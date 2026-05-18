@@ -1,0 +1,2786 @@
+import telebot
+import os
+import json
+import random
+import time
+import re
+from io import BytesIO
+from datetime import datetime
+from urllib.parse import quote
+import anthropic
+from telebot.types import (InlineKeyboardMarkup, InlineKeyboardButton,
+                           ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
+                           BotCommand)
+
+# KEYS
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY")
+OPENAI_KEY    = os.getenv("OPENAI_API_KEY")  # Only used for TTS + speech-to-text
+
+# CLIENTS
+from openai import OpenAI as _OpenAI
+bot           = telebot.TeleBot(TELEGRAM_TOKEN)
+client        = anthropic.Anthropic(api_key=ANTHROPIC_KEY)  # Claude — all chat/text
+openai_client = _OpenAI(api_key=OPENAI_KEY)                 # OpenAI — audio only
+
+bot.set_my_commands([
+    BotCommand("start",     "Start"),
+    BotCommand("menu",      "Menü öffnen"),
+    BotCommand("level",     "Mein Niveau"),
+    BotCommand("progress",  "Mein Fortschritt"),
+    BotCommand("errors",    "Meine Fehler"),
+    BotCommand("practice",  "Übungen"),
+    BotCommand("shadowing", "Shadowing Mode"),
+    BotCommand("restart",   "Chat neu starten"),
+])
+
+# PERSISTENT STORAGE
+# /data is a Railway Volume — survives redeploys. Fallback to local for dev.
+USER_FILE = os.getenv("USER_FILE", "/data/users.json")
+
+def load_users():
+    if not os.path.exists(USER_FILE):
+        return {}
+    with open(USER_FILE, "r") as f:
+        return json.load(f)
+
+def save_users(data):
+    os.makedirs(os.path.dirname(USER_FILE) or ".", exist_ok=True)
+    with open(USER_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+ALL_GOALS = [
+    "Selbstpräsentation", "Freunde / Beziehungen", "Soziales (Ämter, Ärzte)",
+    "Unterhaltung (Club, Kino etc)", "Einkauf & Restaurants", "Tourismus & Reisen",
+    "Sport & Hobbys", "Am Telefon", "Job"
+]
+
+def ensure_user(chat_id):
+    uid = str(chat_id)
+    if uid not in user_data:
+        user_data[uid] = {
+            "name": None,
+            "gender": None,
+            "native_language": None,
+            "goal": None,
+            "level": "A2",
+            "scenario_streak": 0,
+            "weak_points": [],
+            "errors": [],
+            "user_progress": {g: [] for g in ALL_GOALS},
+            "user_stats": {"xp": 0, "level": 1, "streak": 0, "last_active": None}
+        }
+    else:
+        if "user_progress" not in user_data[uid]:
+            user_data[uid]["user_progress"] = {g: [] for g in ALL_GOALS}
+        if "scenario_streak" not in user_data[uid]:
+            user_data[uid]["scenario_streak"] = 0
+        if "weak_points" not in user_data[uid]:
+            user_data[uid]["weak_points"] = []
+        if "errors" not in user_data[uid]:
+            user_data[uid]["errors"] = []
+        if "user_stats" not in user_data[uid]:
+            user_data[uid]["user_stats"] = {"xp": 0, "level": 1, "streak": 0, "last_active": None}
+        if "gender" not in user_data[uid]:
+            user_data[uid]["gender"] = None
+        if "native_language" not in user_data[uid]:
+            user_data[uid]["native_language"] = None
+    save_users(user_data)
+
+def save_name(chat_id, name):
+    user_data[str(chat_id)]["name"] = name
+    save_users(user_data)
+
+# STATE
+turn_counter = {}
+user_memory = {}
+user_voice = {}  # TTS voice per user
+current_scenario = {}
+last_voice_text     = {}  # last transcribed voice per user
+last_voice_answer   = {}  # GPT reply for that voice (None if ask_gpt itself failed)
+last_voice_answered = {}  # True once the TTS reply was actually delivered
+user_data = load_users()
+user_step = {}
+session_state = {}   # per-user adaptive engine: {struggle: int, success: int}
+exercise_data = {}   # stores pre-computed XP/gamification while user does exercises
+_text_id_counter = 0
+pending_texts = {}   # text_id (int) → text; powers the "📄 Text anzeigen" button
+
+# QUIZ STATE
+quiz_state = {}
+quiz_current_level = {}
+quiz_scores = {}        # 🔥 wichtig: Score pro Level
+quiz_history = {}
+quiz_a0_results = {}    # gating results for first 2 A0 questions
+user_level = {}         # final level after test
+asked_questions = {}    # set of asked question IDs per user
+test_state = {}         # unified quiz state per user
+user_state = {}         # state machine: "test" | "chat"
+
+VOICES = ["alloy", "echo", "nova", "shimmer", "fable", "onyx"]
+
+# QUIZ CONFIG
+TOTAL_QUESTIONS = 12
+LEVELS = ["A0", "A1", "A2", "B1", "B2", "C1"]
+QUIZ_LEVEL_ORDER = ["A1", "A2", "B1", "B2", "C1"]  # quiz only — no A0
+
+QUESTION_POOL = {
+    "A1": [
+        {"id": "A1_1", "q": "Ich ___ Maria.", "options": ["heißt", "heiße", "habe"], "a": "heiße"},
+        {"id": "A1_2", "q": "Ich komme ___ Spanien.", "options": ["aus", "von", "in"], "a": "aus"},
+        {"id": "A1_3", "q": "Wie ___ du?", "options": ["heißt", "bist", "hast"], "a": "heißt"},
+        {"id": "A1_4", "q": "Das ___ mein Freund.", "options": ["ist", "bin", "hat"], "a": "ist"},
+        {"id": "A1_5", "q": "Ich ___ 25 Jahre alt.", "options": ["bin", "habe", "sei"], "a": "bin"},
+    ],
+    "A2": [
+        {"id": "A2_1", "q": "Ich ___ gestern ins Kino gegangen.", "options": ["bin", "habe", "war"], "a": "bin"},
+        {"id": "A2_2", "q": "Ich habe Hunger, ___ ich heute nichts gegessen habe.", "options": ["weil", "und", "oder"], "a": "weil"},
+        {"id": "A2_3", "q": "Ich ___ seit zwei Jahren Deutsch.", "options": ["lerne", "lernte", "gelernt"], "a": "lerne"},
+        {"id": "A2_4", "q": "Er ___ nicht kommen, weil er krank ist.", "options": ["kann", "könnte", "konnte"], "a": "kann"},
+        {"id": "A2_5", "q": "Wir ___ gestern lange spazieren gegangen.", "options": ["sind", "haben", "waren"], "a": "sind"},
+    ],
+    "B1": [
+        {"id": "B1_1", "q": "Wenn ich mehr Zeit hätte, ___ ich mehr lernen.", "options": ["würde", "werde", "bin"], "a": "würde"},
+        {"id": "B1_2", "q": "Das ist der Mann, ___ ich gestern gesehen habe.", "options": ["den", "der", "dem"], "a": "den"},
+        {"id": "B1_3", "q": "Er hat gesagt, dass er später ___ kommt.", "options": ["vorbei", "danach", "nachher"], "a": "vorbei"},
+        {"id": "B1_4", "q": "Ich ___ gerne reisen, aber ich habe kein Geld.", "options": ["würde", "werde", "will"], "a": "würde"},
+        {"id": "B1_5", "q": "Das Buch, ___ du mir empfohlen hast, ist toll.", "options": ["das", "dem", "den"], "a": "das"},
+    ],
+    "B2": [
+        {"id": "B2_1", "q": "Ich arbeite viel, ___ meine Ziele zu erreichen.", "options": ["um", "damit", "weil"], "a": "um"},
+        {"id": "B2_2", "q": "_______ Anna viel verdient, hat sie ständig Geldprobleme.", "options": ["Obwohl", "Weil", "Nachdem"], "a": "Obwohl"},
+        {"id": "B2_3", "q": "Je mehr sie lernt, ___ wird ihr Deutsch.", "options": ["desto besser", "so besser", "desto gut"], "a": "desto besser"},
+        {"id": "B2_4", "q": "Er verhält sich, ___ er der Chef wäre.", "options": ["als ob", "so wie", "wie wenn"], "a": "als ob"},
+        {"id": "B2_5", "q": "Das Problem lässt sich nur ___ enge Zusammenarbeit lösen.", "options": ["durch", "mit", "von"], "a": "durch"},
+    ],
+    "C1": [
+        {"id": "C1_1", "q": "Angesichts der Krise ___ die Regierung sofortigen Handlungsbedarf.", "options": ["sieht", "betrachtet", "schaut"], "a": "sieht"},
+        {"id": "C1_2", "q": "Sein ausgeprägtes ___ machte ihn zum idealen Redner.", "options": ["Mitteilungsbedürfnis", "Mitteilungswunsch", "Mitteilungsart"], "a": "Mitteilungsbedürfnis"},
+        {"id": "C1_3", "q": "Dem Bericht ___ seien die Ursachen noch unklar.", "options": ["zufolge", "gemäß", "nach"], "a": "zufolge"},
+        {"id": "C1_4", "q": "Die Entscheidung wurde ___ der wirtschaftlichen Lage getroffen.", "options": ["angesichts", "infolge", "bezüglich"], "a": "angesichts"},
+    ],
+}
+
+# SCENARIOS
+LEVEL_ORDER = ["A0", "A1", "A2", "B1", "B2", "C1"]
+
+SCENARIOS = [
+
+    # =========================
+    # 1. Selbstpräsentation
+    # =========================
+    {"id": "selbst_1",  "goal": "Selbstpräsentation", "text": "Du bist umgezogen & triffst einen Nachbarn im Treppenhaus.", "level_min": "A1", "level_max": "A2"},
+    {"id": "selbst_2",  "goal": "Selbstpräsentation", "text": "Du bist im Warteraum bei deinem Hausarzt und wirst von einem älteren Herrn freundlich angesprochen. Er fragt dich, woher du kommst und was dich nach Deutschland bringt.", "level_min": "A1", "level_max": "A2"},
+    {"id": "selbst_3",  "goal": "Selbstpräsentation", "text": "Dein erster Tag im Job. Du lernst dein Team kennen. Erzähl etwas über dich.", "level_min": "A2", "level_max": "B1"},
+    {"id": "selbst_4",  "goal": "Selbstpräsentation", "text": "Du bist im Vorstellungsgespräch. Erzähl etwas über dich.", "level_min": "A2", "level_max": "B2"},
+    {"id": "selbst_5",  "goal": "Selbstpräsentation", "text": "Du bist auf einer Hofparty deiner Nachbarn. Jemand fragt dich, wie lange du schon in Deutschland bist.", "level_min": "A1", "level_max": "A2"},
+    {"id": "selbst_6",  "goal": "Selbstpräsentation", "text": "Du bist auf einer Party bei einer Freundin. Jemand fragt dich, wie du nach Deutschland gekommen bist.", "level_min": "A2", "level_max": "B1"},
+    {"id": "selbst_7",  "goal": "Selbstpräsentation", "text": "Du bist auf einem Date. Dein Gegenüber fragt dich, was du so machst.", "level_min": "A2", "level_max": "B1"},
+    {"id": "selbst_8",  "goal": "Selbstpräsentation", "text": "Du schickst jemandem auf Tinder eine Sprachnachricht, in der du dich kurz vorstellst.", "level_min": "A1", "level_max": "A2"},
+    {"id": "selbst_9",  "goal": "Selbstpräsentation", "text": "Du bist bei einer Wohnungsbesichtigung. Der Vermieter fragt dich, wer du bist und was du beruflich machst und warum er sich für dich entscheiden soll.", "level_min": "B1", "level_max": "C1"},
+    {"id": "selbst_10", "goal": "Selbstpräsentation", "text": 'Du bist in einem Meeting und ein Manager sagt: „[Name], Sie sind ja neu hier bei uns. Erzählen Sie doch etwas über sich!"', "level_min": "A2", "level_max": "C1"},
+
+    # =========================
+    # 2. Freunde & Beziehungen
+    # =========================
+    {"id": "freunde_1",  "goal": "Freunde / Beziehungen", "text": "Du möchtest deine Deutschsprechende Freundin zum Kaffee per WhatsApp Sprachnachricht einladen. Schick ihr eine Sprachnachricht!", "level_min": "A1", "level_max": "A2"},
+    {"id": "freunde_2",  "goal": "Freunde / Beziehungen", "text": "Deine Freunde rufen dich an und laden dich am kommenden Wochenende zum Grillen ein. Kannst du mitkommen? Sprich mit ihnen!", "level_min": "A1", "level_max": "A2"},
+    {"id": "freunde_3",  "goal": "Freunde / Beziehungen", "text": "Du triffst dich mit deinem Kumpel. Er hat dir über sein Wochenende in Polen erzählt. Erzähle nun du über dein Wochenende.", "level_min": "A2", "level_max": "B1"},
+    {"id": "freunde_4",  "goal": "Freunde / Beziehungen", "text": "Deiner Bestie geht es nicht gut. Du rufst sie an und fragst sie, wie es ihr geht und was genau passiert ist. Vielleicht kannst du ihr helfen.", "level_min": "B1", "level_max": "B2"},
+    {"id": "freunde_5",  "goal": "Freunde / Beziehungen", "text": "Du triffst deine Kollegen zu einem Bierchen nach dem Feierabend. Eine Kollegin fragt dich nach deinen Hobbies. Sie fragt dich, wie du damit angefangen hast.", "level_min": "A2", "level_max": "B1"},
+    {"id": "freunde_6",  "goal": "Freunde / Beziehungen", "text": "Du bekommst Besuch von deinem Freund und seiner deutschen Freundin. Sie sind begeistert von deinem Essen und sie fragt dich nach dem Rezept.", "level_min": "A2", "level_max": "B1"},
+    {"id": "freunde_7",  "goal": "Freunde / Beziehungen", "text": "Du quatschst mit deiner Kollegin, wo du gestern Essen warst. Erzähl ihr alles!", "level_min": "A2", "level_max": "B1"},
+    {"id": "freunde_8",  "goal": "Freunde / Beziehungen", "text": "Dein Freund hat ein Beziehungsproblem und du möchtest ihn nicht nur trösten, sondern auch helfen. Wie tust du das? Welche Fragen stellst du?", "level_min": "B1", "level_max": "B2"},
+    {"id": "freunde_9",  "goal": "Freunde / Beziehungen", "text": "Dein Liebespartner plant mit dir einen Urlaub. Mach eine Planung mit ihm/ihr. Wo geht es hin? Wie kommt ihr hin? Was werdet ihr machen?", "level_min": "A2", "level_max": "B1"},
+    {"id": "freunde_10", "goal": "Freunde / Beziehungen", "text": "Du hast bald Geburtstag und erstellst eine Gruppe in WhatsApp. Erzähl den eingeladenen Freunden, welche Party und wo du machst!", "level_min": "A2", "level_max": "B1"},
+    {"id": "freunde_11", "goal": "Freunde / Beziehungen", "text": "Deine Nachbarin hat gesehen, dass du den Müll falsch sortiert hast. Du möchtest dich entschuldigen und höflich bitten, dass sie dir die Regeln erklärt.", "level_min": "A2", "level_max": "B1"},
+    {"id": "freunde_12", "goal": "Freunde / Beziehungen", "text": "Deine Freunde heiraten bald und laden dich zur Hochzeit ein. Du freust dich sehr und willst natürlich kommen. Was sagst du?", "level_min": "A1", "level_max": "A2"},
+    {"id": "freunde_13", "goal": "Freunde / Beziehungen", "text": "Deine Freunde haben einen Hund und zwei Katzen und sprechen ständig darüber. Sie fragen dich, ob du ein Tierfreund bist. Was sagst du?", "level_min": "A1", "level_max": "A2"},
+    {"id": "freunde_14", "goal": "Freunde / Beziehungen", "text": "Deine Kollegin zeigt dir ein Bild von einem Welpen, den sie gestern bekommen hat. Wie ist deine Reaktion zu dem süßen Bild?", "level_min": "A1", "level_max": "A2"},
+    {"id": "freunde_15", "goal": "Freunde / Beziehungen", "text": "Du liest ein Buch auf der Bank im Park. Plötzlich kommt eine ältere Dame mit dem Hund auf dich zu und fragt dich, ob sie sich neben dich hinsetzen kann. Was sagst du?", "level_min": "A1", "level_max": "A2"},
+    {"id": "freunde_16", "goal": "Freunde / Beziehungen", "text": "Eine Gruppe in der Kneipe lädt dich an ihren Tisch ein, denn du bist allein. Was sagst du?", "level_min": "A1", "level_max": "A2"},
+
+    # =========================
+    # 3. Soziales (Ämter, Ärzte)
+    # =========================
+    {"id": "soziales_1",  "goal": "Soziales (Ämter, Ärzte)", "text": "Du möchtest dich im Bürgeramt anmelden. Was sagst du am Schalter?", "level_min": "A1", "level_max": "A2"},
+    {"id": "soziales_2",  "goal": "Soziales (Ämter, Ärzte)", "text": "Du kommst in deiner Hausarztpraxis an und möchtest deinen Arzt sprechen. Was sagst du am Empfang?", "level_min": "A1", "level_max": "A2"},
+    {"id": "soziales_3",  "goal": "Soziales (Ämter, Ärzte)", "text": "Du möchtest dich krankschreiben lassen. Dein Arzt fragt dich, was dir fehlt. Erzähle ihm über dein Problem.", "level_min": "A2", "level_max": "B1"},
+    {"id": "soziales_4",  "goal": "Soziales (Ämter, Ärzte)", "text": "Deine Kollegin hatte einen Arbeitsunfall. Rufe die Feuerwehr an und erkläre das Problem.", "level_min": "B1", "level_max": "B2"},
+    {"id": "soziales_5",  "goal": "Soziales (Ämter, Ärzte)", "text": "Du möchtest ein Gewerbe anmelden. Was sagst du dem Sachbearbeiter?", "level_min": "B1", "level_max": "B2"},
+    {"id": "soziales_6",  "goal": "Soziales (Ämter, Ärzte)", "text": "Die Sachbearbeiterin im JobCenter bittet dich, über dich und deine Erfahrung zu erzählen und zu sagen, was genau du am Arbeitsmarkt suchst.", "level_min": "B1", "level_max": "B2"},
+    {"id": "soziales_7",  "goal": "Soziales (Ämter, Ärzte)", "text": "Der Abfluss in deinem Badezimmer ist kaputt. Dein Vermieter hat einen Techniker organisiert. Nun ist er da. Was sagst du?", "level_min": "A2", "level_max": "B1"},
+    {"id": "soziales_8",  "goal": "Soziales (Ämter, Ärzte)", "text": "Du hast einen Termin in der Ausländerbehörde und musst deinen Aufenthaltstitel verlängern. Was sagst du?", "level_min": "B1", "level_max": "B2"},
+    {"id": "soziales_9",  "goal": "Soziales (Ämter, Ärzte)", "text": "Du hast einen Termin bei einer Ernährungsberaterin. Warum bist du hier? Was sind deine Ziele?", "level_min": "A2", "level_max": "B1"},
+    {"id": "soziales_10", "goal": "Soziales (Ämter, Ärzte)", "text": "Du hast neue Möbel gekauft und musst die alten entsorgen. Ruf bei einer Sperrmüllabholungsfirma an und vereinbare einen Termin.", "level_min": "B1", "level_max": "B2"},
+
+    # =========================
+    # 4. Unterhaltung (Club, Kino etc)
+    # =========================
+    {"id": "unterhalt_1",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du bist im Kino und möchtest 2 Karten für den Film kaufen.", "level_min": "A1", "level_max": "A2"},
+    {"id": "unterhalt_2",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du kommst im Gym an und begrüßt deinen Trainer. Erzähl ihm, wie es dir geht und was du heute trainieren möchtest.", "level_min": "A1", "level_max": "A2"},
+    {"id": "unterhalt_3",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du bist von deinen Kolleginnen zu einem Game-Abend eingeladen. Du kennst das Spiel nicht und bittest einen Kollegen, dir die Regeln zu erklären.", "level_min": "A2", "level_max": "B1"},
+    {"id": "unterhalt_4",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du bist zum ersten Mal im Sprachclub und fragst die Moderatorin, dir alles zu erklären.", "level_min": "A2", "level_max": "B1"},
+    {"id": "unterhalt_5",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du bist im Aufzug mit deinen Nachbarn. Fange einen kleinen Smalltalk über das Wetter.", "level_min": "A1", "level_max": "A2"},
+    {"id": "unterhalt_6",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du triffst dich in einer Kneipe mit deinem Freund, der sich auch für dein Hobby interessiert. Sprich mit ihm darüber!", "level_min": "A2", "level_max": "B1"},
+    {"id": "unterhalt_7",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du bist in einem Schikurort und chillst im Apres Ski. Der Bartender spricht dich an und fragt, wie es dir hier so gefällt. Erzähle ihm über deinen ersten Tag und deine Eindrücke hier.", "level_min": "B1", "level_max": "B2"},
+    {"id": "unterhalt_8",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du hast an einem Marathon mitgemacht und deine Kollegen möchten erfahren, wie es war. Erzähl ihnen alles!", "level_min": "B1", "level_max": "B2"},
+    {"id": "unterhalt_9",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du bist im Date. Dein Gegenüber fragt dich nach deinen Hobbys. Erzähl alles!", "level_min": "A2", "level_max": "B1"},
+    {"id": "unterhalt_10", "goal": "Unterhaltung (Club, Kino etc)", "text": 'Du bist im Deutsch-Sprachclub. Das heutige Thema ist „gesundes Essen". Die Moderatorin fragt dich: „Was ist dein Lieblingsgericht, das gesund und lecker ist?". Beantworte ihre Frage!', "level_min": "A2", "level_max": "B1"},
+
+    # =========================
+    # 5. Einkauf & Restaurants
+    # =========================
+    {"id": "einkauf_1",  "goal": "Einkauf & Restaurants", "text": "Du bist im Kaufhaus und suchst nach einem Bankautomaten und nach der Toilette.", "level_min": "A1", "level_max": "A2"},
+    {"id": "einkauf_2",  "goal": "Einkauf & Restaurants", "text": "Du bist in deinem Stammrestaurant angekommen und siehst deinen Lieblingskellner. Wie begrüßt du ihn?", "level_min": "A1", "level_max": "A2"},
+    {"id": "einkauf_3",  "goal": "Einkauf & Restaurants", "text": "Du gehst in einen Biergarten, um einen Tisch für deine Geburtstagsfeier zu buchen.", "level_min": "A2", "level_max": "B1"},
+    {"id": "einkauf_4",  "goal": "Einkauf & Restaurants", "text": "Du bist im Restaurant. Der Kellner fragt dich, was du bestellen möchtest.", "level_min": "A1", "level_max": "A2"},
+    {"id": "einkauf_5",  "goal": "Einkauf & Restaurants", "text": "Dir wurde etwas in die Rechnung gestellt, was du nicht bestellt hast. Rufe den Kellner und kläre es.", "level_min": "B1", "level_max": "B2"},
+    {"id": "einkauf_6",  "goal": "Einkauf & Restaurants", "text": "Du fährst ins Bauhaus, weil du etwas zuhause reparieren musst. Was ist das? Erkläre es dem Mitarbeiter am Infostand.", "level_min": "A2", "level_max": "B1"},
+    {"id": "einkauf_7",  "goal": "Einkauf & Restaurants", "text": "Du gehst in einen Weinboutique und suchst nach einem Geschenk für deine beste Freundin / deinen besten Freund. Wie bittest du die Mitarbeiterin, dir bei der Wahl zu helfen?", "level_min": "A2", "level_max": "B1"},
+    {"id": "einkauf_8",  "goal": "Einkauf & Restaurants", "text": "Du kommst an der Kasse mit deinem Einkauf an. Die Kassiererin begrüßt dich. Was sagst du?", "level_min": "A1", "level_max": "A2"},
+    {"id": "einkauf_9",  "goal": "Einkauf & Restaurants", "text": "Du möchtest eine defekte Ware im Supermarkt zurückgeben. Sprich den Filialmitarbeiter an und erkläre dein Problem.", "level_min": "B1", "level_max": "B2"},
+    {"id": "einkauf_10", "goal": "Einkauf & Restaurants", "text": "Du möchtest einen Tisch im Restaurant für dich und deine Freunde reservieren. Rufe da an und mach es.", "level_min": "A2", "level_max": "B1"},
+    {"id": "einkauf_11", "goal": "Einkauf & Restaurants", "text": "Du hast mehrere Sachen auf Ebay Kleinanzeigen verkauft. Bald kommt ein Käufer bei dir vorbei. Begrüße ihn und finde heraus, was genau er kaufen möchte und beantworte seine Fragen, wenn er welche hat.", "level_min": "A2", "level_max": "B1"},
+
+    # =========================
+    # 6. Tourismus & Reisen
+    # =========================
+    {"id": "reisen_1",  "goal": "Tourismus & Reisen", "text": "Du gehst ins Reisebüro und möchtest dich nach aktuellen Angeboten erkundigen.", "level_min": "A1", "level_max": "A2"},
+    {"id": "reisen_2",  "goal": "Tourismus & Reisen", "text": "Du rufst deinen Airbnb Host an, weil der Schlüssel abgebrochen und in der Tür geblieben ist und du nicht in die Wohnung reinkommen kannst.", "level_min": "B1", "level_max": "B2"},
+    {"id": "reisen_3",  "goal": "Tourismus & Reisen", "text": "Du triffst deine Kollegen nach dem Urlaub. Erzähle ihnen über deine Reise.", "level_min": "A2", "level_max": "B1"},
+    {"id": "reisen_4",  "goal": "Tourismus & Reisen", "text": "Du möchtest einen Kurztrip mit deinem Kumpel machen. Ruf ihn an und frage, ob er mitkommt.", "level_min": "A2", "level_max": "B1"},
+    {"id": "reisen_5",  "goal": "Tourismus & Reisen", "text": "Du möchtest mit deiner Schwester / deinem Bruder übers Wochenende verreisen. Plane den Ausflug!", "level_min": "A2", "level_max": "B1"},
+    {"id": "reisen_6",  "goal": "Tourismus & Reisen", "text": "Du bist in einem Date. Dein Gegenüber fragt nach deiner besten Reise. Erzähl alles!", "level_min": "A2", "level_max": "B1"},
+    {"id": "reisen_7",  "goal": "Tourismus & Reisen", "text": "Deine Freundin erzählt über ihre verrückteste Reise und fragt dich, ob du auch eine verrückte Reise hattest. Erzähl ihr alles.", "level_min": "B1", "level_max": "B2"},
+    {"id": "reisen_8",  "goal": "Tourismus & Reisen", "text": "Dein Kollege erzählt über sein Lieblingsurlaubsland und fragt dich nach deinem. Erzähl ihm alles!", "level_min": "A2", "level_max": "B1"},
+    {"id": "reisen_9",  "goal": "Tourismus & Reisen", "text": 'Du bist im Büro. Ein deutscher Kollege erzählt über seine Reise nach „Malle". Was ist das? Frag ihn aus.', "level_min": "A2", "level_max": "B1"},
+    {"id": "reisen_10", "goal": "Tourismus & Reisen", "text": "Du kommst im Hotel an. Du hattest eine Reservierung. Fang das Gespräch am Empfang an.", "level_min": "A1", "level_max": "A2"},
+    {"id": "reisen_11", "goal": "Tourismus & Reisen", "text": "Du bist zum Brunchen bei deinen Freunden eingeladen. Das Essen ist lecker und du möchtest wissen, wer und wie es gekocht hat. Stelle die Fragen!", "level_min": "A2", "level_max": "B1"},
+
+    # =========================
+    # 7. Sport & Hobbys
+    # =========================
+    {"id": "sport_1",  "goal": "Sport & Hobbys", "text": "Du bist im Gym und siehst einen sehr sportlichen Typen, der ganz freundlich ist. Du möchtest mehr über seine Trainingsweise erfahren. Frag ihn aus!", "level_min": "A2", "level_max": "B1"},
+    {"id": "sport_2",  "goal": "Sport & Hobbys", "text": "Du möchtest eine Mitgliedschaft im Gym kaufen. Die Empfangsmitarbeiterin begrüßt dich und fragt, was du möchtest.", "level_min": "A1", "level_max": "A2"},
+    {"id": "sport_3",  "goal": "Sport & Hobbys", "text": "Du bist zum ersten Mal in der Mittagspause mit deinen Kolleginnen. Eine fragt dich, wofür du dich interessierst. Erzähl ihnen alles!", "level_min": "A2", "level_max": "B1"},
+    {"id": "sport_4",  "goal": "Sport & Hobbys", "text": "Du bist auf einer Hofparty. Ein netter Nachbar erzählt über sein Hobby und fragt dich über deine Hobbys. Erzähl ihm etwas darüber!", "level_min": "A2", "level_max": "B1"},
+    {"id": "sport_5",  "goal": "Sport & Hobbys", "text": "Im Biergarten hast du eine tolle Person kennengelernt. Nun fragt sie dich, was dich begeistert und wofür du dich interessierst. Erzähl doch!", "level_min": "A2", "level_max": "B1"},
+    {"id": "sport_6",  "goal": "Sport & Hobbys", "text": "Deine Freundin hat dir gerade über ein interessantes Hobby ihres Lebenspartners erzählt. Dir fällt ein, dass ein Bekannter / eine Bekannte von dir auch was Außergewöhnliches macht. Was ist das für ein Hobby?", "level_min": "B1", "level_max": "B2"},
+    {"id": "sport_7",  "goal": "Sport & Hobbys", "text": "Dein Kollege erzählt etwas über einen sehr interessanten Podcast. Das erinnert dich an deinen Lieblingspodcast / YouTube Channel. Teile darüber mit!", "level_min": "B1", "level_max": "B2"},
+    {"id": "sport_8",  "goal": "Sport & Hobbys", "text": "Du hast jemanden kennengelernt und diese Person geht gerne bouldern. Du verstehst das nicht. Erfahre, was sie damit meint!", "level_min": "A2", "level_max": "B1"},
+    {"id": "sport_9",  "goal": "Sport & Hobbys", "text": 'Dein Kumpel war gestern in München Oktoberfest feiern. Er sagt immer wieder „Wiesn" und „Maß"… Du verstehst das nicht. Frag ihn, was es bedeutet.', "level_min": "A2", "level_max": "B1"},
+    {"id": "sport_10", "goal": "Sport & Hobbys", "text": "Du bist auf einer Firmenparty. Du willst mehr über deine Kollegen erfahren. Gerade stehst du auf dem Balkon mit zwei von ihnen. Frage sie, wofür sie sich interessieren und was sie begeistert.", "level_min": "A2", "level_max": "B1"},
+    {"id": "sport_11", "goal": "Sport & Hobbys", "text": "Du hast ein Uber bestellt und quatschst mit dem Fahrer. Plötzlich erfährst du, er teilt dein Hobby. Was sagst du?", "level_min": "A2", "level_max": "B1"},
+
+    # =========================
+    # 8. Am Telefon
+    # =========================
+    {"id": "telefon_1",  "goal": "Am Telefon", "text": 'Du rufst im Restaurant „Amelia" an und möchtest einen Tisch buchen.', "level_min": "A2", "level_max": "B1"},
+    {"id": "telefon_2",  "goal": "Am Telefon", "text": 'Du schaust im Restaurant „Rosengarten" vorbei und möchtest einen Tisch buchen.', "level_min": "A1", "level_max": "A2"},
+    {"id": "telefon_3",  "goal": "Am Telefon", "text": "Du rufst im Kunden-Support der Deutschen Bahn an und möchtest wissen, warum sie von deinem Konto 50 Euro abgebucht haben.", "level_min": "B1", "level_max": "B2"},
+    {"id": "telefon_4",  "goal": "Am Telefon", "text": "Du rufst bei deinem Internetprovider an und möchtest einen Internetausfall mitteilen und wissen, was du tun sollst.", "level_min": "B1", "level_max": "B2"},
+    {"id": "telefon_5",  "goal": "Am Telefon", "text": "Du rufst in der Praxis deines Hausarztes an und möchtest einen Termin vereinbaren.", "level_min": "A2", "level_max": "B1"},
+    {"id": "telefon_6",  "goal": "Am Telefon", "text": "Du hast eine Zahnarztpraxis gefunden und rufst da an, um zu fragen, ob sie dich als Patienten annehmen können.", "level_min": "A2", "level_max": "B1"},
+    {"id": "telefon_7",  "goal": "Am Telefon", "text": "Du hast deine Bankkarte verloren. Du rufst bei deiner Bank an und möchtest die Karte sperren.", "level_min": "B1", "level_max": "B2"},
+    {"id": "telefon_8",  "goal": "Am Telefon", "text": "Deine Freundin hat Geburtstag. Ruf sie an und gratuliere ihr.", "level_min": "A1", "level_max": "A2"},
+    {"id": "telefon_9",  "goal": "Am Telefon", "text": "Du fühlst dich schlecht. Ruf bei deinem Arbeitgeber an und lass dich krank schreiben.", "level_min": "A2", "level_max": "B1"},
+    {"id": "telefon_10", "goal": "Am Telefon", "text": "Du rufst deinen Kunden an und möchtest euren Termin morgen verschieben. Ruf ihn an. Entschuldige dich, verschiebe den Termin und erkläre, warum.", "level_min": "B1", "level_max": "B2"},
+    {"id": "telefon_11", "goal": "Am Telefon", "text": "Du hast was im Internet bestellt und die Ware war kaputt. Es gibt keinen Internetsupport. Rufe bei dem Verkäufer an.", "level_min": "B1", "level_max": "B2"},
+    {"id": "telefon_12", "goal": "Am Telefon", "text": "Du kannst dich in deinem Kundenkonto in deiner Mobilfunkanbieter-App nicht anmelden. Du hast schon alles versucht. Jetzt rufe den Support an.", "level_min": "B1", "level_max": "B2"},
+
+    # =========================
+    # 9. Job
+    # =========================
+    {"id": "job_1",  "goal": "Job", "text": "Heute ist dein erster Tag im neuen Job. Du lernst dein Team kennen. Erzähl etwas über dich.", "level_min": "A2", "level_max": "B1"},
+    {"id": "job_2",  "goal": "Job", "text": "Du bist im Vorstellungsgespräch. Erzähl etwas über dich.", "level_min": "A2", "level_max": "B2"},
+    {"id": "job_3",  "goal": "Job", "text": 'Du bist im Vorstellungsgespräch. Alles läuft super. Nun fragt die Personalmanagerin „Warum sollen wir uns für Sie entscheiden?". Was sagst du?', "level_min": "B1", "level_max": "C1"},
+    {"id": "job_4",  "goal": "Job", "text": "Du bist im Onboarding. Die HR-Managerin gibt dir Zeit, um dir deine Fragen an sie zu überlegen. Stelle nun deine Fragen an sie.", "level_min": "A2", "level_max": "B1"},
+    {"id": "job_5",  "goal": "Job", "text": "Dein erster Tag im Job. Deine Kollegen sind super nett und nehmen dich in der Mittagspause in die Kantine mit. Nun fragen sie dich, über dich und deinen Weg zu erzählen. Was sagst du?", "level_min": "A2", "level_max": "B1"},
+    {"id": "job_6",  "goal": "Job", "text": "Du triffst dich mit einer Kollegin in der Pause. Sie ist nett und fragt, wie es dir geht. Was sagst du?", "level_min": "A1", "level_max": "A2"},
+    {"id": "job_7",  "goal": "Job", "text": "Dein Kollege erzählt über seinen Urlaub. Du willst was dazu sagen, aber du hast auch ein paar Fragen an ihn, weil du seine Aufgaben während seines Urlaubs übernommen hast. Wie gehst du das an?", "level_min": "B1", "level_max": "B2"},
+    {"id": "job_8",  "goal": "Job", "text": "Du bist im Präsenz-Meeting mit deinen Kollegen. Du hast ein wichtiges Update zu deinem Projekt und nun bist du dran. Teile deinen Kolleginnen darüber mit!", "level_min": "B1", "level_max": "B2"},
+    {"id": "job_9",  "goal": "Job", "text": "Du hast ein Problem mit deiner Software. Du wendest dich an deinen Abteilungsleiter und erklärst ihm, worum es geht.", "level_min": "B1", "level_max": "B2"},
+    {"id": "job_10", "goal": "Job", "text": 'Du bist heute das erste Mal an deinem neuen Arbeitsplatz. Du siehst viele Goodies und eine Willkommenskarte auf deinem Schreibtisch. In der Pause fragt dich eine Kollegin: „Na, wie läuft dein erster Tag so?". Erzähle ihr alles!', "level_min": "A2", "level_max": "B1"},
+    {"id": "job_11", "goal": "Job", "text": "Im Kick-Off Meeting fragt dich dein Manager nach deinem Vorschlag, wie das bevorstehende Event anzugehen ist. Was sagst du?", "level_min": "B2", "level_max": "C1"},
+    {"id": "job_12", "goal": "Job", "text": "Du kannst dich in deinem Firmenlaptop-Profil nicht anmelden. Wie erklärst du das Problem deinem Kollegen aus der IT-Abteilung?", "level_min": "B1", "level_max": "B2"},
+    {"id": "job_13", "goal": "Job", "text": "Du bist krank. Dein Kollege ruft dich an und fragt, wie es dir geht. Quatsch mit ihm.", "level_min": "A2", "level_max": "B1"},
+    {"id": "job_14", "goal": "Job", "text": "Du hast eine Bitte an deine Kollegin. Was für eine Bitte ist das und wie sagst du es auf Deutsch?", "level_min": "A2", "level_max": "B1"},
+    {"id": "job_15", "goal": "Job", "text": "Du kommst mit einem Problem nicht klar. In dem Raum sind ein paar Kolleginnen. Wie führst du es so ein, dass dir geholfen wird?", "level_min": "B1", "level_max": "B2"},
+    {"id": "job_16", "goal": "Job", "text": "Ein Kollege lästert über eine andere Kollegin ab, die du gern hast. Was sagst du zu ihm?", "level_min": "B2", "level_max": "C1"},
+    {"id": "job_17", "goal": "Job", "text": "Ein Kollege braucht deine Hilfe. Das Problem ist dir wohlbekannt. Was antwortest du?", "level_min": "A2", "level_max": "B1"},
+    {"id": "job_18", "goal": "Job", "text": "Eine Kollegin ist krank und bittet dich, für sie morgen einzuspringen. Was sagst du?", "level_min": "A2", "level_max": "B1"},
+    {"id": "job_19", "goal": "Job", "text": 'Du bist im 1-on-1 Meeting mit deiner Abteilungsleiterin. Sie fragt dich: „Na, wie waren die ersten 2 Monate bei uns?" Was sagst du?', "level_min": "B1", "level_max": "B2"},
+    {"id": "job_20", "goal": "Job", "text": "Im Entscheidungsmeeting wird ein wichtiges Problem besprochen. Du hast eine Idee, wie es gelöst werden kann. Teile deine Lösung mit dem Team!", "level_min": "B2", "level_max": "C1"},
+
+    # =========================
+    # NEW FORMAT — Selbstpräsentation
+    # =========================
+    {"id": "self_1", "goal": "Selbstpräsentation", "level": ["A1", "A2"], "context": "Du bist umgezogen und triffst einen Nachbarn im Treppenhaus.", "persona": {"name": "Nachbar", "tone": "informal"}, "start": {"text": "Hey 😊 bist du neu hier im Haus?"}},
+    {"id": "self_2", "goal": "Selbstpräsentation", "level": ["A2", "B1"], "context": "Erster Tag im Job, Team stellt sich vor.", "persona": {"name": "Kollege", "tone": "informal"}, "start": {"text": "Hi! Erzähl mal kurz, wer du bist 😄"}},
+    {"id": "self_3", "goal": "Selbstpräsentation", "level": ["B1", "C1"], "context": "Vorstellungsgespräch.", "persona": {"name": "HR Manager", "tone": "formal"}, "start": {"text": "Guten Tag. Erzählen Sie bitte etwas über sich."}},
+
+    # =========================
+    # NEW FORMAT — Freunde & Beziehungen
+    # =========================
+    {"id": "friends_1", "goal": "Freunde / Beziehungen", "level": ["A1", "A2"], "context": "Freund ruft dich an und lädt dich ein.", "persona": {"name": "Freund", "tone": "informal"}, "start": {"text": "Ey 😄 hast du am Wochenende Zeit?"}},
+    {"id": "friends_2", "goal": "Freunde / Beziehungen", "level": ["B1", "B2"], "context": "Deine Freundin hat Probleme.", "persona": {"name": "Freundin", "tone": "informal"}, "start": {"text": "Hey… ich brauch kurz deinen Rat 😕"}},
+
+    # =========================
+    # NEW FORMAT — Soziales
+    # =========================
+    {"id": "social_1", "goal": "Soziales (Ämter, Ärzte)", "level": ["A1", "A2"], "context": "Du bist beim Arzt am Empfang.", "persona": {"name": "Rezeptionistin", "tone": "formal"}, "start": {"text": "Guten Tag. Wie kann ich Ihnen helfen?"}},
+    {"id": "social_2", "goal": "Soziales (Ämter, Ärzte)", "level": ["B1", "B2"], "context": "JobCenter Gespräch.", "persona": {"name": "Sachbearbeiter", "tone": "formal"}, "start": {"text": "Erzählen Sie bitte etwas über Ihre berufliche Situation."}},
+
+    # =========================
+    # NEW FORMAT — Unterhaltung
+    # =========================
+    {"id": "fun_1", "goal": "Unterhaltung (Club, Kino etc)", "level": ["A1", "A2"], "context": "Smalltalk im Aufzug.", "persona": {"name": "Nachbar", "tone": "informal"}, "start": {"text": "Puh… heute ist echt kalt, oder?"}},
+    {"id": "fun_2", "goal": "Unterhaltung (Club, Kino etc)", "level": ["B1", "B2"], "context": "Bartender im Ski-Resort.", "persona": {"name": "Bartender", "tone": "informal"}, "start": {"text": "Na 😄 wie war dein erster Tag hier?"}},
+
+    # =========================
+    # NEW FORMAT — Einkauf & Restaurants
+    # =========================
+    {"id": "shop_1", "goal": "Einkauf & Restaurants", "level": ["A1", "A2"], "context": "Im Restaurant.", "persona": {"name": "Kellner", "tone": "formal"}, "start": {"text": "Guten Tag. Was möchten Sie bestellen?"}},
+    {"id": "shop_2", "goal": "Einkauf & Restaurants", "level": ["B1", "B2"], "context": "Reklamation im Laden.", "persona": {"name": "Mitarbeiter", "tone": "formal"}, "start": {"text": "Wie kann ich Ihnen helfen?"}},
+
+    # =========================
+    # NEW FORMAT — Reisen
+    # =========================
+    {"id": "travel_1", "goal": "Tourismus & Reisen", "level": ["A1", "A2"], "context": "Hotel Check-in.", "persona": {"name": "Rezeption", "tone": "formal"}, "start": {"text": "Willkommen. Haben Sie reserviert?"}},
+    {"id": "travel_2", "goal": "Tourismus & Reisen", "level": ["B1", "B2"], "context": "Problem mit Airbnb.", "persona": {"name": "Host", "tone": "semi_formal"}, "start": {"text": "Hallo, was ist passiert?"}},
+
+    # =========================
+    # NEW FORMAT — Sport & Hobbys
+    # =========================
+    {"id": "hobby_1", "goal": "Sport & Hobbys", "level": ["A1", "A2"], "context": "Im Gym.", "persona": {"name": "Trainer", "tone": "informal"}, "start": {"text": "Hey 😊 was willst du heute trainieren?"}},
+    {"id": "hobby_2", "goal": "Sport & Hobbys", "level": ["B1", "B2"], "context": "Gespräch über Podcast.", "persona": {"name": "Kollege", "tone": "informal"}, "start": {"text": "Kennst du den Podcast XY?"}},
+
+    # =========================
+    # NEW FORMAT — Telefon
+    # =========================
+    {"id": "phone_1", "goal": "Am Telefon", "level": ["A2", "B1"], "context": "Restaurant anrufen.", "persona": {"name": "Restaurant", "tone": "formal"}, "start": {"text": "Restaurant Amelia, guten Tag."}},
+    {"id": "phone_2", "goal": "Am Telefon", "level": ["B1", "B2"], "context": "Support anrufen.", "persona": {"name": "Support", "tone": "formal"}, "start": {"text": "Kundenservice, wie kann ich Ihnen helfen?"}},
+
+    # =========================
+    # NEW FORMAT — Job
+    # =========================
+    {"id": "job_n1", "goal": "Job", "level": ["A2", "B1"], "context": "Mittagspause mit Kollegen.", "persona": {"name": "Kollege", "tone": "informal"}, "start": {"text": "Und? Wie ist dein erster Eindruck?"}},
+    {"id": "job_n2", "goal": "Job", "level": ["B2", "C1"], "context": "Meeting Update.", "persona": {"name": "Manager", "tone": "formal"}, "start": {"text": "Können Sie uns ein Update geben?"}},
+]
+
+def level_to_num(level):
+    return {"A1": 1, "A2": 2, "B1": 3, "B2": 4, "C1": 5}.get(level, 2)
+
+def _scenario_levels(s):
+    """Return the set of numeric level values a scenario covers (supports both formats)."""
+    if "level" in s:
+        levels = s["level"]
+        if isinstance(levels, list):
+            nums = [level_to_num(l) for l in levels]
+            return set(range(min(nums), max(nums) + 1))
+        return {level_to_num(levels)}
+    lo = level_to_num(s.get("level_min", "A1"))
+    hi = level_to_num(s.get("level_max", "C1"))
+    return set(range(lo, hi + 1))
+
+def _scenario_context(s):
+    """Return the situation description regardless of format."""
+    return s.get("context") or s.get("text", "")
+
+def get_clean_context(scenario):
+    """Return context stripped of any level badges like (A2–B1)."""
+    text = _scenario_context(scenario)
+    text = re.sub(r'\s*\([A-Ca-c][0-2][–\-][A-Ca-c][0-2]\)', '', text)
+    return text.strip()
+
+def reframe_context_for_npc(context: str, user_name: str = "") -> str:
+    """
+    Old-format scenario texts are written from the USER's POV:
+      "Du möchtest dich im Bürgeramt anmelden, was sagst du am Schalter?"
+    This confuses GPT into playing the user instead of the NPC.
+    We rewrite to NPC-POV so the role is unambiguous:
+      "Der Lernende (Farid) möchte sich anmelden und kommt an deinen Schalter."
+    Only applied to old-format scenarios (text field); new-format already has explicit persona + start.
+    """
+    import re as _re
+    name_ref = user_name if user_name else "der Lernende"
+
+    # Remove rhetorical question at the end ("was sagst du?", "wie reagierst du?" etc.)
+    ctx = _re.sub(r'[,.]?\s*(was sagst du[^?]*\?|wie reagierst du[^?]*\?|was machst du[^?]*\?)', '', context, flags=_re.IGNORECASE).strip()
+    ctx = _re.sub(r'\?$', '', ctx).strip()  # trailing ? from above
+
+    # Replace "Du bist" → third person description
+    ctx = _re.sub(r'^Du bist ', f'{name_ref} ist ', ctx, flags=_re.IGNORECASE)
+    ctx = _re.sub(r'du bist ', f'{name_ref} ist ', ctx, flags=_re.IGNORECASE)
+
+    # Replace "Du möchtest" → third person
+    ctx = _re.sub(r'^Du möchtest ', f'{name_ref} möchte ', ctx, flags=_re.IGNORECASE)
+    ctx = _re.sub(r' du möchtest ', f' {name_ref} möchte ', ctx, flags=_re.IGNORECASE)
+
+    # Replace "Du hast" → third person
+    ctx = _re.sub(r'^Du hast ', f'{name_ref} hat ', ctx, flags=_re.IGNORECASE)
+    ctx = _re.sub(r' du hast ', f' {name_ref} hat ', ctx, flags=_re.IGNORECASE)
+
+    # Replace "Du" standalone → der Lernende / name
+    ctx = _re.sub(r'du', name_ref, ctx, flags=_re.IGNORECASE)
+    ctx = _re.sub(r'dein', f'{name_ref}s', ctx, flags=_re.IGNORECASE)
+    ctx = _re.sub(r'deine', f'{name_ref}s', ctx, flags=_re.IGNORECASE)
+
+    # Append clear NPC framing
+    ctx = ctx.rstrip('.') + f'. {name_ref} kommt gerade rein / tritt an dich heran / spricht dich an.'
+    return ctx
+
+
+def get_next_scenario(chat_id):
+    """Return the next undone scenario for the user's goal.
+    Level never filters scenarios — it only controls how the bot speaks.
+    No recursion: resets progress once and returns the first available scenario."""
+    user     = user_data[str(chat_id)]
+    goal     = user.get("goal", "Selbstpräsentation")
+    progress = user["user_progress"].get(goal, [])
+
+    all_for_goal = sort_scenarios([s for s in SCENARIOS if s["goal"] == goal])
+    if not all_for_goal:
+        return None
+
+    candidates = [s for s in all_for_goal if s["id"] not in progress]
+    if not candidates:
+        # All done — reset progress and cycle through again
+        user["user_progress"][goal] = []
+        save_users(user_data)
+        candidates = all_for_goal
+
+    return candidates[0]
+
+def sort_scenarios(scenarios):
+    return sorted(scenarios, key=lambda s: s.get("id", ""))
+
+def pick_scenario(chat_id, goal, level):
+    # Level does NOT filter scenarios — every scenario is available at every level.
+    # Level only controls how the bot speaks (see build_system_prompt).
+    user = user_data.setdefault(str(chat_id), {})
+    index = user.get("scenario_index", 0)
+
+    scenarios = [s for s in SCENARIOS if s["goal"] == goal]
+    scenarios = sort_scenarios(scenarios)
+
+    if not scenarios:
+        return None
+
+    if index >= len(scenarios):
+        index = 0
+
+    chosen = scenarios[index]
+    user["scenario_index"] = index + 1
+    save_users(user_data)
+
+    return chosen
+
+LEVEL_PROGRESSION = ["A1", "A2", "B1", "B2", "C1"]
+
+def mark_scenario_done(chat_id, scenario):
+    user = user_data[str(chat_id)]
+    goal = user["goal"]
+    if scenario["id"] not in user["user_progress"][goal]:
+        user["user_progress"][goal].append(scenario["id"])
+        save_users(user_data)
+
+def check_level_up(chat_id):
+    uid  = str(chat_id)
+    user = user_data[uid]
+    user["scenario_streak"] = user.get("scenario_streak", 0) + 1
+    save_users(user_data)
+
+    if user["scenario_streak"] >= 3:
+        current = user.get("level", "A2")
+        if current in LEVEL_PROGRESSION:
+            idx = LEVEL_PROGRESSION.index(current)
+            if idx < len(LEVEL_PROGRESSION) - 1:
+                new_level = LEVEL_PROGRESSION[idx + 1]
+                user["level"] = new_level
+                user["scenario_streak"] = 0
+                save_users(user_data)
+                bot.send_message(
+                    chat_id,
+                    f"🎉 Glückwunsch! Du hast 3 Szenarien gemeistert.\n"
+                    f"Dein Niveau steigt auf *{new_level}*! 🚀",
+                    parse_mode="Markdown"
+                )
+
+# LEVEL → DIFFICULTY GUIDANCE
+LEVEL_RULES = {
+    "A0": "Sprich SEHR einfach. Max 1 kurzer Satz. Nur Grundwortschatz.",
+    "A1": "Sprich sehr einfach (A1). Max 1-2 kurze Sätze. Einfache Verben im Präsens.",
+    "A2": "Sprich einfach (A2). Max 2 Sätze. Einfache Vergangenheit ist ok.",
+    "B1": "Sprich moderat (B1). Max 2-3 Sätze. Auch Nebensätze und Konjunktionen.",
+    "B2": "Sprich natürlich (B2). 2-3 Sätze. Auch komplexere Strukturen.",
+    "C1": "Sprich anspruchsvoll (C1). 3+ Sätze. Idiome und differenzierte Ausdrücke ok.",
+}
+
+TONE_MAP = {
+    "informal":   "locker, freundlich, direkt, alltagssprachlich, du-Form",
+    "semi_formal": "freundlich, respektvoll, aber nicht steif",
+    "formal":     "höflich, professionell, distanziert, Sie-Form"
+}
+
+PERSONAS = {
+    "Einkauf & Restaurants": {
+        "role": "Kellner",
+        "tone": "freundlich, effizient",
+        "formality": "SIE",
+        "emotion": "neutral bis freundlich",
+        "energy": "ruhig",
+        "behavior": "führt Bestellung, stellt gezielte Fragen",
+        "dynamic": "führt Gespräch",
+        "voice": {
+            "style": "höflich, klar, serviceorientiert",
+            "pace": "ruhig, strukturiert",
+            "expressions": "Sehr gerne, Einen Moment bitte, Natürlich, Selbstverständlich",
+            "attitude": "professionell hilfsbereit"
+        }
+    },
+    "Freunde / Beziehungen": {
+        "role": "Freund",
+        "tone": "locker, persönlich",
+        "formality": "DU",
+        "emotion": "warm, interessiert",
+        "energy": "mittel",
+        "behavior": "stellt persönliche Fragen, reagiert emotional",
+        "dynamic": "beidseitig",
+        "voice": {
+            "style": "locker, warm, spontan",
+            "pace": "lebhaft, natürlich",
+            "expressions": "krass, echt?, naja, weißt du, also..., hm",
+            "attitude": "entspannt, neugierig"
+        }
+    },
+    "Soziales (Ämter, Ärzte)": {
+        "role": "Sachbearbeiter / Arzt",
+        "tone": "professionell, direkt",
+        "formality": "SIE",
+        "emotion": "neutral",
+        "energy": "kontrolliert",
+        "behavior": "stellt klare Fragen, erwartet konkrete Antworten",
+        "dynamic": "führt Gespräch",
+        "voice": {
+            "style": "sachlich, professionell, klar",
+            "pace": "kontrolliert, präzise",
+            "expressions": "Bitte, Vielen Dank, Könnten Sie..., Ich verstehe",
+            "attitude": "neutral, korrekt"
+        }
+    },
+    "Unterhaltung (Club, Kino etc)": {
+        "role": "Fremder / Bekannter",
+        "tone": "locker, smalltalk",
+        "formality": "DU",
+        "emotion": "offen",
+        "energy": "leicht aktiv",
+        "behavior": "macht Smalltalk, reagiert spontan",
+        "dynamic": "beidseitig",
+        "voice": {
+            "style": "locker, offen, ungezwungen",
+            "pace": "leicht, flott",
+            "expressions": "cool, echt?, no way, nice, alter",
+            "attitude": "offen, spontan"
+        }
+    },
+    "Tourismus & Reisen": {
+        "role": "Rezeptionist / Gastgeber",
+        "tone": "höflich, hilfsbereit",
+        "formality": "SIE",
+        "emotion": "freundlich",
+        "energy": "ruhig",
+        "behavior": "hilft, erklärt, stellt Fragen",
+        "dynamic": "führt Gespräch",
+        "voice": {
+            "style": "freundlich, gepflegt, einladend",
+            "pace": "ruhig, klar",
+            "expressions": "Herzlich willkommen, Gerne, Selbstverständlich, Kein Problem",
+            "attitude": "gastfreundlich, professionell"
+        }
+    },
+    "Sport & Hobbys": {
+        "role": "Trainingspartner",
+        "tone": "locker, interessiert",
+        "formality": "DU",
+        "emotion": "motiviert",
+        "energy": "aktiv",
+        "behavior": "fragt nach Interessen, teilt eigene Erfahrungen",
+        "dynamic": "beidseitig",
+        "voice": {
+            "style": "motiviert, direkt, kumpelhaft",
+            "pace": "energetisch, aktiv",
+            "expressions": "los, komm, stark, geil, alter, nice, voll cool",
+            "attitude": "enthusiastisch, unterstützend"
+        }
+    },
+    "Am Telefon": {
+        "role": "Support / Gesprächspartner",
+        "tone": "klar, strukturiert",
+        "formality": "SIE",
+        "emotion": "neutral",
+        "energy": "fokussiert",
+        "behavior": "stellt gezielte Fragen, wartet auf Antwort",
+        "dynamic": "reaktiv",
+        "voice": {
+            "style": "klar, strukturiert, fokussiert",
+            "pace": "ruhig, präzise",
+            "expressions": "Ich verstehe, Einen Moment, Kein Problem, Alles klar",
+            "attitude": "lösungsorientiert, geduldig"
+        }
+    },
+    "Job": {
+        "role": "Kollege oder Manager",
+        "tone": "semi-professionell",
+        "formality": "AUTO",
+        "emotion": "neutral bis interessiert",
+        "energy": "mittel",
+        "behavior": "stellt arbeitsbezogene Fragen",
+        "dynamic": "beidseitig",
+        "voice": {
+            "style": "sachlich, kollegial, klar",
+            "pace": "moderat, zielgerichtet",
+            "expressions": "alright, verstanden, kurze Frage, genau, macht Sinn",
+            "attitude": "respektvoll, kollegial"
+        }
+    },
+    "Selbstpräsentation": {
+        "role": "Gesprächspartner",
+        "tone": "freundlich",
+        "formality": "AUTO",
+        "emotion": "interessiert",
+        "energy": "ruhig",
+        "behavior": "fordert dich auf, über dich zu sprechen",
+        "dynamic": "führt Gespräch",
+        "voice": {
+            "style": "aufmerksam, warm, ermutigend",
+            "pace": "entspannt, zugewandt",
+            "expressions": "interessant, wirklich?, erzähl mal, und dann?, spannend",
+            "attitude": "offen, neugierig"
+        }
+    },
+}
+
+def resolve_formality(goal, scenario_text):
+    text = scenario_text.lower()
+    if any(x in text for x in [
+        "arzt", "amt", "behörde", "kellner", "restaurant",
+        "termin", "interview", "manager", "sachbearbeiter"
+    ]):
+        return "SIE"
+    if any(x in text for x in [
+        "freund", "party", "date", "tinder", "kollege", "bier", "kneipe"
+    ]):
+        return "DU"
+    return PERSONAS[goal]["formality"]
+
+def enforce_style(text, formality):
+    if formality == "SIE":
+        for slang in ["ey", "digga", "krass", "nice", "alter", "geil", "voll cool"]:
+            text = text.replace(slang, "")
+    return text.strip()
+
+def build_system_prompt(chat_id, scenario):
+    user    = user_data[str(chat_id)]
+    level   = user.get("level", "A2")
+    goal    = user.get("goal",  "Einkauf & Restaurants")
+
+    # Inject turn-phase so NPC knows when to wind down vs. keep going
+    _cur  = turn_counter.get(chat_id, 0)
+    _max  = max_turns_for_level(level)
+    _ratio = _cur / max(_max, 1)
+    if _ratio < 0.45:
+        _phase = (
+            "FRÜH im Gespräch — halte die Unterhaltung aktiv: stelle am Ende eine kurze, "
+            "natürliche Folgefrage oder reagiere mit einem Anstoß, der den User zum Weitersprechen einlädt."
+        )
+    elif _ratio < 0.8:
+        _phase = (
+            "MITTE des Gesprächs — natürlicher Austausch. Stelle eine Frage NUR wenn sie sich "
+            "organisch ergibt. Wenn die Interaktion inhaltlich abgeschlossen wirkt, ist das ok."
+        )
+    else:
+        _phase = (
+            "GESPRÄCHSENDE naht — lass die Interaktion natürlich abschließen. "
+            "Wenn das Ziel erreicht ist (Kauf, Info, Entscheidung), dann schließe es herzlich ab "
+            "und verabschiede dich — erfinde KEINE neuen Angebote, Themen oder Fragen mehr. "
+            "Kein 'darf ich noch etwas tun?', kein 'haben Sie noch Fragen?' wenn der Kontext abgeschlossen ist."
+        )
+
+    # Support new-format persona (per-scenario) or fall back to global PERSONAS
+    if "persona" in scenario:
+        sp = scenario["persona"]
+        persona = PERSONAS.get(goal, PERSONAS["Einkauf & Restaurants"]).copy()
+        persona["role"] = sp.get("name", persona["role"])
+        if sp.get("tone") == "casual":
+            persona["formality"] = "DU"
+    else:
+        persona = PERSONAS.get(goal, PERSONAS["Einkauf & Restaurants"])
+
+    context    = _scenario_context(scenario)
+    name            = user.get("name", "")
+    gender          = user.get("gender", None)
+    native_language = user.get("native_language", None)
+    if name:
+        context = context.replace("[Name]", name)
+    # For old-format scenarios (no explicit persona/start), reframe from NPC POV
+    # to prevent GPT from confusing "Du" (=user) with itself.
+    if "persona" not in scenario:
+        context = reframe_context_for_npc(context, name)
+
+    # Build gender-aware formal address
+    if gender == "weiblich":
+        formal_address = f"Frau {name}" if name else "die Nutzerin"
+        gender_note = "Der Lernende ist weiblich. Verwende in formellen Situationen 'Frau [Name]'."
+    elif gender == "männlich":
+        formal_address = f"Herr {name}" if name else "der Nutzer"
+        gender_note = "Der Lernende ist männlich. Verwende in formellen Situationen 'Herr [Name]'."
+    else:
+        formal_address = name if name else "die Person"
+        gender_note = "Der Lernende hat 'divers' angegeben. Vermeide geschlechtsspezifische Anreden — nutze den Vornamen."
+
+    # Native language note for GPT
+    lang_note = f"Die Muttersprache des Lernenden ist: {native_language}." if native_language else ""
+    formality  = resolve_formality(goal, context)
+    voice      = persona["voice"]
+    mode       = get_dynamic_mode(session_state.get(chat_id, {"struggle": 0, "success": 0}))
+    due_wps    = get_due_weak_points(chat_id)
+    wp_text    = "\n".join(
+        f"- {w['example_wrong']} → {w['example_correct']}" for w in due_wps
+    ) if due_wps else "Keine"
+
+    return f"""
+Du bist ein echter Mensch in einer realistischen Situation.
+
+ROLLE: {persona['role']}
+VERHALTEN: {persona['behavior']}
+DYNAMIK: {persona['dynamic']}
+
+FORMALITÄT: {formality}
+- SIE → siezen, höflich, kein Slang
+- DU → duzen, locker, natürlich
+- Niemals mischen
+
+STIMME PERSÖNLICHKEIT:
+Stil: {voice['style']}
+Tempo: {voice['pace']}
+Ausdruck: {voice['expressions']}
+Haltung: {voice['attitude']}
+
+VOICE ACTING:
+- Sprich wie ein echter Mensch
+- NIEMALS Pause-Labels oder Regieanweisungen schreiben: KEIN „(leichte Pause)", „(Pause)", „(seufzt)", „(zögert)", „[Pause]" oder ähnliches — der Text wird direkt vorgelesen und solche Klammern werden wörtlich ausgesprochen
+- Zögerung und Pausen: drücke sie mit echten deutschen Lauten aus — „äh", „öhm", „hmm", „mhm", „na ja...", „also...", „tja..." — NICHT mit Beschriftungen
+- Seufzen, Nachdenken, Überraschung: direkt als Laut schreiben — „Hmm...", „Öh...", „Ach so!", „Ah okay..." — NIE als Klammerausdruck
+- Nutze „..." innerhalb von Sätzen für natürliches Zögern, aber nie als Label
+- Füge kleine Reaktionen ein passend zum Stil: {voice['expressions']}
+- Kurze + mittlere Sätze mischen, keine Monologe
+- Vermeide perfekte, formelle Sprache — außer bei SIE
+
+SCHWIERIGKEITSGRAD — Nutzerlevel: {level}
+Das Niveau bestimmt NUR Tempo, Vokabular-Komplexität und Satzlänge — NICHT welche Themen möglich sind.
+Jede Gesprächssituation ist für jedes Niveau verfügbar.
+
+WICHTIG: Du sprichst IMMER grammatikalisch korrektes Deutsch.
+Keine fehlenden Artikel, keine Telegrammsprache, keine gebrochene Grammatik.
+Einfache Sprache bedeutet kurze Sätze und leichtes Vokabular — NICHT falsches Deutsch.
+
+A1 — Absoluter Anfänger:
+- Max. 1 kurzer Satz pro Antwort
+- Nur Grundvokabular: sein, haben, kommen, gehen, heißen
+- Sehr langsam, viele Pausen: „Hallo... ich bin Anna. Und du?"
+- Einfache Fragen: „Wie heißt du?", „Woher kommst du?"
+- Kein Nebensatz, keine Konjunktionen außer „und"
+
+A2 — Grundkenntnisse:
+- 1–2 kurze Sätze
+- Alltagsvokabular, einfache Vergangenheit (war, hatte)
+- Fragen mit „wann", „wo", „was"
+- Leichter natürlicher Ton: „Ah okay… und was machst du so?"
+
+B1 — Mittelstufe:
+- 1–2 Sätze, natürlicher Gesprächsflow
+- Nebensätze mit „weil", „dass", „wenn"
+- Einfache Meinungen und Erklärungen
+- „Ah, interessant… warum denn das?"
+
+B2 — Gute Kenntnisse:
+- 2 Sätze, fließend, idiomatisch
+- Komplexere Strukturen, Konjunktiv: „Das wäre toll, wenn…"
+- Nachfragen, diskutieren, widersprechen
+- „Ehrlich gesagt finde ich das etwas schwierig, weil…"
+
+C1 — Fortgeschritten:
+- 2–3 Sätze, fließend, präzise
+- Idiome, Nuancen, Ironie erlaubt
+- Komplexe Fragen, Argumentation
+- „Das klingt spannend — aber hast du dabei auch bedacht, dass…?"
+
+FEHLER-FOKUS:
+{wp_text}
+→ Baue diese Strukturen subtil ein. Korrigiere nie direkt — Recasting:
+User: „Ich habe gegangen" → Du: „Ah, du bist also gegangen — und dann?"
+
+EMOTIONALE REAKTION:
+- Reagiere zuerst emotional, dann inhaltlich
+- Beispiele: "Ahh okay 😄 und dann?", "Echt jetzt? Erzähl mal…", "Wait… wie meinst du das genau?"
+
+GESPRÄCHSPHASE:
+{_phase}
+
+GESPRÄCHS-KONTINUITÄT (ABSOLUT WICHTIG):
+- Verfolge lückenlos alles, was im bisherigen Gespräch BEREITS gesagt, bestätigt oder entschieden wurde
+- Frage NIEMALS nochmal nach etwas, das der Nutzer bereits beantwortet hat — das ist respektlos und unrealistisch
+- Widerspreche NIEMALS etwas, das der Nutzer bereits gesagt hat
+- Bei schrittweisen Situationen (Check-in, Bestellung, Buchung, Termin): arbeite logisch Schritt für Schritt ab — ein abgeschlossener Schritt wird nicht wieder geöffnet
+- Beispiel Hotel: Hat der Nutzer gesagt, er hat eine Reservierung → bestätige es, frage nach Name/Buchungsnummer — frage NIEMALS danach nochmal, ob man eine Reservierung anlegen soll oder ob er reserviert hat
+- Beispiel Restaurant: Hat der Nutzer bestellt → bestätige die Bestellung, frage NICHT nochmal was er möchte
+- Baue jede Antwort auf dem tatsächlichen Gesprächsverlauf auf — nicht auf dem, was in der Situation "typisch" wäre, wenn es dem bereits Gesagten widerspricht
+
+REGELN:
+- Du bist KEIN Lehrer, KEIN Assistent
+- Kein Lehrbuch-Deutsch
+- Echtes Gespräch, echte Reaktionen
+- Stimme und Situation müssen zusammenpassen
+- NIEMALS das Gespräch neu starten oder die Eröffnung wiederholen
+- Führe das bestehende Gespräch IMMER weiter — reagiere auf den letzten Beitrag
+- Keine künstlichen Angebote oder Fragen erfinden, nur um das Gespräch am Laufen zu halten
+- Wenn die Situation natürlich abgeschlossen ist, ist das in Ordnung — echte Menschen verabschieden sich
+
+SZENARIO:
+{context}
+
+WICHTIG: Du bist die ANDERE Person in dieser Situation — NICHT {name}.
+{name} führt die oben beschriebene Aktion aus (ruft an, kommt rein, stellt Fragen usw.).
+Du reagierst als deine Rolle auf der anderen Seite der Szene.
+Reagiere direkt, keine Meta-Erklärungen, echtes Gespräch.
+
+ANREDE & GESCHLECHT:
+{gender_note}
+Formelle Anrede des Lernenden: {formal_address}
+In formellen Szenarien (Amt, Arzt, Job-Interview, Hotel etc.) sprich den Lernenden mit "{formal_address}" an.
+In informellen Szenarien (Freunde, Party, Gym etc.) nutze einfach "{name}".
+
+MUTTERSPRACHE:
+{lang_note}
+Du antwortest IMMER auf Deutsch — unabhängig davon, in welcher Sprache der Lernende schreibt oder spricht.
+"""
+
+SPEED_MAP = {"A1": 0.8, "A2": 0.85, "B1": 0.95, "B2": 1.0, "C1": 1.05}
+
+MAX_TURNS = {"A1": 5, "A2": 5, "B1": 8, "B2": 8, "C1": 10}
+
+def get_speed(level):
+    return SPEED_MAP.get(level, 0.95)
+
+def max_turns_for_level(level):
+    return MAX_TURNS.get(level, 8)
+
+def human_delay():
+    time.sleep(random.uniform(0.8, 1.8))
+
+def clean_for_tts(text):
+    """Strip everything that a TTS model would read aloud as punctuation or symbols."""
+    import unicodedata
+    # Strip parenthetical / bracketed stage directions GPT sometimes generates
+    # e.g. "(leichte Pause)", "(seufzt)", "[Pause]", "*(zögert)*"
+    text = re.sub(r'\*?\([\w\s,äöüÄÖÜß\-]+\)\*?', '', text)
+    text = re.sub(r'\*?\[[\w\s,äöüÄÖÜß\-]+\]\*?', '', text)
+    # Remove markdown formatting characters
+    text = re.sub(r'[*_`~#]', '', text)
+    # Em/en dashes → short pause (comma)
+    text = re.sub(r'[—–]', ',', text)
+    # Remove typographic quotes and angle brackets
+    text = re.sub(r'[„""«»<>]', '', text)
+    # Remove emojis and other non-speech symbols
+    text = ''.join(
+        c for c in text
+        if unicodedata.category(c) not in ('So', 'Sk', 'Sm', 'Co', 'Cn')
+        and ord(c) < 0x10000
+    )
+    # Collapse multiple commas/spaces left by replacements
+    text = re.sub(r',\s*,+', ',', text)
+    text = re.sub(r'\s{2,}', ' ', text)
+    return text.strip()
+
+def humanize_text(text, level):
+    # Do NOT replace periods — TTS handles them as pauses naturally
+    starters = ["Ahh okay,", "Hmm,", "Alles klar,", "Interessant,"]
+    if random.random() < 0.4:
+        text = random.choice(starters) + " " + text
+    return text
+
+def text_to_speech_stream(text, chat_id=None):
+    level = user_data.get(str(chat_id), {}).get("level", "B1") if chat_id else "B1"
+    speed = get_speed(level)
+    voice = user_voice.get(chat_id, "alloy") if chat_id else "alloy"
+    text  = clean_for_tts(text)
+    response = openai_client.audio.speech.create(
+        model="gpt-4o-mini-tts",
+        voice=voice,
+        input=text,
+        speed=speed
+    )
+    audio_file = BytesIO(response.read())
+    audio_file.name = "voice.ogg"
+    return audio_file
+
+def safe_markdown_send(chat_id, text, **kwargs):
+    """Send with Markdown; if parse fails, retry as plain text."""
+    try:
+        bot.send_message(chat_id, text, parse_mode="Markdown", **kwargs)
+    except Exception as e:
+        if "can't parse entities" in str(e):
+            bot.send_message(chat_id, text, **kwargs)
+        else:
+            raise
+
+def send_reply(chat_id, text, voice=True):
+    global _text_id_counter
+    if not isinstance(text, str):
+        return
+    bot.send_chat_action(chat_id, "typing")
+    time.sleep(1.2)
+    level = user_data.get(str(chat_id), {}).get("level", "B1") if chat_id else "B1"
+    text = humanize_text(text, level)
+
+    # Text-only mode: user sent a text message, bot replies with text only
+    if not voice:
+        bot.send_message(chat_id, text, parse_mode="Markdown")
+        return
+
+    audio = text_to_speech_stream(text, chat_id)
+
+    _text_id_counter += 1
+    pending_texts[_text_id_counter] = text
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("📄 Text anzeigen", callback_data=f"show_text:{_text_id_counter}"))
+    try:
+        bot.send_voice(chat_id, audio, reply_markup=markup)
+    except Exception as e:
+        err = str(e)
+        if "VOICE_MESSAGES_FORBIDDEN" in err:
+            bot.send_message(
+                chat_id,
+                "🔇 Sprachnachrichten sind in deinen Telegram-Einstellungen deaktiviert.\n\n"
+                "Bitte aktiviere sie: *Einstellungen → Privatsphäre → Sprachnachrichten → Alle*\n\n"
+                f"📄 _{text}_",
+                parse_mode="Markdown"
+            )
+        else:
+            raise
+
+def send_chat_reply(chat_id, text):
+    send_reply(chat_id, text)
+
+def nudge_user(chat_id):
+    scenario  = current_scenario.get(chat_id, {})
+    followups = scenario.get("followups", [])
+    if followups:
+        send_reply(chat_id, random.choice(followups))
+
+def start_conversation(chat_id, scenario):
+    """Legacy entry-point kept for finish_test path; delegates to start_scenario logic."""
+    current_scenario[chat_id] = scenario
+    opener = ask_gpt(chat_id, "BEGINNE DAS GESPRÄCH in dieser Rolle, 1–2 kurze Sätze.")
+    send_reply(chat_id, opener)
+
+# GPT FUNCTION
+def get_translation(chat_id, text_to_translate):
+    """Translate the given German text into the user's native language."""
+    user = user_data.get(str(chat_id), {})
+    native_lang = user.get("native_language", "Englisch")
+    name = user.get("name", "")
+
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=300,
+        system=(
+            f"Du bist ein Übersetzer. Übersetze den folgenden deutschen Text "
+            f"ins {native_lang}. Antworte NUR mit der Übersetzung — "
+            f"keine Erklärungen, kein Kommentar, keine Zusätze."
+        ),
+        messages=[{"role": "user", "content": text_to_translate}]
+    )
+    return response.content[0].text.strip()
+
+
+def ask_gpt(chat_id, user_text):
+    user = user_data.get(str(chat_id), {})
+
+    name  = user.get("name",  "User")
+    level = user.get("level", "A2")
+    goal  = user.get("goal",  "Einkauf & Restaurants")
+
+    scenario = current_scenario.get(chat_id)
+    if not scenario:
+        scenario = get_next_scenario(chat_id)
+    if not scenario:
+        return "Entschuldigung, kein Szenario verfügbar. Bitte /restart."
+    system_prompt = build_system_prompt(chat_id, scenario)
+
+    # Always keep memory alive with the current system prompt
+    if chat_id not in user_memory or len(user_memory[chat_id]) == 0:
+        user_memory[chat_id] = [{"role": "system", "content": system_prompt}]
+    else:
+        # Refresh system prompt in slot [0] so stale state never leaks into GPT
+        user_memory[chat_id][0] = {"role": "system", "content": system_prompt}
+
+    if not user_text:
+        return ""
+
+    user_memory[chat_id].append({
+        "role": "user",
+        "content": user_text
+    })
+
+    # Anthropic: split system prompt out of messages list
+    mem = user_memory[chat_id]
+    sys_msg = mem[0]["content"] if mem and mem[0]["role"] == "system" else ""
+    conv_msgs = [m for m in mem if m["role"] != "system"]
+
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1024,
+        system=sys_msg,
+        messages=conv_msgs
+    )
+
+    reply = response.content[0].text
+
+    goal      = user.get("goal", "Einkauf & Restaurants")
+    scenario  = current_scenario.get(chat_id, {})
+    formality = resolve_formality(goal, _scenario_context(scenario))
+    reply     = enforce_style(reply, formality)
+
+    user_memory[chat_id].append({
+        "role": "assistant",
+        "content": reply
+    })
+
+    return reply
+
+# GAMIFICATION
+def calculate_xp(turns, difficulty):
+    base = turns * 2
+    if difficulty == "easy":
+        return base
+    elif difficulty == "normal":
+        return base + 5
+    else:
+        return base + 10
+
+def get_level(xp):
+    return max(1, int(xp ** 0.5))
+
+def update_streak(chat_id):
+    today = datetime.now().date()
+    stats = user_data[str(chat_id)]["user_stats"]
+    last  = stats.get("last_active")
+
+    if last:
+        last_date = datetime.fromisoformat(last).date()
+        diff = (today - last_date).days
+        if diff == 1:
+            stats["streak"] += 1
+        elif diff > 1:
+            stats["streak"] = 1
+    else:
+        stats["streak"] = 1
+
+    stats["last_active"] = today.isoformat()
+    save_users(user_data)
+
+BADGES = {
+    3:  "🥉 3-Tage-Streak! Guter Start!",
+    7:  "🏆 7 Tage Streak! Du bist on fire!",
+    14: "🔥 2 Wochen am Stück! Unglaublich!",
+    30: "👑 30 Tage! Du bist eine Legende!",
+}
+
+def check_badges(chat_id, stats):
+    streak = stats.get("streak", 0)
+    if streak in BADGES:
+        bot.send_message(chat_id, BADGES[streak])
+
+GOAL_TEXT = {
+    "Job":                "💼 Sicher im Job sprechen",
+    "Freunde":            "🧑‍🤝‍🧑 Freunde finden & Smalltalk",
+    "Einkaufen":          "🛒 Im Alltag einkaufen & kommunizieren",
+    "Reisen":             "✈️ Selbstständig reisen & orientieren",
+    "Soziales":           "🤝 Behörden & Alltagssituationen meistern",
+    "Unterhaltung":       "🎬 Filme, Serien & Kultur verstehen",
+    "Sport":              "⚽ Im Verein & Training kommunizieren",
+    "Telefon":            "📞 Anrufe & Termine sicher führen",
+    "Selbstpräsentation": "🎤 Selbstsicher auftreten & vorstellen",
+}
+
+def add_xp(chat_id, amount):
+    stats = user_data[str(chat_id)]["user_stats"]
+    stats["xp"] += amount
+    new_level = get_level(stats["xp"])
+    leveled_up = new_level > stats["level"]
+    stats["level"] = new_level
+    save_users(user_data)
+    return leveled_up
+
+def send_progress(chat_id):
+    user  = user_data[str(chat_id)]
+    stats = user["user_stats"]
+    xp      = stats["xp"]
+    level   = stats["level"]
+    streak  = stats["streak"]
+    goal    = user.get("goal", "")
+    name    = user.get("name", "")
+
+    goal_line = GOAL_TEXT.get(goal, f"🎯 {goal}")
+
+    xp_in_level = xp % 50
+    filled = xp_in_level // 5
+    bar = "🟩" * filled + "⬜" * (10 - filled)
+    xp_to_next = 50 - xp_in_level
+
+    text = (
+        f"📊 *Dein Fortschritt{', ' + name if name else ''}*\n"
+        f"━━━━━━━━━━━━━━━\n\n"
+        f"⭐ *Level:* {level}\n"
+        f"⚡ *XP:* {xp}  (+{xp_to_next} bis Level {level+1})\n"
+        f"{bar}\n\n"
+        f"🔥 *Streak:* {streak} {'Tag' if streak == 1 else 'Tage'}\n"
+        f"🎯 *Ziel:* {goal_line}"
+    )
+    bot.send_message(chat_id, text, parse_mode="Markdown")
+
+BOT_LINK = "https://t.me/germandude_bot"
+
+def send_referral(chat_id):
+    share_text = quote(
+        "I've been practicing real German conversations with this bot — it's actually good 😅\n\n"
+        + BOT_LINK
+    )
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton(
+        text="Send to a friend 👀",
+        url=f"https://t.me/share/url?url={quote(BOT_LINK)}&text={share_text}"
+    ))
+    bot.send_message(
+        chat_id,
+        "🔥 Das war eine deiner besten Sessions.\n\n"
+        "Kennst du jemanden, der auch mit Deutsch struggelt?\n"
+        "Schick ihm das mal 😏",
+        reply_markup=markup
+    )
+
+# ADAPTIVE DIFFICULTY ENGINE
+def _is_nudge_text(text: str) -> bool:
+    """True if the typed text is clearly not a real conversational message —
+    e.g. '?', '??', '!', 'wtf', 'hello?' — just a user poking the bot."""
+    stripped = text.strip()
+    if len(stripped) <= 6:
+        return True
+    # Only punctuation / symbols / digits — no real words
+    if re.match(r'^[\W\d\s]+$', stripped, re.UNICODE):
+        return True
+    return False
+
+def analyze_user_input(text):
+    words = text.split()
+    if len(words) < 3:
+        return "struggle"
+    if "??" in text or text.count("?") >= 2:
+        return "struggle"
+    return "ok"
+
+def get_dynamic_mode(state):
+    struggle = state.get("struggle", 0)
+    success  = state.get("success",  0)
+    if struggle > success:
+        return "easy"
+    elif success > struggle * 2:
+        return "hard"
+    else:
+        return "normal"
+
+# WEAK POINT FUNCTIONS
+def save_weak_points(chat_id, extracted_errors):
+    user = user_data[str(chat_id)]
+    if "weak_points" not in user or not isinstance(user["weak_points"], list):
+        user["weak_points"] = []
+    if "errors" not in user or not isinstance(user["errors"], list):
+        user["errors"] = []
+    for err in extracted_errors:
+        user["weak_points"].append({
+            "type":            err.get("type", ""),
+            "example_wrong":   err.get("wrong", ""),
+            "example_correct": err.get("correct", ""),
+            "next_review":     1,
+            "strength":        0
+        })
+        # Simple readable string for show_errors display
+        wrong   = err.get("wrong", "")
+        correct = err.get("correct", "")
+        if wrong and correct:
+            user["errors"].append(f"{wrong} → {correct}")
+    save_users(user_data)
+
+def get_due_weak_points(chat_id):
+    user = user_data[str(chat_id)]
+    due  = []
+    for wp in user.get("weak_points", []):
+        if not isinstance(wp, dict):
+            continue
+        if wp.get("next_review", 1) <= 0:
+            due.append(wp)
+        else:
+            wp["next_review"] -= 1
+    save_users(user_data)
+    return due
+
+def update_weak_points(chat_id, results):
+    user     = user_data[str(chat_id)]
+    improved = results.get("improved", [])
+
+    for wp in user.get("weak_points", []):
+        if not isinstance(wp, dict):
+            continue
+
+        if wp.get("type") in improved:
+            wp["strength"]    = wp.get("strength", 0) + 1
+            wp["next_review"] = wp["strength"] * 2
+        else:
+            wp["strength"]    = max(0, wp.get("strength", 0) - 1)
+            wp["next_review"] = 1
+
+        strength = wp.get("strength", 0)
+
+        if strength >= 5 and not wp.get("mastered"):
+            wp["mastered"]    = True
+            wp["next_review"] = 10
+
+        elif strength == 4 and not wp.get("mastered"):
+            bot.send_message(
+                chat_id,
+                f"🔥 *Fast geschafft!*\n"
+                f"Diesen Fehler hast du fast im Griff:\n\n"
+                f"❌ _{wp.get('example_wrong', '')}_\n"
+                f"✅ _{wp.get('example_correct', '')}_",
+                parse_mode="Markdown"
+            )
+
+    save_users(user_data)
+
+# FEEDBACK FUNCTION
+def generate_feedback(chat_id, conversation_history):
+    user  = user_data[str(chat_id)]
+    level = user.get("level", "A2")
+
+    history = [m for m in conversation_history if m["role"] in ("user", "assistant")]
+    if not history:
+        return "❗ Kein Gespräch gefunden. Übe erst ein bisschen mit /start!"
+
+    conversation_text = "\n".join(
+        f"{'Du' if m['role'] == 'user' else 'Bot'}: {m['content']}"
+        for m in history
+    )
+
+    prompt = f"""
+Du bist ein Deutsch-Coach.
+
+Analysiere die Sprache des Users im folgenden Gespräch.
+
+KEIN FEHLER — ignoriere folgendes komplett:
+- Apokope in der gesprochenen Sprache: „hab" statt „habe", „genieß" statt „genieße", „mach" statt „mache", „komm" statt „komme" usw. — das ist normales, korrektes Umgangsdeutsch.
+- Umgangssprachliche Verkürzungen, die Muttersprachler täglich verwenden.
+
+ZIEL:
+- Finde die 1–5 wichtigsten Fehler
+- Priorisiere:
+  1. Wiederholte Fehler
+  2. Fehler, die Kommunikation stören
+  3. Typische Level-Fehler
+- Wenn der gleiche Fehler mehrfach vorkommt, fasse ihn zusammen.
+
+GIB AUS:
+
+1. FEHLER (max 5):
+- kurzer Beispielsatz vom User
+- Korrektur
+
+2. KURZE ERKLÄRUNG:
+- einfach erklärt (passend zu Level {level})
+
+3. MINI-ÜBUNG:
+- 2–3 Sätze zum Ausfüllen oder Nachsprechen
+
+4. FEHLER_JSON:
+Gib die Fehler als JSON-Array aus (direkt nach dem Text, keine Erklärung):
+[{{"type": "Fehlerkategorie", "wrong": "falscher Satz des Users", "correct": "korrekter Satz"}}]
+
+WICHTIG:
+- Kein Roman
+- Klar, direkt, hilfreich
+- Sprache an Level anpassen
+
+GESPRÄCH:
+{conversation_text}
+"""
+
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    raw = response.content[0].text
+
+    extracted_errors = []
+    if "FEHLER_JSON:" in raw:
+        feedback_text, json_block = raw.split("FEHLER_JSON:", 1)
+        json_str = json_block.strip()
+        try:
+            extracted_errors = json.loads(json_str)
+        except Exception:
+            import re
+            m = re.search(r'\[.*?\]', json_str, re.DOTALL)
+            if m:
+                try:
+                    extracted_errors = json.loads(m.group())
+                except Exception:
+                    extracted_errors = []
+    else:
+        feedback_text = raw
+
+    if extracted_errors:
+        save_weak_points(chat_id, extracted_errors)
+        known_types = {
+            wp.get("type") for wp in user.get("weak_points", [])
+            if isinstance(wp, dict)
+        }
+        new_types    = {e.get("type") for e in extracted_errors}
+        improved     = list(known_types - new_types)
+        update_weak_points(chat_id, {"improved": improved})
+
+    return feedback_text.strip()
+
+
+LEVEL_NEXT = {"A1": "A2", "A2": "B1", "B1": "B2", "B2": "C1", "C1": "C1"}
+
+def generate_errors_and_exercises(chat_id, conversation_history):
+    """Returns (exercises_text, answers_text) tuple."""
+    user  = user_data[str(chat_id)]
+    level = user.get("level", "A2")
+
+    history = [m for m in conversation_history if m["role"] in ("user", "assistant")]
+    if not history:
+        return ("❗ Kein Gespräch gefunden.", "")
+
+    conversation_text = "\n".join(
+        f"{'Du' if m['role'] == 'user' else 'Bot'}: {m['content']}"
+        for m in history
+    )
+
+    prompt = f"""Du bist ein Deutsch-Coach für Niveau {level}.
+Analysiere die Antworten des Users in diesem Gespräch.
+
+KEIN FEHLER — ignoriere folgendes komplett:
+- Apokope in der gesprochenen Sprache: „hab" statt „habe", „genieß" statt „genieße", „mach" statt „mache", „komm" statt „komme" usw. — das ist normales, korrektes Umgangsdeutsch.
+- Umgangssprachliche Verkürzungen, die Muttersprachler täglich verwenden.
+
+AUFGABE:
+1. Finde die 2–3 häufigsten oder wichtigsten Fehler des Users.
+2. Erkläre jeden Fehler kurz und klar (1–2 Sätze, passend zu Niveau {level}).
+3. Erstelle einen zusammenhängenden Lückentext (5–10 Sätze) zum Gesprächsthema.
+   - Baue die Fehler des Users als Lücken ein.
+   - Jede Lücke wird mit ______________ markiert (viele Unterstriche).
+   - Nummeriere jede Lücke: (1) ______________, (2) ______________ usw.
+4. Erstelle 5 Mini-Test-Aufgaben (Multiple Choice, je 3 Optionen) zu den Fehlern des Users.
+
+FORMAT (Telegram Markdown, genau so):
+
+*🔍 Deine häufigsten Fehler:*
+
+1. ❌ [falscher Satz des Users]
+   ✅ [korrekter Satz]
+   💡 [kurze Erklärung]
+
+2. ❌ ...
+   ✅ ...
+   💡 ...
+
+*✏️ Lückentext:*
+
+[5–10 zusammenhängende Sätze zum Thema, Lücken als (1) ______________, (2) ______________ usw.]
+
+*🧩 Mini-Test:*
+
+1. [Frage]
+A) ...  B) ...  C) ...
+
+2. [Frage]
+A) ...  B) ...  C) ...
+
+3. [Frage]
+A) ...  B) ...  C) ...
+
+4. [Frage]
+A) ...  B) ...  C) ...
+
+5. [Frage]
+A) ...  B) ...  C) ...
+
+---ANSWERS---
+
+*✅ Lösungen — Lückentext:*
+(1) [Antwort]
+(2) [Antwort]
+...
+
+*✅ Lösungen — Mini-Test:*
+1. [richtige Option + kurze Begründung]
+2. ...
+3. ...
+4. ...
+5. ...
+
+WICHTIG: Trenne Aufgaben und Lösungen IMMER mit der Zeile ---ANSWERS--- . Kein Text danach außer den Lösungen.
+
+GESPRÄCH:
+{conversation_text}
+"""
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    raw = response.content[0].text.strip()
+
+    if "---ANSWERS---" in raw:
+        exercises, answers = raw.split("---ANSWERS---", 1)
+        return (exercises.strip(), answers.strip())
+    return (raw, "")
+
+
+def generate_vocab_boost(chat_id):
+    """Returns 6–8 native-speaker vocab items one level above the user's current level."""
+    user     = user_data[str(chat_id)]
+    level    = user.get("level", "A2")
+    scenario = current_scenario.get(chat_id, {})
+    topic    = scenario.get("text", user.get("goal", "Alltag"))
+    target   = LEVEL_NEXT.get(level, level)
+
+    prompt = f"""Du bist ein Deutsch-Coach.
+Der User hat gerade geübt: {topic}
+Sein aktuelles Niveau: {level}. Ziel-Niveau für diesen Wortschatz: {target}.
+
+Gib 6–8 Wörter oder Ausdrücke, die Muttersprachler in genau dieser Situation wirklich benutzen.
+
+FORMAT (Telegram Markdown, genau so):
+
+*🚀 Bonus-Wortschatz — wie Muttersprachler reden:*
+
+• *[Wort/Ausdruck]* — [kurze Erklärung auf Deutsch]
+  💬 _"[natürlicher Beispielsatz]"_
+
+WICHTIG:
+- Echte Umgangssprache / Alltagsdeutsch, kein Lehrbuch
+- Redewendungen, typische Kollokationen, Phrasen
+- Niveau {target} (einen Schritt über dem aktuellen Niveau {level})
+- Alles auf Deutsch — kurz und einprägsam
+"""
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=512,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response.content[0].text.strip()
+
+
+# START
+@bot.message_handler(commands=['start'])
+def start(message):
+    chat_id = message.chat.id
+    ensure_user(chat_id)
+
+    # full reset
+    user_state[chat_id] = {"mode": "onboarding", "step": "name"}
+    test_state.pop(chat_id, None)
+    user_step.pop(chat_id, None)
+
+    bot.send_message(chat_id,
+        "Hallo! Ich bin dein deutscher Kumpel! 🇩🇪😄\n"
+        "Ich werde dein Deutsch boosten — bald sprichst du wie ein Muttersprachler.\n\n"
+        "Aber erstmal... wie heißt du? So werde ich dich nennen! ☺️")
+
+# GOAL SELECTION
+def send_goal_selection(chat_id):
+    markup = InlineKeyboardMarkup()
+
+    goals = [
+        "Selbstpräsentation",
+        "Freunde / Beziehungen",
+        "Soziales (Ämter, Ärzte)",
+        "Unterhaltung (Club, Kino etc)",
+        "Einkauf & Restaurants",
+        "Tourismus & Reisen",
+        "Sport & Hobbys",
+        "Am Telefon",
+        "Job"
+    ]
+
+    for g in goals:
+        markup.add(InlineKeyboardButton(g, callback_data=f"goal:{g}"))
+
+    bot.send_message(chat_id,
+        "🎯 Wähle dein Ziel. Wofür brauchst du Deutsch?",
+        reply_markup=markup)
+
+# ONBOARDING
+GOAL_MAP = {
+    "🧍‍♂️ Über dich": "Selbstpräsentation",
+    "🧑‍🤝‍🧑 Freunde":  "Freunde / Beziehungen",
+    "🏢 Amt & Arzt":  "Soziales (Ämter, Ärzte)",
+    "🎉 Freizeit":    "Unterhaltung (Club, Kino etc)",
+    "🍽 Restaurant":  "Einkauf & Restaurants",
+    "✈️ Reisen":      "Tourismus & Reisen",
+    "🏋️ Hobbys":      "Sport & Hobbys",
+    "📞 Telefon":     "Am Telefon",
+    "💼 Job":         "Job",
+}
+
+# Ordered topic list for topic-selection buttons (index = callback key)
+TOPIC_LIST = [
+    ("1️⃣  Selbstpräsentation",     "Selbstpräsentation"),
+    ("2️⃣  Freunde & Beziehungen",  "Freunde / Beziehungen"),
+    ("3️⃣  Amt & Arzt",             "Soziales (Ämter, Ärzte)"),
+    ("4️⃣  Freizeit",               "Unterhaltung (Club, Kino etc)"),
+    ("5️⃣  Einkauf & Restaurant",   "Einkauf & Restaurants"),
+    ("6️⃣  Reisen",                 "Tourismus & Reisen"),
+    ("7️⃣  Sport & Hobbys",         "Sport & Hobbys"),
+    ("8️⃣  Telefon",                "Am Telefon"),
+    ("9️⃣  Job",                    "Job"),
+]
+
+def send_topic_buttons(chat_id):
+    markup = InlineKeyboardMarkup(row_width=2)
+    buttons = [
+        InlineKeyboardButton(label, callback_data=f"topic:{i}")
+        for i, (label, _) in enumerate(TOPIC_LIST)
+    ]
+    markup.add(*buttons)
+    bot.send_message(chat_id, "🗣️ Wähle dein Thema:", reply_markup=markup)
+
+def send_goal_buttons(chat_id):
+    markup = ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.row(KeyboardButton("🧍‍♂️ Über dich"), KeyboardButton("🧑‍🤝‍🧑 Freunde"))
+    markup.row(KeyboardButton("🏢 Amt & Arzt"),  KeyboardButton("🎉 Freizeit"))
+    markup.row(KeyboardButton("🍽 Restaurant"),   KeyboardButton("✈️ Reisen"))
+    markup.row(KeyboardButton("🏋️ Hobbys"),       KeyboardButton("📞 Telefon"))
+    markup.row(KeyboardButton("💼 Job"))
+    bot.send_message(chat_id, "👉 Wofür brauchst du Deutsch?", reply_markup=markup)
+
+def send_gender_buttons(chat_id):
+    markup = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.row(
+        KeyboardButton("männlich 👨🏻"),
+        KeyboardButton("weiblich 👩🏽‍💼"),
+        KeyboardButton("divers 😌")
+    )
+    bot.send_message(chat_id,
+        "Ich bin ein Mann. Und du? Wähle dein Geschlecht 👇",
+        reply_markup=markup)
+
+GENDER_MAP = {
+    "männlich 👨🏻": "männlich",
+    "weiblich 👩🏽‍💼": "weiblich",
+    "divers 😌": "divers",
+}
+
+def handle_onboarding(chat_id, text):
+    state = user_state[chat_id]
+    step  = state.get("step")
+
+    if step == "name":
+        name = text.strip()
+        user_data[str(chat_id)]["name"] = name
+        save_users(user_data)
+        state["step"] = "gender"
+        send_gender_buttons(chat_id)
+
+    elif step == "gender":
+        if text.strip() not in GENDER_MAP:
+            bot.send_message(chat_id, "Klick einfach auf einen der Buttons 🙂")
+            return
+        gender = GENDER_MAP[text.strip()]
+        user_data[str(chat_id)]["gender"] = gender
+        save_users(user_data)
+        state["step"] = "native_language"
+        bot.send_message(chat_id,
+            "Meine Muttersprache ist Deutsch. Und deine? \n\nSchreibe einfach in den Chat! 🌍",
+            reply_markup=ReplyKeyboardRemove())
+
+    elif step == "native_language":
+        lang = text.strip()
+        user_data[str(chat_id)]["native_language"] = lang
+        save_users(user_data)
+        name = user_data[str(chat_id)].get("name", "")
+        # Skip goal selection — go straight to level test
+        user_state[chat_id] = {"mode": "test"}
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("📊 Level-Check starten", callback_data="start_test"))
+        bot.send_message(chat_id,
+            f"Nice, {name}! 🙌 Dann wissen wir Bescheid.\n\n"
+            "Lass mich kurz checken, wie gut dein Deutsch schon ist.\n"
+            "10 Fragen — 1 Minute — kein Stress 😊\n\n"
+            "👉 Bereit?",
+            parse_mode="Markdown",
+            reply_markup=markup
+        )
+
+def send_voice_intro(chat_id):
+    bot.send_message(chat_id,
+        "🎧 Ganz wichtig:\n\n"
+        "Hier geht es nicht um Schreiben.\n"
+        "Du sprichst. Du hörst zu.\n\n"
+        "👉 Wie im echten Leben.\n\n"
+        "❗️ Damit du meine Sprachnachrichten empfangen kannst, stelle sicher, "
+        "dass Sprachnachrichten in deinen Telegram-Einstellungen aktiviert sind:\n"
+        "*Einstellungen → Privatsphäre → Sprachnachrichten → Alle*",
+        parse_mode="Markdown")
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🚀 Los geht's", callback_data="start_chat"))
+    bot.send_message(chat_id, "Bereit?", reply_markup=markup)
+
+def start_chat_callback(call):
+    chat_id = call.message.chat.id
+    bot.answer_callback_query(call.id)
+    # Never interrupt an active test — old callbacks can re-fire from Telegram
+    if chat_id in test_state:
+        return
+    goal = user_data.get(str(chat_id), {}).get("goal")
+    if goal:
+        # Goal already chosen during onboarding — launch directly
+        user_state[chat_id] = {"mode": "chat"}
+        bot.send_message(chat_id, f"🎯 Thema: *{goal}* — los geht's 💪", parse_mode="Markdown")
+        launch_scenario(chat_id)
+    else:
+        user_state[chat_id] = {"mode": "topic_select"}
+        send_topic_buttons(chat_id)
+
+def show_text_callback(call):
+    try:
+        tid = int(call.data.split(":")[1])
+        text = pending_texts.get(tid, "")
+    except (IndexError, ValueError):
+        bot.answer_callback_query(call.id, "Nicht verfügbar.")
+        return
+    bot.answer_callback_query(call.id)
+    if text:
+        bot.send_message(call.message.chat.id, f"💬 {text}")
+    else:
+        bot.answer_callback_query(call.id, "Text nicht mehr verfügbar.")
+
+def handle_topic_callback(call):
+    chat_id = call.message.chat.id
+    if chat_id in test_state:
+        bot.answer_callback_query(call.id)
+        return
+    try:
+        idx = int(call.data.split(":")[1])
+        _, goal = TOPIC_LIST[idx]
+    except (IndexError, ValueError):
+        bot.answer_callback_query(call.id, "Ungültige Auswahl.")
+        return
+
+    user_data[str(chat_id)]["goal"] = goal
+    save_users(user_data)
+    user_state[chat_id] = {"mode": "chat"}
+
+    bot.answer_callback_query(call.id)
+    bot.send_message(chat_id, f"*{goal}* — los geht's 💪", parse_mode="Markdown")
+    launch_scenario(chat_id)
+
+def start_scenario(chat_id, scenario):
+    """
+    Single authoritative entry point for starting any scenario.
+    Order: set state → reset memory → generate opener → send context text → send voice nudge.
+    """
+    name = user_data.get(str(chat_id), {}).get("name", "User")
+
+    # 1. Set state FIRST so build_system_prompt and GPT get the right context
+    current_scenario[chat_id] = scenario
+    user_state[chat_id] = {
+        "mode":        "chat",
+        "scenario_id": scenario["id"],
+        "turn":        0,
+    }
+
+    # 2. Reset memory with correct system prompt
+    sys_prompt = build_system_prompt(chat_id, scenario)
+    user_memory[chat_id] = [{"role": "system", "content": sys_prompt}]
+
+    # 3. Build context string (clean, name-substituted)
+    ctx = get_clean_context(scenario).replace("[Name]", name)
+
+    # 4. Determine opener:
+    #    - new-format scenarios have a hardcoded start.text → use it with name substitution
+    #    - old-format scenarios → generate a vivid, level-appropriate opener via GPT
+    if "start" in scenario and scenario["start"].get("text"):
+        opening = scenario["start"]["text"].replace("[Name]", name)
+    else:
+        level = user_data.get(str(chat_id), {}).get("level", "A2")
+
+        # Detect phone-call scenarios: user is the caller, NPC picks up
+        ctx_lower = ctx.lower()
+        is_phone = any(kw in ctx_lower for kw in [
+            "ruf", "anrufen", "telefonier", "anruf", "rufst", "rufe", "telefon"
+        ])
+
+        if is_phone:
+            situation_instruction = (
+                f"SITUATION: {ctx}\n\n"
+                f"{name} ruft gerade an. Du nimmst das Telefon ab.\n"
+                "Antworte mit einem echten, professionellen Telefongruß:\n"
+                "→ Format: [Firmen- oder Praxisname] + Gruß + dein Name + Hilfsangebot\n"
+                "→ Beispiel: \"Toller Laden GmbH, guten Tag, hier ist Sara, wie kann ich Ihnen helfen?\"\n"
+                "Erfinde einen passenden Firmennamen, der zur Situation passt.\n"
+                f"Niveau {level}: Tempo und Vokabular anpassen, aber IMMER korrektes Deutsch.\n"
+                "Kein Zögern, keine Pausen beim Abheben — du bist am Arbeitsplatz."
+            )
+        else:
+            reframed = reframe_context_for_npc(ctx, name)
+            situation_instruction = (
+                f"DEINE AUFGABE: Sprich die ERSTE Zeile des Gesprächs.\n\n"
+                f"SITUATION (aus deiner NPC-Perspektive): {reframed}\n\n"
+                f"Du bist der NPC — du wartest, empfängst, oder bist bereits vor Ort.\n"
+                f"{name or 'Der Lernende'} betritt gerade die Szene / spricht dich gerade an.\n"
+                f"Eröffne das Gespräch so, wie DEINE Rolle es tun würde — nicht wie {name or 'der Lernende'} es tun würde.\n"
+                f"Beispiel Bürgeramt: Du sagst \'Guten Tag, wie kann ich Ihnen helfen?\' — NICHT \'Ich möchte mich anmelden.\'\n"
+                f"Niveau {level}: Sprachtempo und Vokabular anpassen, aber IMMER korrektes Deutsch.\n"
+                "1–2 Sätze. Kein erzwungenes Name-Dropping."
+            )
+
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=120,
+            system=sys_prompt,
+            messages=[{"role": "user", "content": situation_instruction}],
+        )
+        opening = resp.content[0].text.strip()
+
+    # 5. Store opener as first assistant turn in memory (dialog continues from here)
+    user_memory[chat_id].append({"role": "assistant", "content": opening})
+
+    # 6. Send context text
+    user = user_data.get(str(chat_id), {})
+    lang = user.get("native_language")
+    lang_hint = f"\n🌍 Tippe /übersetzen um meine letzte Nachricht auf {lang} zu übersetzen." if lang else ""
+    bot.send_message(chat_id, f"🎭 {ctx}{lang_hint}")
+
+    # 7. Send voice nudge
+    send_reply(chat_id, opening)
+
+
+def launch_scenario(chat_id):
+    user     = user_data.get(str(chat_id), {})
+    goal     = user.get("goal", "Selbstpräsentation")
+    level    = user.get("level", "A2")
+    scenario = pick_scenario(chat_id, goal, level)
+    if not scenario:
+        bot.send_message(chat_id, "⚠️ Kein passendes Szenario gefunden. Bitte /restart und Level prüfen.")
+        return
+    start_scenario(chat_id, scenario)
+
+def handle_goal(call):
+    chat_id = call.message.chat.id
+    if chat_id in test_state:
+        bot.answer_callback_query(call.id)
+        return
+    goal = call.data.split(":")[1]
+
+    user_data[str(chat_id)]["goal"] = goal
+    save_users(user_data)
+
+    # Onboarding abgeschlossen → Test steht als nächstes
+    user_step.pop(chat_id, None)
+    user_state[chat_id] = {"mode": "test"}
+
+    name = user_data[str(chat_id)]["name"]
+
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton(
+        "Wie gut ist dein Deutsch? Lass uns es kurz checken 😊",
+        callback_data="start_test"
+    ))
+
+    bot.send_message(chat_id,
+        f"Perfekt, {name} 🙌\n"
+        f"Du willst dein Deutsch für *{goal}* verbessern.\n\n"
+        "Damit ich dir die richtigen Gespräche geben kann, mache ich jetzt einen kurzen Check mit dir.\n\n"
+        "Das dauert nur 1 Minute.\n"
+        "Einfach antworten – kein Stress 😊\n\n"
+        "👉 Bereit?",
+        parse_mode="Markdown",
+        reply_markup=markup
+    )
+
+# GET QUESTION (no repeats per session)
+def get_question(level, chat_id):
+    """Pick a random unused question for the given level. Resets if pool exhausted."""
+    used = test_state[chat_id]["used_questions"]
+    pool = QUESTION_POOL.get(level, [])
+    available = [q for q in pool if q["id"] not in used]
+    if not available:
+        available = list(pool)
+    q = random.choice(available)
+    used.add(q["id"])
+    return q
+
+def decide_level(q_index, state):
+    """Q0–1 fixed A1, Q2–3 fixed A2, Q4+ adaptive starting at A1 and climbing."""
+    if q_index < 2:
+        return "A1"
+    if q_index < 4:
+        return "A2"
+    return QUIZ_LEVEL_ORDER[state["current_level_index"]]
+
+def prepare_question(q):
+    options = q["options"][:]
+    correct = q.get("a") or q.get("answer", "")
+    random.shuffle(options)
+    correct_index = options.index(correct)
+    return {
+        "id": q["id"],
+        "question": q["q"],
+        "options": options,
+        "correct_index": correct_index,
+    }
+
+def send_question(chat_id):
+    """Pick and send the next question on-the-fly based on current adaptive level."""
+    state = test_state.get(chat_id)
+    if not state:
+        bot.send_message(chat_id, "Test nicht gestartet.")
+        return
+
+    q_index = state["q_index"]
+
+    if q_index >= TOTAL_QUESTIONS:
+        finish_test(chat_id)
+        return
+
+    level = decide_level(q_index, state)
+    q     = get_question(level, chat_id)
+    pq    = prepare_question(q)
+
+    state["current_q"]          = pq
+    state["current_level"]      = level
+    state["waiting_for_answer"] = True
+
+    text = f"❓ Frage {q_index + 1}/{TOTAL_QUESTIONS}\n\n{pq['question']}"
+
+    markup = InlineKeyboardMarkup(row_width=1)
+    for i, opt in enumerate(pq["options"]):
+        label = f"{chr(65 + i)})  {opt}"
+        markup.add(InlineKeyboardButton(label, callback_data=f"quiz_answer:{chr(97 + i)}"))
+
+    bot.send_message(chat_id, text, reply_markup=markup)
+
+# QUIZ START
+def start_test(chat_id):
+    test_state[chat_id] = {
+        "q_index":             0,
+        "current_level_index": 0,   # adaptive phase starts at A1 (index 0) — climbs naturally
+        "used_questions":      set(),
+        "score":    {lvl: 0 for lvl in QUIZ_LEVEL_ORDER},
+        "attempts": {lvl: 0 for lvl in QUIZ_LEVEL_ORDER},
+        "current_q":          None,
+        "current_level":      "A1",
+        "waiting_for_answer": False,
+    }
+    user_state[chat_id] = {"mode": "test"}
+    bot.send_message(chat_id, "🧠 Level-Test startet!")
+    send_question(chat_id)
+
+def start_test_callback(call):
+    chat_id = call.message.chat.id
+    bot.answer_callback_query(call.id)
+    if chat_id in test_state:
+        return   # test already running — ignore stale button re-tap
+    start_test(chat_id)
+
+# ANSWER LOGIC
+def handle_answer(chat_id, user_answer):
+    state = test_state.get(chat_id)
+    if not state or not state.get("waiting_for_answer"):
+        return
+
+    state["waiting_for_answer"] = False
+
+    q       = state["current_q"]
+    correct = False
+
+    if user_answer.lower() in ["a", "b", "c"]:
+        idx = ord(user_answer.lower()) - 97
+        if idx == q["correct_index"]:
+            correct = True
+    elif user_answer.strip() == q["options"][q["correct_index"]]:
+        correct = True
+
+    level = state["current_level"]
+    state["attempts"][level] = state["attempts"].get(level, 0) + 1
+    if correct:
+        state["score"][level] = state["score"].get(level, 0) + 1
+
+    # Only shift adaptive index during the adaptive phase (questions 4–10)
+    if state["q_index"] >= 4:
+        if correct:
+            state["current_level_index"] = min(
+                state["current_level_index"] + 1, len(QUIZ_LEVEL_ORDER) - 1)
+        else:
+            state["current_level_index"] = max(
+                state["current_level_index"] - 1, 0)
+
+    state["q_index"] += 1
+
+    if state["q_index"] >= TOTAL_QUESTIONS:
+        finish_test(chat_id)
+    else:
+        send_question(chat_id)
+
+# QUIZ ANSWER — inline button callback
+def handle_quiz_answer_callback(call):
+    chat_id = call.message.chat.id
+    bot.answer_callback_query(call.id)
+    if chat_id not in test_state:
+        return
+    # Remove buttons from the question message so it can't be clicked twice
+    try:
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+    except Exception:
+        pass
+    answer = call.data.split(":")[1]   # "a", "b", or "c"
+    handle_answer(chat_id, answer)
+
+# QUIZ ANSWER — text / voice fallback (kept for voice STT path)
+@bot.message_handler(func=lambda m: m.chat.id in test_state)
+def handle_answer_message(message):
+    chat_id = message.chat.id
+    text    = message.text.strip() if message.text else ""
+    if text.lower() not in ["a", "b", "c"]:
+        return   # silently ignore non-answer text during test
+    handle_answer(chat_id, text)
+
+# FAIL FLOW (mind. eine A0-Frage falsch)
+def trigger_fail_flow(chat_id):
+    # cleanup quiz so handle_answer stops matching
+    quiz_state.pop(chat_id, None)
+    quiz_current_level.pop(chat_id, None)
+    quiz_scores.pop(chat_id, None)
+    quiz_history.pop(chat_id, None)
+    quiz_a0_results.pop(chat_id, None)
+    asked_questions.pop(chat_id, None)
+
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("Ja", callback_data="lesson_yes"),
+        InlineKeyboardButton("Nein", callback_data="lesson_no"),
+    )
+
+    bot.send_message(chat_id,
+        "Ohje 😞. Wollen wir ein bisschen lernen?",
+        reply_markup=markup)
+
+def lesson_yes_callback(call):
+    chat_id = call.message.chat.id
+    if chat_id in test_state:
+        bot.answer_callback_query(call.id)
+        return
+    bot.send_message(chat_id, "Super! Hier kommen 10 Mini-Lektionen für dich 📚")
+    bot.send_chat_action(chat_id, "typing")
+
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        system=(
+                    "Du bist ein Deutschlehrer für Anfänger (A1). "
+                    "Erstelle 10 sehr kurze, klare Mini-Lektionen auf Deutsch "
+                    "mit Übersetzungen auf Englisch. "
+                    "Themen (zufällig auswählen, abwechslungsreich): "
+                    "Begrüßungen, Zahlen, Monate, Wochentage, Sprachen, Hobbys, Essen & Einkaufen. "
+                    "Format pro Lektion:\n"
+                    "1. 🇩🇪 Thema\n"
+                    "Beispielsatz (DE) — translation (EN)\n"
+                    "Beispielsatz (DE) — translation (EN)\n\n"
+                    "Halte es freundlich und einfach."
+                ),
+        max_tokens=1500,
+        messages=[{"role": "user", "content": "Erstelle die 10 Mini-Lektionen jetzt."}]
+    )
+    bot.send_message(chat_id, response.content[0].text)
+
+def lesson_no_callback(call):
+    chat_id = call.message.chat.id
+    if chat_id in test_state:
+        bot.answer_callback_query(call.id)
+        return
+    bot.send_message(chat_id,
+        "Send an email to: kontakt@erfolgreich-mit-deutsch.de "
+        "to arrange your first free German lesson 🥳 "
+        "I am sure, we will have a chatter in German very soon!")
+
+# Progression benchmarks based on CEFR guidelines + Speakly/Goethe-Institut research:
+# 10 min/day of active speaking ≈ 70 min/week = ~5 hrs/month of focused conversation practice.
+# Active speaking is ~3–4x more efficient than passive learning (source: Speakly, 2021).
+# CEFR: A1→A2 ~80h | A2→B1 ~120h | B1→B2 ~200h | B2→C1 ~250h of total guided learning.
+# With intensive daily speaking these compress significantly.
+LEVEL_PROGRESS = {
+    "A1": {"emoji": "🌱", "desc": "Du kennst die Basics — erste Wörter, einfache Sätze, Begrüßungen.", "next": "A2", "weeks": 4},
+    "A2": {"emoji": "🚶", "desc": "Du kommst im Alltag klar, aber brauchst noch Zeit zum Formulieren.", "next": "B1", "weeks": 8},
+    "B1": {"emoji": "💬", "desc": "Du kannst dich verständigen — Natürlichkeit ist dein nächster Schritt.", "next": "B2", "weeks": 12},
+    "B2": {"emoji": "🎯", "desc": "Du sprichst schon gut — jetzt geht's um Flüssigkeit und natürlichen Ausdruck.", "next": "C1", "weeks": 18},
+    "C1": {"emoji": "🏆", "desc": "Du bist fast auf Muttersprachler-Niveau. Feinschliff und Nuancen sind dein Ziel.", "next": None, "weeks": None},
+}
+
+GOAL_EXTRA = {
+    "Job":              "💼 Fokus: Meetings, Kollegen, Interviews",
+    "Freunde":          "🧑‍🤝‍🧑 Fokus: Alltag & Smalltalk",
+    "Einkaufen":        "🛒 Fokus: Läden, Märkte, Bestellungen",
+    "Reisen":           "✈️ Fokus: Hotels, Ausflüge, Orientierung",
+    "Soziales":         "🤝 Fokus: Behörden, Formulare, Alltagssituationen",
+    "Unterhaltung":     "🎬 Fokus: Filme, Serien, Kultur",
+    "Sport":            "⚽ Fokus: Training, Verein, Wettkampf",
+    "Telefon":          "📞 Fokus: Anrufe, Termine, Durchsagen",
+    "Selbstpräsentation": "🎤 Fokus: Vorstellung, Präsentation, Auftreten",
+}
+
+def send_level_feedback(chat_id, level):
+    prog = LEVEL_PROGRESS.get(level, LEVEL_PROGRESS["A1"])
+    name = user_data.get(str(chat_id), {}).get("name", "")
+    greeting = f"Glückwunsch, {name}!" if name else "Glückwunsch!"
+
+    if prog["next"] and prog["weeks"]:
+        promise = (
+            f"Wenn du jeden Tag 10 Minuten mit mir sprichst, "
+            f"bist du in ~*{prog['weeks']} Wochen* auf *{prog['next']}*! 📈"
+        )
+    else:
+        promise = "Mit 10 Minuten täglich bringst du dich auf echtes Muttersprachler-Niveau. 🏆"
+
+    # Message 1: Result + Promise
+    bot.send_message(chat_id,
+        f"{greeting} Du bist auf *{prog['emoji']} {level}* 😏\n\n"
+        f"{prog['desc']}\n\n"
+        f"{promise}",
+        parse_mode="Markdown"
+    )
+
+    # Message 2: Mini instruction + privacy note + "Los geht's!" button
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🚀 Los geht's!", callback_data="start_chat"))
+    bot.send_message(chat_id,
+        "🎤 Hier geht es nicht ums Schreiben.\n"
+        "🗣️ Du sprichst. Du hörst zu.\n"
+        "📢 Genau wie im echten Leben — das macht den Unterschied.\n\n"
+        "❗️ *One quick thing:* For voice messages to work, make sure you allow them in Telegram:\n"
+        "*Settings → Privacy and Security → Voice Messages → Everybody*\n\n"
+        "Bereit?",
+        parse_mode="Markdown",
+        reply_markup=markup
+    )
+
+# FINISH TEST
+def finish_test(chat_id):
+    state = test_state[chat_id]
+
+    scores   = state["score"]    # {level: correct_count}
+    attempts = state["attempts"] # {level: attempt_count}
+
+    # ── Hierarchical level assignment ───────────────────────────────────────
+    # Walk A1 → A2 → B1 → B2 → C1 in order.
+    # A level is "passed" only if ALL of:
+    #   1. at least 1 attempt (A1/A2) or 2 attempts (B1/B2/C1) — prevents 1-question fluke
+    #   2. accuracy ≥ 60 %  (well above random 33 % for 3-choice questions)
+    #   3. previous level was already passed (hierarchical — can't skip)
+    # Exception: if only 1 attempt on B1+, require 100 % (the one question must be correct).
+    # This stops a lucky single correct on C1 from overriding a weak overall performance.
+
+    MIN_ATTEMPTS = {"A1": 1, "A2": 1, "B1": 2, "B2": 2, "C1": 2}
+    THRESHOLD    = 0.60   # 60 % accuracy required
+
+    final_level = "A1"   # floor — everyone gets at least A1
+    for lvl in QUIZ_LEVEL_ORDER:       # ["A1","A2","B1","B2","C1"]
+        att  = attempts.get(lvl, 0)
+        corr = scores.get(lvl, 0)
+
+        if att == 0:
+            # Never tested at this level — cannot claim it or anything above
+            break
+
+        acc = corr / att
+
+        # Relaxed single-attempt rule: if user only saw 1 question at B1+ and
+        # got it right then continued climbing (proving competence), allow it.
+        # But if they had ≥ min attempts and still failed, stop.
+        if att < MIN_ATTEMPTS[lvl]:
+            # Only 1 attempt (for B1/B2/C1 where min=2): must be 100 % correct
+            if acc < 1.0:
+                break   # got it wrong — doesn't pass
+            # 1/1 correct on B1+ — tentative pass, but final_level update below
+        else:
+            if acc < THRESHOLD:
+                break   # failed this level — stop here
+
+        final_level = lvl   # passed → advance
+
+    user_level[chat_id] = final_level
+    user_data[str(chat_id)]["level"] = final_level
+    save_users(user_data)
+
+    del test_state[chat_id]
+
+    # Reset conversation memory for a fresh start
+    user_memory[chat_id]   = []
+    turn_counter[chat_id]  = 0
+    session_state[chat_id] = {"struggle": 0, "success": 0}
+
+    # Wait for user to click "Los geht's!" — conversation starts in start_chat_callback
+    user_state[chat_id] = {"mode": "ready"}
+    send_level_feedback(chat_id, final_level)
+
+# FEEDBACK COMMAND
+@bot.message_handler(commands=['feedback'])
+def feedback(message):
+    chat_id = message.chat.id
+    bot.send_message(chat_id, "🧠 Analysiere dein Deutsch...")
+    result = generate_feedback(chat_id, user_memory.get(chat_id, []))
+    bot.send_message(chat_id, result)
+
+# FORTSCHRITT COMMAND
+@bot.message_handler(commands=['progress'])
+def progress_cmd(message):
+    send_progress(message.chat.id)
+
+@bot.message_handler(commands=['fortschritt'])
+def fortschritt(message):
+    chat_id = message.chat.id
+    ensure_user(chat_id)
+    user = user_data[str(chat_id)]
+
+    level   = user.get("level", "A2")
+    streak  = user.get("scenario_streak", 0)
+    goal    = user.get("goal", "—")
+    name    = user.get("name", "User")
+
+    # Scenarios completed per goal
+    progress = user.get("user_progress", {})
+    total_done = sum(len(v) for v in progress.values())
+    goal_done  = len(progress.get(goal, []))
+
+    # Streak bar toward next level (out of 3)
+    filled  = min(streak, 3)
+    bar     = "🟩" * filled + "⬜" * (3 - filled)
+
+    # Level progression position
+    LEVELS  = ["A1", "A2", "B1", "B2", "C1"]
+    lv_pos  = LEVELS.index(level) + 1 if level in LEVELS else "?"
+    lv_bar  = "".join("🔵" if LEVELS[i] == level else ("✅" if i < LEVELS.index(level) else "⚪") for i in range(len(LEVELS)))
+
+    # Weak points summary
+    wps = [wp for wp in user.get("weak_points", []) if isinstance(wp, dict)]
+    if wps:
+        wp_lines = "\n".join(
+            f"  • {wp.get('type','?')}  (Stärke: {wp.get('strength',0)})"
+            for wp in wps[-5:]
+        )
+    else:
+        wp_lines = "  Noch keine erfasst"
+
+    # Session mode
+    s     = session_state.get(chat_id, {"struggle": 0, "success": 0})
+    mode  = get_dynamic_mode(s)
+    mode_emoji = {"easy": "🐢 Easy", "normal": "🚶 Normal", "hard": "🔥 Hard"}.get(mode, mode)
+
+    text = (
+        f"📊 *Dein Fortschritt, {name}*\n"
+        f"━━━━━━━━━━━━━━━━━\n\n"
+        f"🎯 *Niveau:* {level}\n"
+        f"{lv_bar}\n"
+        f"A1 → A2 → B1 → B2 → C1\n\n"
+        f"⚡ *Level-Up Streak:* {streak}/3\n"
+        f"{bar}\n\n"
+        f"🗂 *Aktuelles Ziel:* {goal}\n"
+        f"📁 Szenarien in diesem Ziel: {goal_done} erledigt\n"
+        f"📚 Insgesamt erledigt: {total_done}\n\n"
+        f"🧠 *Schwachpunkte:*\n{wp_lines}\n\n"
+        f"🎮 *Aktuelle Schwierigkeit:* {mode_emoji}"
+    )
+
+    bot.send_message(chat_id, text, parse_mode="Markdown")
+
+# ─────────────────────────────────────────────
+# MENU & FEATURE FUNCTIONS
+# ─────────────────────────────────────────────
+
+def show_menu(chat_id):
+    user_state[chat_id] = user_state.get(chat_id, {})
+    user_state[chat_id]["mode"] = "menu"
+    bot.send_message(chat_id,
+        "😄 Was willst du machen?\n\n"
+        "1. 🎯 Neues Gespräch starten\n"
+        "2. 📊 Mein Fortschritt\n"
+        "3. 🧠 Meine Fehler\n"
+        "4. 📈 Mein Niveau\n"
+        "5. 🏋️ Übungen\n"
+        "6. 🎧 Shadowing Mode\n"
+        "7. 🔄 Chat neu starten\n\n"
+        "👉 Schreib die Zahl"
+    )
+
+def show_level(chat_id):
+    level = user_data.get(str(chat_id), {}).get("level", "A2")
+    bot.send_message(chat_id, f"🎯 Dein aktuelles Niveau: *{level}*", parse_mode="Markdown")
+
+def show_errors(chat_id):
+    errors = user_data.get(str(chat_id), {}).get("errors", [])
+    if not errors:
+        bot.send_message(chat_id, "Alles sauber 😄 Noch keine Fehler gespeichert.")
+        return
+    msg = "🧠 *Deine häufigsten Fehler:*\n\n"
+    for e in errors[-5:]:
+        msg += f"• {e}\n"
+    bot.send_message(chat_id, msg, parse_mode="Markdown")
+
+def start_exercise(chat_id):
+    user_state[chat_id] = user_state.get(chat_id, {})
+    user_state[chat_id]["mode"] = "exercise"
+
+    weak_points = user_data.get(str(chat_id), {}).get("weak_points", [])
+    level       = user_data.get(str(chat_id), {}).get("level", "A2")
+
+    if weak_points:
+        wp    = random.choice(weak_points[:5])
+        focus = (
+            f"Fehlerkategorie: {wp.get('type', 'Grammatik')}\n"
+            f"Beispiel falsch: {wp.get('example_wrong', '')}\n"
+            f"Beispiel richtig: {wp.get('example_correct', '')}"
+        )
+    else:
+        focus = "allgemeine Grammatik auf Niveau " + level
+
+    bot.send_message(chat_id, "💪 *Mini-Übung startet...*", parse_mode="Markdown")
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=512,
+        system=(
+                f"Du bist ein Deutschlehrer. Niveau des Lernenden: {level}.\n"
+                f"Erstelle GENAU EINE kurze Übung (Multiple Choice ODER Lückensatz).\n"
+                f"Thema: {focus}\n"
+                "Format: kurze Aufgabe + 3 Optionen a / b / c.\n"
+                "Kein Kommentar davor oder danach — nur die Übung."
+        ),
+        messages=[{"role": "user", "content": "Erstelle die Übung jetzt."}]
+    )
+    bot.send_message(chat_id, response.content[0].text)
+
+SHADOWING_SENTENCES = {
+    "A1": ["Ich heiße Maria.", "Guten Morgen! Wie geht es dir?", "Ich komme aus Spanien."],
+    "A2": ["Ich hätte gern einen Kaffee.", "Können Sie mir helfen, bitte?", "Wo ist der Bahnhof?"],
+    "B1": ["Ich würde gern einen Termin vereinbaren.", "Das ist eine interessante Frage.", "Wie lange bist du schon hier?"],
+    "B2": ["Ich bin der Meinung, dass wir das überdenken sollten.", "Obwohl es schwierig ist, versuche ich es täglich.", "Das hätte ich nicht gedacht."],
+    "C1": ["Angesichts der Umstände wäre ein anderer Ansatz sinnvoller.", "Er hat sich hervorragend geschlagen, trotz aller Widrigkeiten.", "Das lässt sich nicht so einfach auf einen Nenner bringen."],
+}
+
+def start_shadowing(chat_id):
+    user_state[chat_id] = user_state.get(chat_id, {})
+    user_state[chat_id]["mode"] = "shadowing"
+
+    level     = user_data.get(str(chat_id), {}).get("level", "A2")
+    sentences = SHADOWING_SENTENCES.get(level, SHADOWING_SENTENCES["A2"])
+    text      = random.choice(sentences)
+    user_state[chat_id]["shadowing_text"] = text
+
+    send_reply(chat_id, text)
+    bot.send_message(chat_id, "🎧 Hör zu und sprich nach!\n\n👉 Schick eine Sprachnachricht.")
+
+def restart_chat(chat_id):
+    user_state[chat_id]   = {"mode": "idle", "scenario": None, "step": None}
+    user_memory[chat_id]  = []
+    turn_counter[chat_id] = 0
+    session_state[chat_id] = {"struggle": 0, "success": 0}
+    current_scenario.pop(chat_id, None)
+    bot.send_message(chat_id, "🔄 Neustart. Deine Daten bleiben gespeichert.")
+    show_menu(chat_id)
+
+# ─────────────────────────────────────────────
+# COMMAND HANDLERS
+# ─────────────────────────────────────────────
+
+@bot.message_handler(commands=['menu'])
+def menu_cmd(message):
+    ensure_user(message.chat.id)
+    show_menu(message.chat.id)
+
+@bot.message_handler(commands=['level'])
+def level_cmd(message):
+    show_level(message.chat.id)
+
+@bot.message_handler(commands=['errors'])
+def errors_cmd(message):
+    show_errors(message.chat.id)
+
+@bot.message_handler(commands=['practice'])
+def practice_cmd(message):
+    ensure_user(message.chat.id)
+    start_exercise(message.chat.id)
+
+@bot.message_handler(commands=['shadowing'])
+def shadowing_cmd(message):
+    ensure_user(message.chat.id)
+    start_shadowing(message.chat.id)
+
+@bot.message_handler(commands=['restart'])
+def restart_cmd(message):
+    restart_chat(message.chat.id)
+
+# ─────────────────────────────────────────────
+# MAIN LOOP
+@bot.message_handler(commands=["uebersetzen", "übersetzen", "translate"])
+def handle_translate(message):
+    """Translate the last NPC message into the user's native language."""
+    chat_id = message.chat.id
+    mem = user_memory.get(chat_id, [])
+    # Find last assistant message
+    last_npc = next(
+        (m["content"] for m in reversed(mem) if m.get("role") == "assistant"),
+        None
+    )
+    if not last_npc:
+        bot.send_message(chat_id, "Noch keine Nachricht zum Übersetzen 🙂")
+        return
+    user = user_data.get(str(chat_id), {})
+    lang = user.get("native_language", "Englisch")
+    translation = get_translation(chat_id, last_npc)
+    bot.send_message(chat_id, f"🌍 Übersetzung ({lang}):\n\n_{translation}_",
+        parse_mode="Markdown")
+
+
+@bot.message_handler(func=lambda message: True)
+def handle(message):
+    # Skip non-text messages — they have dedicated handlers
+    if not message.text:
+        return
+    chat_id = message.chat.id
+    text = message.text
+
+    # Route via state machine
+    mode = user_state.get(chat_id, {}).get("mode")
+
+    if mode == "onboarding":
+        handle_onboarding(chat_id, text)
+        return
+
+    if mode in ("test", "ready", "exercises", "topic_select") or chat_id in test_state:
+        return
+
+    if mode == "menu":
+        if text == "1":
+            launch_scenario(chat_id)
+        elif text == "2":
+            send_progress(chat_id)
+        elif text == "3":
+            show_errors(chat_id)
+        elif text == "4":
+            show_level(chat_id)
+        elif text == "5":
+            start_exercise(chat_id)
+        elif text == "6":
+            start_shadowing(chat_id)
+        elif text == "7":
+            restart_chat(chat_id)
+        else:
+            show_menu(chat_id)
+        return
+
+    if mode == "shadowing":
+        bot.send_message(chat_id, "🎧 Schick bitte eine *Sprachnachricht* zum Nachsprechen.",
+            parse_mode="Markdown")
+        return
+
+    if mode == "exercise":
+        # Pass the text answer to GPT for light evaluation, then return to menu
+        bot.send_message(chat_id, "✅ Notiert! Weiter üben? /practice — oder /menu")
+        user_state[chat_id]["mode"] = "idle"
+        return
+
+    # Voice selection
+    if user_voice.get(chat_id) == "__choosing__":
+        if message.text in VOICES:
+            user_voice[chat_id] = message.text
+            bot.send_message(chat_id, f"✅ Stimme gesetzt: *{message.text}*",
+                parse_mode="Markdown",
+                reply_markup=telebot.types.ReplyKeyboardRemove())
+        else:
+            bot.send_message(chat_id, "❗ Bitte wähle eine Stimme aus der Liste.")
+        return
+
+    if chat_id not in turn_counter:
+        turn_counter[chat_id] = 0
+    if chat_id not in session_state:
+        session_state[chat_id] = {"struggle": 0, "success": 0}
+
+    # ── NUDGE RECOVERY ────────────────────────────────────────────────────────
+    # If the bot never replied to the last voice message (silent failure), treat
+    # any typed message as a retry signal and respond to that voice instead.
+    if last_voice_answered.get(chat_id) is False and last_voice_text.get(chat_id):
+        saved_text   = last_voice_text[chat_id]
+        saved_answer = last_voice_answer.get(chat_id)   # None if ask_gpt itself failed
+        last_voice_answered[chat_id] = True
+        try:
+            if saved_answer:
+                # GPT already gave us an answer — TTS was the thing that failed.
+                # Just resend that answer as voice; no new GPT call, no memory pollution.
+                send_reply(chat_id, saved_answer, voice=True)
+            else:
+                # ask_gpt itself failed — memory may have an orphaned user message.
+                # Clean it before retrying so we don't double-append.
+                mem = user_memory.get(chat_id, [])
+                if mem and mem[-1].get("role") == "user":
+                    user_memory[chat_id].pop()
+                answer = ask_gpt(chat_id, saved_text)
+                send_reply(chat_id, answer, voice=True)
+        except Exception:
+            bot.send_message(chat_id, "⚠️ Etwas ist schiefgelaufen. Bitte nochmal versuchen.")
+        return
+    # ──────────────────────────────────────────────────────────────────────────
+
+    # If we're inside an active voice scenario, short/punctuation-only text
+    # (like "?", "!", "wtf") is never real input — just ask them to speak.
+    if current_scenario.get(chat_id) and _is_nudge_text(message.text):
+        bot.send_message(chat_id, "🎙️ Schick eine Sprachnachricht, um weiterzumachen.")
+        return
+
+    result = analyze_user_input(message.text if message.text else "")
+    if result == "struggle":
+        session_state[chat_id]["struggle"] += 1
+    else:
+        session_state[chat_id]["success"] += 1
+
+    turn_counter[chat_id] += 1
+
+    answer = ask_gpt(chat_id, message.text)
+    # Always reply with voice in an active scenario; text-only outside one
+    _in_scenario = bool(current_scenario.get(chat_id))
+    send_reply(chat_id, answer, voice=_in_scenario)
+
+    _level = user_data.get(str(chat_id), {}).get("level", "A2")
+    if turn_counter[chat_id] >= max_turns_for_level(_level):
+        send_end_button(chat_id)
+
+def send_end_button(chat_id):
+    """Show 'Das Gespräch beenden' button — user presses it when ready to wrap up."""
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🔚 Das Gespräch beenden", callback_data="end_convo"))
+    bot.send_message(
+        chat_id,
+        "Du kannst noch weitersprechen — oder das Gespräch jetzt beenden. 💬",
+        reply_markup=markup
+    )
+
+def handle_end_convo(call):
+    """User pressed the button → NPC wraps up naturally → feedback flow."""
+    chat_id = call.message.chat.id
+    bot.answer_callback_query(call.id)
+    if chat_id in test_state:
+        return
+    trigger_natural_close(chat_id)
+
+def trigger_natural_close(chat_id):
+    """NPC gives one warm goodbye, then feedback + share fires."""
+    closing_prompt = (
+        "[INTERN — NUR FÜR DICH: Das Gespräch wird jetzt beendet. "
+        "Verabschiede dich herzlich und natürlich als deine Rolle — 1–2 Sätze. "
+        "Keine Fragen mehr, kein neues Thema. Nur ein echtes, warmes Gesprächsende.]"
+    )
+    closing = ask_gpt(chat_id, closing_prompt)
+    send_reply(chat_id, closing)
+    end_conversation(chat_id)
+
+def end_conversation(chat_id):
+    """Full end-flow in one shot: errors+exercises+XP → share button → topic select."""
+    history_snapshot = list(user_memory.get(chat_id, []))
+    user_state[chat_id] = {"mode": "exercises"}
+
+    # ── Gamification ──────────────────────────────────────────────────────────
+    s         = session_state.get(chat_id, {"struggle": 0, "success": 0})
+    mode_type = get_dynamic_mode(s)
+    turns     = turn_counter.get(chat_id, 0)
+    xp_gain   = calculate_xp(turns, mode_type)
+    update_streak(chat_id)
+    leveled_up = add_xp(chat_id, xp_gain)
+    stats      = user_data[str(chat_id)]["user_stats"]
+    total_xp   = stats.get("xp", 0)
+    check_badges(chat_id, stats)
+
+    # Save weak points silently for spaced-repetition (no output shown)
+    try:
+        generate_feedback(chat_id, history_snapshot)
+    except Exception:
+        pass
+
+    # ── Error analysis + exercises (GPT) ─────────────────────────────────────
+    bot.send_chat_action(chat_id, "typing")
+    exercises_text, answers_text = generate_errors_and_exercises(chat_id, history_snapshot)
+
+    # ── XP block appended to exercises message ────────────────────────────────
+    xp_block = f"\n\n─────────────────────\n*＋{xp_gain} XP verdient* 💥  |  Gesamt: *{total_xp} XP*"
+    if leveled_up:
+        xp_block += f"\n🚀 *Level Up! Du bist jetzt Level {stats['level']}!* 🎉"
+
+    MOTIVATIONS = [
+        "Du wirst deutlich flüssiger.",
+        "Dein Deutsch klingt immer natürlicher.",
+        "Du denkst schon weniger auf Englisch.",
+        "Muttersprachler würden das nicht merken.",
+        "Noch ein paar Sessions und du sprichst wie ein Profi.",
+    ]
+    xp_block += f"\n\n_{random.choice(MOTIVATIONS)}_ 💪"
+
+    safe_markdown_send(chat_id, exercises_text + xp_block)
+
+    # ── Answers (separate message) ────────────────────────────────────────────
+    if answers_text:
+        time.sleep(0.5)
+        safe_markdown_send(chat_id, answers_text)
+
+    # ── Share button ──────────────────────────────────────────────────────────
+    share_text = quote(
+        "Ich übe gerade Deutsch mit diesem Bot — ist echt gut 😅\n\n" + BOT_LINK
+    )
+    share_markup = InlineKeyboardMarkup()
+    share_markup.add(InlineKeyboardButton(
+        "🤝 Hilf deinen Freunden, ihr Deutsch zu boosten",
+        url=f"https://t.me/share/url?url={quote(BOT_LINK)}&text={share_text}"
+    ))
+    bot.send_message(
+        chat_id,
+        "💬 Kennst du jemanden, der auch Deutsch üben will?",
+        reply_markup=share_markup
+    )
+
+    # ── Reset + next topic ────────────────────────────────────────────────────
+    turn_counter[chat_id]  = 0
+    user_memory[chat_id]   = []
+    session_state[chat_id] = {"struggle": 0, "success": 0}
+    user_state[chat_id]    = {"mode": "topic_select"}
+    time.sleep(1.5)
+    send_topic_buttons(chat_id)
+
+
+def finish_exercises_callback(call):
+    """Legacy callback — no longer used but kept so old buttons don't crash."""
+    bot.answer_callback_query(call.id, "Bereits erledigt ✅")
+
+@bot.message_handler(commands=['uebung'])
+def send_exercise(message):
+    chat_id = message.chat.id
+
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=512,
+        system="""Du bist ein Deutschlehrer.
+
+Erstelle eine kurze Übung (A2-B1 Niveau).
+
+Regeln:
+- max. 1 Aufgabe
+- Multiple Choice ODER Lückensatz
+- Thema: Restaurant / Reservierung
+- einfach & klar""",
+        messages=[{"role": "user", "content": "Erstelle die Übung jetzt."}]
+    )
+
+    reply = response.content[0].text
+    send_chat_reply(chat_id, reply)
+
+# STIMME COMMAND
+@bot.message_handler(commands=['stimme'])
+def stimme(message):
+    chat_id = message.chat.id
+    current = user_voice.get(chat_id, "alloy")
+
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=3)
+    markup.add(*[telebot.types.KeyboardButton(v) for v in VOICES])
+
+    bot.send_message(
+        chat_id,
+        f"🎙 Wähle eine Stimme:\n_(Aktuell: {current})_",
+        parse_mode="Markdown",
+        reply_markup=markup
+    )
+    user_voice[chat_id] = "__choosing__"
+
+def extract_quiz_answer(text: str) -> str:
+    """Extract a/b/c from a spoken transcript. Returns '' if not found."""
+    import re
+    t = text.strip().lower()
+    # Direct single letter or starts with it
+    if t in ("a", "b", "c"):
+        return t
+    if re.match(r'^[abc][)\.\s,!]', t):
+        return t[0]
+    # "die Antwort ist B", "ich nehme A", "ich sage C", "ich glaube B" etc.
+    m = re.search(r'\b(?:antwort|nehme?|wähle?|sage?|denke?|glaube?|ist|wäre?)\s+([abc])\b', t)
+    if m:
+        return m.group(1)
+    # Any standalone a/b/c
+    m = re.search(r'\b([abc])\b', t)
+    if m:
+        return m.group(1)
+    return ""
+
+def _transcribe_voice(message) -> str:
+    """Download and transcribe a Telegram voice message. Returns transcript text."""
+    file_info       = bot.get_file(message.voice.file_id)
+    downloaded_file = bot.download_file(file_info.file_path)
+    # Unique temp file per user+message — prevents concurrent users overwriting each other
+    tmp_path = f"voice_{message.chat.id}_{message.message_id}.ogg"
+    with open(tmp_path, "wb") as f:
+        f.write(downloaded_file)
+    try:
+        with open(tmp_path, "rb") as audio_file:
+            transcript = openai_client.audio.transcriptions.create(
+                model="gpt-4o-transcribe",
+                file=audio_file,
+                language="de",
+            )
+        return transcript.text.strip()
+    finally:
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+
+@bot.message_handler(content_types=['voice'])
+def handle_voice(message):
+    chat_id = message.chat.id
+    state   = user_state.get(chat_id, {})
+    mode    = state.get("mode")
+
+    # ── SHADOWING MODE ────────────────────────────────────────────────────────
+    if mode == "shadowing":
+        user_text = _transcribe_voice(message)
+        bot.send_message(chat_id, f"_📝 Du hast gesagt: {user_text}_", parse_mode="Markdown")
+        bot.send_message(chat_id, "👍 Gut! Noch einmal? Oder /menu für mehr Optionen.")
+        return
+
+    # ── ONBOARDING — covers ALL steps so nothing falls through to chat ───────
+    if mode == "onboarding":
+        if state.get("step") == "name":
+            user_text = _transcribe_voice(message)
+            # Use the full transcript as the name (trim excess punctuation/length)
+            name = user_text.strip().strip(".,!?-–")[:40] if user_text else ""
+            if name:
+                handle_onboarding(chat_id, name)
+            else:
+                bot.send_message(chat_id, "Ich hab dich nicht verstanden 😅 Wie heißt du?")
+        # Goal step and all others: voice not applicable, ignore silently
+        return
+
+    # ── TEST MODE — extract a/b/c from spoken answer ─────────────────────────
+    if mode == "test" or chat_id in test_state:
+        user_text = _transcribe_voice(message)
+        answer = extract_quiz_answer(user_text)
+        if answer:
+            bot.send_message(
+                chat_id,
+                f"_📝 Gehört: \"{user_text}\" → Antwort: {answer.upper()}_",
+                parse_mode="Markdown"
+            )
+            handle_answer(chat_id, answer)
+        else:
+            bot.send_message(chat_id, "Ich hab dich nicht verstanden 😅 Sag bitte A, B oder C.")
+        return
+
+    # ── CHAT MODE ─────────────────────────────────────────────────────────────
+    # Guard: must be in an active chat mode with a live scenario
+    if mode not in ("chat", "idle", None):
+        return
+    if not current_scenario.get(chat_id):
+        return
+
+    try:
+        user_text = _transcribe_voice(message)
+    except Exception as e:
+        bot.send_message(chat_id, "🎙️ Ich konnte dich leider nicht verstehen. Bitte noch einmal versuchen.")
+        return
+
+    if not user_text:
+        bot.send_message(chat_id, "🎙️ Ich habe nichts gehört. Bitte noch einmal sprechen.")
+        return
+
+    # Store for nudge recovery — mark as unanswered until TTS reply is delivered
+    last_voice_text[chat_id]     = user_text
+    last_voice_answer[chat_id]   = None
+    last_voice_answered[chat_id] = False
+
+    try:
+        answer = ask_gpt(chat_id, user_text)
+        last_voice_answer[chat_id] = answer   # GPT succeeded; store in case TTS fails next
+        send_reply(chat_id, answer)
+        last_voice_answered[chat_id] = True
+    except Exception as e:
+        bot.send_message(chat_id, "⚠️ Etwas ist schiefgelaufen. Bitte nochmal versuchen.")
+
+    # update turn counter
+    turn_counter[chat_id] = turn_counter.get(chat_id, 0) + 1
+    if state.get("turn") is not None:
+        user_state[chat_id]["turn"] = state.get("turn", 0) + 1
+
+    _level = user_data.get(str(chat_id), {}).get("level", "A2")
+    if turn_counter[chat_id] >= max_turns_for_level(_level):
+        send_end_button(chat_id)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MASTER CALLBACK ROUTER
+# Single registered callback_query_handler — every inline-button tap lands here.
+# During an active test ONLY quiz_answer: buttons are processed; everything
+# else (stale buttons from previous sessions, accidental taps, re-delivered
+# Telegram callbacks) is silently dismissed before it can touch any logic.
+# ─────────────────────────────────────────────────────────────────────────────
+@bot.callback_query_handler(func=lambda call: True)
+def master_callback_router(call):
+    chat_id = call.message.chat.id
+    data    = call.data
+
+    # ── TEST FIREWALL ─────────────────────────────────────────────────────────
+    if chat_id in test_state:
+        if data.startswith("quiz_answer:"):
+            handle_quiz_answer_callback(call)
+        else:
+            bot.answer_callback_query(call.id)   # dismiss spinner, do nothing
+        return
+
+    # ── NORMAL ROUTING ────────────────────────────────────────────────────────
+    if data == "start_chat":
+        start_chat_callback(call)
+    elif data.startswith("show_text:"):
+        show_text_callback(call)
+    elif data.startswith("topic:"):
+        handle_topic_callback(call)
+    elif data.startswith("goal:"):
+        handle_goal(call)
+    elif data == "start_test":
+        start_test_callback(call)
+    elif data.startswith("quiz_answer:"):
+        handle_quiz_answer_callback(call)
+    elif data == "lesson_yes":
+        lesson_yes_callback(call)
+    elif data == "lesson_no":
+        lesson_no_callback(call)
+    elif data == "end_convo":
+        handle_end_convo(call)
+    elif data == "finish_exercises":
+        finish_exercises_callback(call)
+    else:
+        bot.answer_callback_query(call.id)
+
+bot.infinity_polling()
