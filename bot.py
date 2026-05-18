@@ -1509,7 +1509,8 @@ def start(message):
     bot.send_message(chat_id,
         "Hallo! Ich bin dein deutscher Kumpel! 🇩🇪😄\n"
         "Ich werde dein Deutsch boosten — bald sprichst du wie ein Muttersprachler.\n\n"
-        "Aber erstmal... wie heißt du? So werde ich dich nennen! ☺️")
+        "Aber erstmal... wie heißt du? So werde ich dich nennen! ☺️",
+        reply_markup=ReplyKeyboardRemove())
 
 # GOAL SELECTION
 def send_goal_selection(chat_id):
