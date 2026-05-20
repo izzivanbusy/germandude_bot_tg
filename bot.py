@@ -7,21 +7,19 @@ import re
 from io import BytesIO
 from datetime import datetime
 from urllib.parse import quote
-import anthropic
+from openai import OpenAI
 from telebot.types import (InlineKeyboardMarkup, InlineKeyboardButton,
                            ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
                            BotCommand)
 
 # KEYS
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY")
-OPENAI_KEY    = os.getenv("OPENAI_API_KEY")  # Only used for TTS + speech-to-text
+OPENAI_KEY     = os.getenv("OPENAI_API_KEY")
 
 # CLIENTS
-from openai import OpenAI as _OpenAI
 bot           = telebot.TeleBot(TELEGRAM_TOKEN)
-client        = anthropic.Anthropic(api_key=ANTHROPIC_KEY)  # Claude — all chat/text
-openai_client = _OpenAI(api_key=OPENAI_KEY)                 # OpenAI — audio only
+client        = OpenAI(api_key=OPENAI_KEY)
+openai_client = client  # same client for audio
 
 bot.set_my_commands([
     BotCommand("start",     "Start"),
@@ -169,149 +167,149 @@ SCENARIOS = [
     # =========================
     # 1. Selbstpräsentation
     # =========================
-    {"id": "selbst_1",  "goal": "Selbstpräsentation", "text": "Du bist umgezogen & triffst einen Nachbarn im Treppenhaus.", "level_min": "A1", "level_max": "A2"},
-    {"id": "selbst_2",  "goal": "Selbstpräsentation", "text": "Du bist im Warteraum bei deinem Hausarzt und wirst von einem älteren Herrn freundlich angesprochen. Er fragt dich, woher du kommst und was dich nach Deutschland bringt.", "level_min": "A1", "level_max": "A2"},
-    {"id": "selbst_3",  "goal": "Selbstpräsentation", "text": "Dein erster Tag im Job. Du lernst dein Team kennen. Erzähl etwas über dich.", "level_min": "A2", "level_max": "B1"},
-    {"id": "selbst_4",  "goal": "Selbstpräsentation", "text": "Du bist im Vorstellungsgespräch. Erzähl etwas über dich.", "level_min": "A2", "level_max": "B2"},
-    {"id": "selbst_5",  "goal": "Selbstpräsentation", "text": "Du bist auf einer Hofparty deiner Nachbarn. Jemand fragt dich, wie lange du schon in Deutschland bist.", "level_min": "A1", "level_max": "A2"},
-    {"id": "selbst_6",  "goal": "Selbstpräsentation", "text": "Du bist auf einer Party bei einer Freundin. Jemand fragt dich, wie du nach Deutschland gekommen bist.", "level_min": "A2", "level_max": "B1"},
-    {"id": "selbst_7",  "goal": "Selbstpräsentation", "text": "Du bist auf einem Date. Dein Gegenüber fragt dich, was du so machst.", "level_min": "A2", "level_max": "B1"},
-    {"id": "selbst_8",  "goal": "Selbstpräsentation", "text": "Du schickst jemandem auf Tinder eine Sprachnachricht, in der du dich kurz vorstellst.", "level_min": "A1", "level_max": "A2"},
-    {"id": "selbst_9",  "goal": "Selbstpräsentation", "text": "Du bist bei einer Wohnungsbesichtigung. Der Vermieter fragt dich, wer du bist und was du beruflich machst und warum er sich für dich entscheiden soll.", "level_min": "B1", "level_max": "C1"},
-    {"id": "selbst_10", "goal": "Selbstpräsentation", "text": 'Du bist in einem Meeting und ein Manager sagt: „[Name], Sie sind ja neu hier bei uns. Erzählen Sie doch etwas über sich!"', "level_min": "A2", "level_max": "C1"},
+    {"id": "selbst_1", "npc_role": "dein neuer Nachbar im Treppenhaus",  "goal": "Selbstpräsentation", "text": "Du bist umgezogen & triffst einen Nachbarn im Treppenhaus.", "level_min": "A1", "level_max": "A2"},
+    {"id": "selbst_2", "npc_role": "ein älterer freundlicher Herr im Wartezimmer beim Hausarzt",  "goal": "Selbstpräsentation", "text": "Du bist im Warteraum bei deinem Hausarzt und wirst von einem älteren Herrn freundlich angesprochen. Er fragt dich, woher du kommst und was dich nach Deutschland bringt.", "level_min": "A1", "level_max": "A2"},
+    {"id": "selbst_3", "npc_role": "ein Teamkollege am ersten Arbeitstag",  "goal": "Selbstpräsentation", "text": "Dein erster Tag im Job. Du lernst dein Team kennen. Erzähl etwas über dich.", "level_min": "A2", "level_max": "B1"},
+    {"id": "selbst_4", "npc_role": "die Personalmanagerin im Vorstellungsgespräch",  "goal": "Selbstpräsentation", "text": "Du bist im Vorstellungsgespräch. Erzähl etwas über dich.", "level_min": "A2", "level_max": "B2"},
+    {"id": "selbst_5", "npc_role": "ein Nachbar auf der Hofparty",  "goal": "Selbstpräsentation", "text": "Du bist auf einer Hofparty deiner Nachbarn. Jemand fragt dich, wie lange du schon in Deutschland bist.", "level_min": "A1", "level_max": "A2"},
+    {"id": "selbst_6", "npc_role": "jemand auf der Party",  "goal": "Selbstpräsentation", "text": "Du bist auf einer Party bei einer Freundin. Jemand fragt dich, wie du nach Deutschland gekommen bist.", "level_min": "A2", "level_max": "B1"},
+    {"id": "selbst_7", "npc_role": "dein Date gegenüber",  "goal": "Selbstpräsentation", "text": "Du bist auf einem Date. Dein Gegenüber fragt dich, was du so machst.", "level_min": "A2", "level_max": "B1"},
+    {"id": "selbst_8", "npc_role": "die Person auf Tinder, der du die Nachricht schickst — reagiere als wärst du diese Person",  "goal": "Selbstpräsentation", "text": "Du schickst jemandem auf Tinder eine Sprachnachricht, in der du dich kurz vorstellst.", "level_min": "A1", "level_max": "A2"},
+    {"id": "selbst_9", "npc_role": "der Vermieter bei der Wohnungsbesichtigung",  "goal": "Selbstpräsentation", "text": "Du bist bei einer Wohnungsbesichtigung. Der Vermieter fragt dich, wer du bist und was du beruflich machst und warum er sich für dich entscheiden soll.", "level_min": "B1", "level_max": "C1"},
+    {"id": "selbst_10", "npc_role": "der Manager im Meeting", "goal": "Selbstpräsentation", "text": 'Du bist in einem Meeting und ein Manager sagt: „[Name], Sie sind ja neu hier bei uns. Erzählen Sie doch etwas über sich!"', "level_min": "A2", "level_max": "C1"},
 
     # =========================
     # 2. Freunde & Beziehungen
     # =========================
-    {"id": "freunde_1",  "goal": "Freunde / Beziehungen", "text": "Du möchtest deine Deutschsprechende Freundin zum Kaffee per WhatsApp Sprachnachricht einladen. Schick ihr eine Sprachnachricht!", "level_min": "A1", "level_max": "A2"},
-    {"id": "freunde_2",  "goal": "Freunde / Beziehungen", "text": "Deine Freunde rufen dich an und laden dich am kommenden Wochenende zum Grillen ein. Kannst du mitkommen? Sprich mit ihnen!", "level_min": "A1", "level_max": "A2"},
-    {"id": "freunde_3",  "goal": "Freunde / Beziehungen", "text": "Du triffst dich mit deinem Kumpel. Er hat dir über sein Wochenende in Polen erzählt. Erzähle nun du über dein Wochenende.", "level_min": "A2", "level_max": "B1"},
-    {"id": "freunde_4",  "goal": "Freunde / Beziehungen", "text": "Deiner Bestie geht es nicht gut. Du rufst sie an und fragst sie, wie es ihr geht und was genau passiert ist. Vielleicht kannst du ihr helfen.", "level_min": "B1", "level_max": "B2"},
-    {"id": "freunde_5",  "goal": "Freunde / Beziehungen", "text": "Du triffst deine Kollegen zu einem Bierchen nach dem Feierabend. Eine Kollegin fragt dich nach deinen Hobbies. Sie fragt dich, wie du damit angefangen hast.", "level_min": "A2", "level_max": "B1"},
-    {"id": "freunde_6",  "goal": "Freunde / Beziehungen", "text": "Du bekommst Besuch von deinem Freund und seiner deutschen Freundin. Sie sind begeistert von deinem Essen und sie fragt dich nach dem Rezept.", "level_min": "A2", "level_max": "B1"},
-    {"id": "freunde_7",  "goal": "Freunde / Beziehungen", "text": "Du quatschst mit deiner Kollegin, wo du gestern Essen warst. Erzähl ihr alles!", "level_min": "A2", "level_max": "B1"},
-    {"id": "freunde_8",  "goal": "Freunde / Beziehungen", "text": "Dein Freund hat ein Beziehungsproblem und du möchtest ihn nicht nur trösten, sondern auch helfen. Wie tust du das? Welche Fragen stellst du?", "level_min": "B1", "level_max": "B2"},
-    {"id": "freunde_9",  "goal": "Freunde / Beziehungen", "text": "Dein Liebespartner plant mit dir einen Urlaub. Mach eine Planung mit ihm/ihr. Wo geht es hin? Wie kommt ihr hin? Was werdet ihr machen?", "level_min": "A2", "level_max": "B1"},
-    {"id": "freunde_10", "goal": "Freunde / Beziehungen", "text": "Du hast bald Geburtstag und erstellst eine Gruppe in WhatsApp. Erzähl den eingeladenen Freunden, welche Party und wo du machst!", "level_min": "A2", "level_max": "B1"},
-    {"id": "freunde_11", "goal": "Freunde / Beziehungen", "text": "Deine Nachbarin hat gesehen, dass du den Müll falsch sortiert hast. Du möchtest dich entschuldigen und höflich bitten, dass sie dir die Regeln erklärt.", "level_min": "A2", "level_max": "B1"},
-    {"id": "freunde_12", "goal": "Freunde / Beziehungen", "text": "Deine Freunde heiraten bald und laden dich zur Hochzeit ein. Du freust dich sehr und willst natürlich kommen. Was sagst du?", "level_min": "A1", "level_max": "A2"},
-    {"id": "freunde_13", "goal": "Freunde / Beziehungen", "text": "Deine Freunde haben einen Hund und zwei Katzen und sprechen ständig darüber. Sie fragen dich, ob du ein Tierfreund bist. Was sagst du?", "level_min": "A1", "level_max": "A2"},
-    {"id": "freunde_14", "goal": "Freunde / Beziehungen", "text": "Deine Kollegin zeigt dir ein Bild von einem Welpen, den sie gestern bekommen hat. Wie ist deine Reaktion zu dem süßen Bild?", "level_min": "A1", "level_max": "A2"},
-    {"id": "freunde_15", "goal": "Freunde / Beziehungen", "text": "Du liest ein Buch auf der Bank im Park. Plötzlich kommt eine ältere Dame mit dem Hund auf dich zu und fragt dich, ob sie sich neben dich hinsetzen kann. Was sagst du?", "level_min": "A1", "level_max": "A2"},
-    {"id": "freunde_16", "goal": "Freunde / Beziehungen", "text": "Eine Gruppe in der Kneipe lädt dich an ihren Tisch ein, denn du bist allein. Was sagst du?", "level_min": "A1", "level_max": "A2"},
+    {"id": "freunde_1", "npc_role": "die Freundin die die Sprachnachricht empfängt — reagiere auf sie",  "goal": "Freunde / Beziehungen", "text": "Du möchtest deine Deutschsprechende Freundin zum Kaffee per WhatsApp Sprachnachricht einladen. Schick ihr eine Sprachnachricht!", "level_min": "A1", "level_max": "A2"},
+    {"id": "freunde_2", "npc_role": "der Freund der anruft und zum Grillen einlädt",  "goal": "Freunde / Beziehungen", "text": "Deine Freunde rufen dich an und laden dich am kommenden Wochenende zum Grillen ein. Kannst du mitkommen? Sprich mit ihnen!", "level_min": "A1", "level_max": "A2"},
+    {"id": "freunde_3", "npc_role": "der Kumpel der über sein Wochenende erzählt hat und jetzt zuhört",  "goal": "Freunde / Beziehungen", "text": "Du triffst dich mit deinem Kumpel. Er hat dir über sein Wochenende in Polen erzählt. Erzähle nun du über dein Wochenende.", "level_min": "A2", "level_max": "B1"},
+    {"id": "freunde_4", "npc_role": "die Bestie die angerufen wird — du bist schlecht drauf",  "goal": "Freunde / Beziehungen", "text": "Deiner Bestie geht es nicht gut. Du rufst sie an und fragst sie, wie es ihr geht und was genau passiert ist. Vielleicht kannst du ihr helfen.", "level_min": "B1", "level_max": "B2"},
+    {"id": "freunde_5", "npc_role": "die Kollegin nach dem Feierabend die nach Hobbys fragt",  "goal": "Freunde / Beziehungen", "text": "Du triffst deine Kollegen zu einem Bierchen nach dem Feierabend. Eine Kollegin fragt dich nach deinen Hobbies. Sie fragt dich, wie du damit angefangen hast.", "level_min": "A2", "level_max": "B1"},
+    {"id": "freunde_6", "npc_role": "die deutsche Freundin des Besuchers die nach dem Rezept fragt",  "goal": "Freunde / Beziehungen", "text": "Du bekommst Besuch von deinem Freund und seiner deutschen Freundin. Sie sind begeistert von deinem Essen und sie fragt dich nach dem Rezept.", "level_min": "A2", "level_max": "B1"},
+    {"id": "freunde_7", "npc_role": "die Kollegin die fragt wo du gestern Essen warst",  "goal": "Freunde / Beziehungen", "text": "Du quatschst mit deiner Kollegin, wo du gestern Essen warst. Erzähl ihr alles!", "level_min": "A2", "level_max": "B1"},
+    {"id": "freunde_8", "npc_role": "der Freund mit dem Beziehungsproblem",  "goal": "Freunde / Beziehungen", "text": "Dein Freund hat ein Beziehungsproblem und du möchtest ihn nicht nur trösten, sondern auch helfen. Wie tust du das? Welche Fragen stellst du?", "level_min": "B1", "level_max": "B2"},
+    {"id": "freunde_9", "npc_role": "der Liebespartner der den Urlaub plant",  "goal": "Freunde / Beziehungen", "text": "Dein Liebespartner plant mit dir einen Urlaub. Mach eine Planung mit ihm/ihr. Wo geht es hin? Wie kommt ihr hin? Was werdet ihr machen?", "level_min": "A2", "level_max": "B1"},
+    {"id": "freunde_10", "npc_role": "ein eingeladener Freund in der WhatsApp-Gruppe", "goal": "Freunde / Beziehungen", "text": "Du hast bald Geburtstag und erstellst eine Gruppe in WhatsApp. Erzähl den eingeladenen Freunden, welche Party und wo du machst!", "level_min": "A2", "level_max": "B1"},
+    {"id": "freunde_11", "npc_role": "die Nachbarin die den falsch sortierten Müll gesehen hat", "goal": "Freunde / Beziehungen", "text": "Deine Nachbarin hat gesehen, dass du den Müll falsch sortiert hast. Du möchtest dich entschuldigen und höflich bitten, dass sie dir die Regeln erklärt.", "level_min": "A2", "level_max": "B1"},
+    {"id": "freunde_12", "npc_role": "der Freund der heiratet und die Einladung ausspricht", "goal": "Freunde / Beziehungen", "text": "Deine Freunde heiraten bald und laden dich zur Hochzeit ein. Du freust dich sehr und willst natürlich kommen. Was sagst du?", "level_min": "A1", "level_max": "A2"},
+    {"id": "freunde_13", "npc_role": "der Freund der über Tiere spricht und fragt ob du Tierfreund bist", "goal": "Freunde / Beziehungen", "text": "Deine Freunde haben einen Hund und zwei Katzen und sprechen ständig darüber. Sie fragen dich, ob du ein Tierfreund bist. Was sagst du?", "level_min": "A1", "level_max": "A2"},
+    {"id": "freunde_14", "npc_role": "die Kollegin die das Bild vom Welpen zeigt", "goal": "Freunde / Beziehungen", "text": "Deine Kollegin zeigt dir ein Bild von einem Welpen, den sie gestern bekommen hat. Wie ist deine Reaktion zu dem süßen Bild?", "level_min": "A1", "level_max": "A2"},
+    {"id": "freunde_15", "npc_role": "die ältere Dame mit dem Hund die fragt ob sie sich setzen darf", "goal": "Freunde / Beziehungen", "text": "Du liest ein Buch auf der Bank im Park. Plötzlich kommt eine ältere Dame mit dem Hund auf dich zu und fragt dich, ob sie sich neben dich hinsetzen kann. Was sagst du?", "level_min": "A1", "level_max": "A2"},
+    {"id": "freunde_16", "npc_role": "jemand aus der Gruppe in der Kneipe der einlädt", "goal": "Freunde / Beziehungen", "text": "Eine Gruppe in der Kneipe lädt dich an ihren Tisch ein, denn du bist allein. Was sagst du?", "level_min": "A1", "level_max": "A2"},
 
     # =========================
     # 3. Soziales (Ämter, Ärzte)
     # =========================
-    {"id": "soziales_1",  "goal": "Soziales (Ämter, Ärzte)", "text": "Du möchtest dich im Bürgeramt anmelden. Was sagst du am Schalter?", "level_min": "A1", "level_max": "A2"},
-    {"id": "soziales_2",  "goal": "Soziales (Ämter, Ärzte)", "text": "Du kommst in deiner Hausarztpraxis an und möchtest deinen Arzt sprechen. Was sagst du am Empfang?", "level_min": "A1", "level_max": "A2"},
-    {"id": "soziales_3",  "goal": "Soziales (Ämter, Ärzte)", "text": "Du möchtest dich krankschreiben lassen. Dein Arzt fragt dich, was dir fehlt. Erzähle ihm über dein Problem.", "level_min": "A2", "level_max": "B1"},
-    {"id": "soziales_4",  "goal": "Soziales (Ämter, Ärzte)", "text": "Deine Kollegin hatte einen Arbeitsunfall. Rufe die Feuerwehr an und erkläre das Problem.", "level_min": "B1", "level_max": "B2"},
-    {"id": "soziales_5",  "goal": "Soziales (Ämter, Ärzte)", "text": "Du möchtest ein Gewerbe anmelden. Was sagst du dem Sachbearbeiter?", "level_min": "B1", "level_max": "B2"},
-    {"id": "soziales_6",  "goal": "Soziales (Ämter, Ärzte)", "text": "Die Sachbearbeiterin im JobCenter bittet dich, über dich und deine Erfahrung zu erzählen und zu sagen, was genau du am Arbeitsmarkt suchst.", "level_min": "B1", "level_max": "B2"},
-    {"id": "soziales_7",  "goal": "Soziales (Ämter, Ärzte)", "text": "Der Abfluss in deinem Badezimmer ist kaputt. Dein Vermieter hat einen Techniker organisiert. Nun ist er da. Was sagst du?", "level_min": "A2", "level_max": "B1"},
-    {"id": "soziales_8",  "goal": "Soziales (Ämter, Ärzte)", "text": "Du hast einen Termin in der Ausländerbehörde und musst deinen Aufenthaltstitel verlängern. Was sagst du?", "level_min": "B1", "level_max": "B2"},
-    {"id": "soziales_9",  "goal": "Soziales (Ämter, Ärzte)", "text": "Du hast einen Termin bei einer Ernährungsberaterin. Warum bist du hier? Was sind deine Ziele?", "level_min": "A2", "level_max": "B1"},
-    {"id": "soziales_10", "goal": "Soziales (Ämter, Ärzte)", "text": "Du hast neue Möbel gekauft und musst die alten entsorgen. Ruf bei einer Sperrmüllabholungsfirma an und vereinbare einen Termin.", "level_min": "B1", "level_max": "B2"},
+    {"id": "soziales_1", "npc_role": "der Sachbearbeiter am Schalter im Bürgeramt",  "goal": "Soziales (Ämter, Ärzte)", "text": "Du möchtest dich im Bürgeramt anmelden. Was sagst du am Schalter?", "level_min": "A1", "level_max": "A2"},
+    {"id": "soziales_2", "npc_role": "die Empfangsdame in der Arztpraxis",  "goal": "Soziales (Ämter, Ärzte)", "text": "Du kommst in deiner Hausarztpraxis an und möchtest deinen Arzt sprechen. Was sagst du am Empfang?", "level_min": "A1", "level_max": "A2"},
+    {"id": "soziales_3", "npc_role": "der Hausarzt",  "goal": "Soziales (Ämter, Ärzte)", "text": "Du möchtest dich krankschreiben lassen. Dein Arzt fragt dich, was dir fehlt. Erzähle ihm über dein Problem.", "level_min": "A2", "level_max": "B1"},
+    {"id": "soziales_4", "npc_role": "der Feuerwehr-Disponent der den Notruf entgegennimmt",  "goal": "Soziales (Ämter, Ärzte)", "text": "Deine Kollegin hatte einen Arbeitsunfall. Rufe die Feuerwehr an und erkläre das Problem.", "level_min": "B1", "level_max": "B2"},
+    {"id": "soziales_5", "npc_role": "der Sachbearbeiter beim Gewerbeamt",  "goal": "Soziales (Ämter, Ärzte)", "text": "Du möchtest ein Gewerbe anmelden. Was sagst du dem Sachbearbeiter?", "level_min": "B1", "level_max": "B2"},
+    {"id": "soziales_6", "npc_role": "die Sachbearbeiterin im JobCenter",  "goal": "Soziales (Ämter, Ärzte)", "text": "Die Sachbearbeiterin im JobCenter bittet dich, über dich und deine Erfahrung zu erzählen und zu sagen, was genau du am Arbeitsmarkt suchst.", "level_min": "B1", "level_max": "B2"},
+    {"id": "soziales_7", "npc_role": "der Techniker der kommt um den Abfluss zu reparieren",  "goal": "Soziales (Ämter, Ärzte)", "text": "Der Abfluss in deinem Badezimmer ist kaputt. Dein Vermieter hat einen Techniker organisiert. Nun ist er da. Was sagst du?", "level_min": "A2", "level_max": "B1"},
+    {"id": "soziales_8", "npc_role": "der Sachbearbeiter in der Ausländerbehörde",  "goal": "Soziales (Ämter, Ärzte)", "text": "Du hast einen Termin in der Ausländerbehörde und musst deinen Aufenthaltstitel verlängern. Was sagst du?", "level_min": "B1", "level_max": "B2"},
+    {"id": "soziales_9", "npc_role": "die Ernährungsberaterin",  "goal": "Soziales (Ämter, Ärzte)", "text": "Du hast einen Termin bei einer Ernährungsberaterin. Warum bist du hier? Was sind deine Ziele?", "level_min": "A2", "level_max": "B1"},
+    {"id": "soziales_10", "npc_role": "der Mitarbeiter der Sperrmüllabholungsfirma am Telefon", "goal": "Soziales (Ämter, Ärzte)", "text": "Du hast neue Möbel gekauft und musst die alten entsorgen. Ruf bei einer Sperrmüllabholungsfirma an und vereinbare einen Termin.", "level_min": "B1", "level_max": "B2"},
 
     # =========================
     # 4. Unterhaltung (Club, Kino etc)
     # =========================
-    {"id": "unterhalt_1",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du bist im Kino und möchtest 2 Karten für den Film kaufen.", "level_min": "A1", "level_max": "A2"},
-    {"id": "unterhalt_2",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du kommst im Gym an und begrüßt deinen Trainer. Erzähl ihm, wie es dir geht und was du heute trainieren möchtest.", "level_min": "A1", "level_max": "A2"},
-    {"id": "unterhalt_3",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du bist von deinen Kolleginnen zu einem Game-Abend eingeladen. Du kennst das Spiel nicht und bittest einen Kollegen, dir die Regeln zu erklären.", "level_min": "A2", "level_max": "B1"},
-    {"id": "unterhalt_4",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du bist zum ersten Mal im Sprachclub und fragst die Moderatorin, dir alles zu erklären.", "level_min": "A2", "level_max": "B1"},
-    {"id": "unterhalt_5",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du bist im Aufzug mit deinen Nachbarn. Fange einen kleinen Smalltalk über das Wetter.", "level_min": "A1", "level_max": "A2"},
-    {"id": "unterhalt_6",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du triffst dich in einer Kneipe mit deinem Freund, der sich auch für dein Hobby interessiert. Sprich mit ihm darüber!", "level_min": "A2", "level_max": "B1"},
-    {"id": "unterhalt_7",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du bist in einem Schikurort und chillst im Apres Ski. Der Bartender spricht dich an und fragt, wie es dir hier so gefällt. Erzähle ihm über deinen ersten Tag und deine Eindrücke hier.", "level_min": "B1", "level_max": "B2"},
-    {"id": "unterhalt_8",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du hast an einem Marathon mitgemacht und deine Kollegen möchten erfahren, wie es war. Erzähl ihnen alles!", "level_min": "B1", "level_max": "B2"},
-    {"id": "unterhalt_9",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du bist im Date. Dein Gegenüber fragt dich nach deinen Hobbys. Erzähl alles!", "level_min": "A2", "level_max": "B1"},
-    {"id": "unterhalt_10", "goal": "Unterhaltung (Club, Kino etc)", "text": 'Du bist im Deutsch-Sprachclub. Das heutige Thema ist „gesundes Essen". Die Moderatorin fragt dich: „Was ist dein Lieblingsgericht, das gesund und lecker ist?". Beantworte ihre Frage!', "level_min": "A2", "level_max": "B1"},
+    {"id": "unterhalt_1", "npc_role": "die Kassiererin im Kino",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du bist im Kino und möchtest 2 Karten für den Film kaufen.", "level_min": "A1", "level_max": "A2"},
+    {"id": "unterhalt_2", "npc_role": "der Trainer im Gym",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du kommst im Gym an und begrüßt deinen Trainer. Erzähl ihm, wie es dir geht und was du heute trainieren möchtest.", "level_min": "A1", "level_max": "A2"},
+    {"id": "unterhalt_3", "npc_role": "der Kollege der die Spielregeln erklärt",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du bist von deinen Kolleginnen zu einem Game-Abend eingeladen. Du kennst das Spiel nicht und bittest einen Kollegen, dir die Regeln zu erklären.", "level_min": "A2", "level_max": "B1"},
+    {"id": "unterhalt_4", "npc_role": "die Moderatorin des Sprachclubs",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du bist zum ersten Mal im Sprachclub und fragst die Moderatorin, dir alles zu erklären.", "level_min": "A2", "level_max": "B1"},
+    {"id": "unterhalt_5", "npc_role": "der Nachbar im Aufzug",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du bist im Aufzug mit deinen Nachbarn. Fange einen kleinen Smalltalk über das Wetter.", "level_min": "A1", "level_max": "A2"},
+    {"id": "unterhalt_6", "npc_role": "der Freund in der Kneipe der dasselbe Hobby hat",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du triffst dich in einer Kneipe mit deinem Freund, der sich auch für dein Hobby interessiert. Sprich mit ihm darüber!", "level_min": "A2", "level_max": "B1"},
+    {"id": "unterhalt_7", "npc_role": "der Bartender im Apres Ski",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du bist in einem Schikurort und chillst im Apres Ski. Der Bartender spricht dich an und fragt, wie es dir hier so gefällt. Erzähle ihm über deinen ersten Tag und deine Eindrücke hier.", "level_min": "B1", "level_max": "B2"},
+    {"id": "unterhalt_8", "npc_role": "ein Kollege der nach dem Marathon fragt",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du hast an einem Marathon mitgemacht und deine Kollegen möchten erfahren, wie es war. Erzähl ihnen alles!", "level_min": "B1", "level_max": "B2"},
+    {"id": "unterhalt_9", "npc_role": "dein Date das nach Hobbys fragt",  "goal": "Unterhaltung (Club, Kino etc)", "text": "Du bist im Date. Dein Gegenüber fragt dich nach deinen Hobbys. Erzähl alles!", "level_min": "A2", "level_max": "B1"},
+    {"id": "unterhalt_10", "npc_role": "die Moderatorin des Sprachclubs", "goal": "Unterhaltung (Club, Kino etc)", "text": 'Du bist im Deutsch-Sprachclub. Das heutige Thema ist „gesundes Essen". Die Moderatorin fragt dich: „Was ist dein Lieblingsgericht, das gesund und lecker ist?". Beantworte ihre Frage!', "level_min": "A2", "level_max": "B1"},
 
     # =========================
     # 5. Einkauf & Restaurants
     # =========================
-    {"id": "einkauf_1",  "goal": "Einkauf & Restaurants", "text": "Du bist im Kaufhaus und suchst nach einem Bankautomaten und nach der Toilette.", "level_min": "A1", "level_max": "A2"},
-    {"id": "einkauf_2",  "goal": "Einkauf & Restaurants", "text": "Du bist in deinem Stammrestaurant angekommen und siehst deinen Lieblingskellner. Wie begrüßt du ihn?", "level_min": "A1", "level_max": "A2"},
-    {"id": "einkauf_3",  "goal": "Einkauf & Restaurants", "text": "Du gehst in einen Biergarten, um einen Tisch für deine Geburtstagsfeier zu buchen.", "level_min": "A2", "level_max": "B1"},
-    {"id": "einkauf_4",  "goal": "Einkauf & Restaurants", "text": "Du bist im Restaurant. Der Kellner fragt dich, was du bestellen möchtest.", "level_min": "A1", "level_max": "A2"},
-    {"id": "einkauf_5",  "goal": "Einkauf & Restaurants", "text": "Dir wurde etwas in die Rechnung gestellt, was du nicht bestellt hast. Rufe den Kellner und kläre es.", "level_min": "B1", "level_max": "B2"},
-    {"id": "einkauf_6",  "goal": "Einkauf & Restaurants", "text": "Du fährst ins Bauhaus, weil du etwas zuhause reparieren musst. Was ist das? Erkläre es dem Mitarbeiter am Infostand.", "level_min": "A2", "level_max": "B1"},
-    {"id": "einkauf_7",  "goal": "Einkauf & Restaurants", "text": "Du gehst in einen Weinboutique und suchst nach einem Geschenk für deine beste Freundin / deinen besten Freund. Wie bittest du die Mitarbeiterin, dir bei der Wahl zu helfen?", "level_min": "A2", "level_max": "B1"},
-    {"id": "einkauf_8",  "goal": "Einkauf & Restaurants", "text": "Du kommst an der Kasse mit deinem Einkauf an. Die Kassiererin begrüßt dich. Was sagst du?", "level_min": "A1", "level_max": "A2"},
-    {"id": "einkauf_9",  "goal": "Einkauf & Restaurants", "text": "Du möchtest eine defekte Ware im Supermarkt zurückgeben. Sprich den Filialmitarbeiter an und erkläre dein Problem.", "level_min": "B1", "level_max": "B2"},
-    {"id": "einkauf_10", "goal": "Einkauf & Restaurants", "text": "Du möchtest einen Tisch im Restaurant für dich und deine Freunde reservieren. Rufe da an und mach es.", "level_min": "A2", "level_max": "B1"},
-    {"id": "einkauf_11", "goal": "Einkauf & Restaurants", "text": "Du hast mehrere Sachen auf Ebay Kleinanzeigen verkauft. Bald kommt ein Käufer bei dir vorbei. Begrüße ihn und finde heraus, was genau er kaufen möchte und beantworte seine Fragen, wenn er welche hat.", "level_min": "A2", "level_max": "B1"},
+    {"id": "einkauf_1", "npc_role": "ein Mitarbeiter im Kaufhaus",  "goal": "Einkauf & Restaurants", "text": "Du bist im Kaufhaus und suchst nach einem Bankautomaten und nach der Toilette.", "level_min": "A1", "level_max": "A2"},
+    {"id": "einkauf_2", "npc_role": "der Lieblingskellner im Stammrestaurant",  "goal": "Einkauf & Restaurants", "text": "Du bist in deinem Stammrestaurant angekommen und siehst deinen Lieblingskellner. Wie begrüßt du ihn?", "level_min": "A1", "level_max": "A2"},
+    {"id": "einkauf_3", "npc_role": "der Mitarbeiter im Biergarten",  "goal": "Einkauf & Restaurants", "text": "Du gehst in einen Biergarten, um einen Tisch für deine Geburtstagsfeier zu buchen.", "level_min": "A2", "level_max": "B1"},
+    {"id": "einkauf_4", "npc_role": "der Kellner im Restaurant",  "goal": "Einkauf & Restaurants", "text": "Du bist im Restaurant. Der Kellner fragt dich, was du bestellen möchtest.", "level_min": "A1", "level_max": "A2"},
+    {"id": "einkauf_5", "npc_role": "der Kellner dem die falsche Rechnung gemeldet wird",  "goal": "Einkauf & Restaurants", "text": "Dir wurde etwas in die Rechnung gestellt, was du nicht bestellt hast. Rufe den Kellner und kläre es.", "level_min": "B1", "level_max": "B2"},
+    {"id": "einkauf_6", "npc_role": "der Mitarbeiter am Infostand im Bauhaus",  "goal": "Einkauf & Restaurants", "text": "Du fährst ins Bauhaus, weil du etwas zuhause reparieren musst. Was ist das? Erkläre es dem Mitarbeiter am Infostand.", "level_min": "A2", "level_max": "B1"},
+    {"id": "einkauf_7", "npc_role": "die Mitarbeiterin in der Weinboutique",  "goal": "Einkauf & Restaurants", "text": "Du gehst in einen Weinboutique und suchst nach einem Geschenk für deine beste Freundin / deinen besten Freund. Wie bittest du die Mitarbeiterin, dir bei der Wahl zu helfen?", "level_min": "A2", "level_max": "B1"},
+    {"id": "einkauf_8", "npc_role": "die Kassiererin im Supermarkt",  "goal": "Einkauf & Restaurants", "text": "Du kommst an der Kasse mit deinem Einkauf an. Die Kassiererin begrüßt dich. Was sagst du?", "level_min": "A1", "level_max": "A2"},
+    {"id": "einkauf_9", "npc_role": "der Filialmitarbeiter im Supermarkt",  "goal": "Einkauf & Restaurants", "text": "Du möchtest eine defekte Ware im Supermarkt zurückgeben. Sprich den Filialmitarbeiter an und erkläre dein Problem.", "level_min": "B1", "level_max": "B2"},
+    {"id": "einkauf_10", "npc_role": "der Mitarbeiter im Restaurant der den Anruf entgegennimmt", "goal": "Einkauf & Restaurants", "text": "Du möchtest einen Tisch im Restaurant für dich und deine Freunde reservieren. Rufe da an und mach es.", "level_min": "A2", "level_max": "B1"},
+    {"id": "einkauf_11", "npc_role": "der Käufer der zum Abholen kommt", "goal": "Einkauf & Restaurants", "text": "Du hast mehrere Sachen auf Ebay Kleinanzeigen verkauft. Bald kommt ein Käufer bei dir vorbei. Begrüße ihn und finde heraus, was genau er kaufen möchte und beantworte seine Fragen, wenn er welche hat.", "level_min": "A2", "level_max": "B1"},
 
     # =========================
     # 6. Tourismus & Reisen
     # =========================
-    {"id": "reisen_1",  "goal": "Tourismus & Reisen", "text": "Du gehst ins Reisebüro und möchtest dich nach aktuellen Angeboten erkundigen.", "level_min": "A1", "level_max": "A2"},
-    {"id": "reisen_2",  "goal": "Tourismus & Reisen", "text": "Du rufst deinen Airbnb Host an, weil der Schlüssel abgebrochen und in der Tür geblieben ist und du nicht in die Wohnung reinkommen kannst.", "level_min": "B1", "level_max": "B2"},
-    {"id": "reisen_3",  "goal": "Tourismus & Reisen", "text": "Du triffst deine Kollegen nach dem Urlaub. Erzähle ihnen über deine Reise.", "level_min": "A2", "level_max": "B1"},
-    {"id": "reisen_4",  "goal": "Tourismus & Reisen", "text": "Du möchtest einen Kurztrip mit deinem Kumpel machen. Ruf ihn an und frage, ob er mitkommt.", "level_min": "A2", "level_max": "B1"},
-    {"id": "reisen_5",  "goal": "Tourismus & Reisen", "text": "Du möchtest mit deiner Schwester / deinem Bruder übers Wochenende verreisen. Plane den Ausflug!", "level_min": "A2", "level_max": "B1"},
-    {"id": "reisen_6",  "goal": "Tourismus & Reisen", "text": "Du bist in einem Date. Dein Gegenüber fragt nach deiner besten Reise. Erzähl alles!", "level_min": "A2", "level_max": "B1"},
-    {"id": "reisen_7",  "goal": "Tourismus & Reisen", "text": "Deine Freundin erzählt über ihre verrückteste Reise und fragt dich, ob du auch eine verrückte Reise hattest. Erzähl ihr alles.", "level_min": "B1", "level_max": "B2"},
-    {"id": "reisen_8",  "goal": "Tourismus & Reisen", "text": "Dein Kollege erzählt über sein Lieblingsurlaubsland und fragt dich nach deinem. Erzähl ihm alles!", "level_min": "A2", "level_max": "B1"},
-    {"id": "reisen_9",  "goal": "Tourismus & Reisen", "text": 'Du bist im Büro. Ein deutscher Kollege erzählt über seine Reise nach „Malle". Was ist das? Frag ihn aus.', "level_min": "A2", "level_max": "B1"},
-    {"id": "reisen_10", "goal": "Tourismus & Reisen", "text": "Du kommst im Hotel an. Du hattest eine Reservierung. Fang das Gespräch am Empfang an.", "level_min": "A1", "level_max": "A2"},
-    {"id": "reisen_11", "goal": "Tourismus & Reisen", "text": "Du bist zum Brunchen bei deinen Freunden eingeladen. Das Essen ist lecker und du möchtest wissen, wer und wie es gekocht hat. Stelle die Fragen!", "level_min": "A2", "level_max": "B1"},
+    {"id": "reisen_1", "npc_role": "der Reiseberater im Reisebüro",  "goal": "Tourismus & Reisen", "text": "Du gehst ins Reisebüro und möchtest dich nach aktuellen Angeboten erkundigen.", "level_min": "A1", "level_max": "A2"},
+    {"id": "reisen_2", "npc_role": "der Airbnb Host der angerufen wird",  "goal": "Tourismus & Reisen", "text": "Du rufst deinen Airbnb Host an, weil der Schlüssel abgebrochen und in der Tür geblieben ist und du nicht in die Wohnung reinkommen kannst.", "level_min": "B1", "level_max": "B2"},
+    {"id": "reisen_3", "npc_role": "ein Kollege der nach dem Urlaub fragt",  "goal": "Tourismus & Reisen", "text": "Du triffst deine Kollegen nach dem Urlaub. Erzähle ihnen über deine Reise.", "level_min": "A2", "level_max": "B1"},
+    {"id": "reisen_4", "npc_role": "der Kumpel der angerufen wird",  "goal": "Tourismus & Reisen", "text": "Du möchtest einen Kurztrip mit deinem Kumpel machen. Ruf ihn an und frage, ob er mitkommt.", "level_min": "A2", "level_max": "B1"},
+    {"id": "reisen_5", "npc_role": "die Schwester / der Bruder mit dem der Ausflug geplant wird",  "goal": "Tourismus & Reisen", "text": "Du möchtest mit deiner Schwester / deinem Bruder übers Wochenende verreisen. Plane den Ausflug!", "level_min": "A2", "level_max": "B1"},
+    {"id": "reisen_6", "npc_role": "dein Date das nach der besten Reise fragt",  "goal": "Tourismus & Reisen", "text": "Du bist in einem Date. Dein Gegenüber fragt nach deiner besten Reise. Erzähl alles!", "level_min": "A2", "level_max": "B1"},
+    {"id": "reisen_7", "npc_role": "die Freundin die über ihre verrückteste Reise erzählt hat",  "goal": "Tourismus & Reisen", "text": "Deine Freundin erzählt über ihre verrückteste Reise und fragt dich, ob du auch eine verrückte Reise hattest. Erzähl ihr alles.", "level_min": "B1", "level_max": "B2"},
+    {"id": "reisen_8", "npc_role": "der Kollege der über sein Lieblingsurlaubsland erzählt",  "goal": "Tourismus & Reisen", "text": "Dein Kollege erzählt über sein Lieblingsurlaubsland und fragt dich nach deinem. Erzähl ihm alles!", "level_min": "A2", "level_max": "B1"},
+    {"id": "reisen_9", "npc_role": "der deutsche Kollege der über Malle erzählt",  "goal": "Tourismus & Reisen", "text": 'Du bist im Büro. Ein deutscher Kollege erzählt über seine Reise nach „Malle". Was ist das? Frag ihn aus.', "level_min": "A2", "level_max": "B1"},
+    {"id": "reisen_10", "npc_role": "der Empfangsmitarbeiter im Hotel", "goal": "Tourismus & Reisen", "text": "Du kommst im Hotel an. Du hattest eine Reservierung. Fang das Gespräch am Empfang an.", "level_min": "A1", "level_max": "A2"},
+    {"id": "reisen_11", "npc_role": "ein Freund beim Brunch der nach dem Rezept fragt", "goal": "Tourismus & Reisen", "text": "Du bist zum Brunchen bei deinen Freunden eingeladen. Das Essen ist lecker und du möchtest wissen, wer und wie es gekocht hat. Stelle die Fragen!", "level_min": "A2", "level_max": "B1"},
 
     # =========================
     # 7. Sport & Hobbys
     # =========================
-    {"id": "sport_1",  "goal": "Sport & Hobbys", "text": "Du bist im Gym und siehst einen sehr sportlichen Typen, der ganz freundlich ist. Du möchtest mehr über seine Trainingsweise erfahren. Frag ihn aus!", "level_min": "A2", "level_max": "B1"},
-    {"id": "sport_2",  "goal": "Sport & Hobbys", "text": "Du möchtest eine Mitgliedschaft im Gym kaufen. Die Empfangsmitarbeiterin begrüßt dich und fragt, was du möchtest.", "level_min": "A1", "level_max": "A2"},
-    {"id": "sport_3",  "goal": "Sport & Hobbys", "text": "Du bist zum ersten Mal in der Mittagspause mit deinen Kolleginnen. Eine fragt dich, wofür du dich interessierst. Erzähl ihnen alles!", "level_min": "A2", "level_max": "B1"},
-    {"id": "sport_4",  "goal": "Sport & Hobbys", "text": "Du bist auf einer Hofparty. Ein netter Nachbar erzählt über sein Hobby und fragt dich über deine Hobbys. Erzähl ihm etwas darüber!", "level_min": "A2", "level_max": "B1"},
-    {"id": "sport_5",  "goal": "Sport & Hobbys", "text": "Im Biergarten hast du eine tolle Person kennengelernt. Nun fragt sie dich, was dich begeistert und wofür du dich interessierst. Erzähl doch!", "level_min": "A2", "level_max": "B1"},
-    {"id": "sport_6",  "goal": "Sport & Hobbys", "text": "Deine Freundin hat dir gerade über ein interessantes Hobby ihres Lebenspartners erzählt. Dir fällt ein, dass ein Bekannter / eine Bekannte von dir auch was Außergewöhnliches macht. Was ist das für ein Hobby?", "level_min": "B1", "level_max": "B2"},
-    {"id": "sport_7",  "goal": "Sport & Hobbys", "text": "Dein Kollege erzählt etwas über einen sehr interessanten Podcast. Das erinnert dich an deinen Lieblingspodcast / YouTube Channel. Teile darüber mit!", "level_min": "B1", "level_max": "B2"},
-    {"id": "sport_8",  "goal": "Sport & Hobbys", "text": "Du hast jemanden kennengelernt und diese Person geht gerne bouldern. Du verstehst das nicht. Erfahre, was sie damit meint!", "level_min": "A2", "level_max": "B1"},
-    {"id": "sport_9",  "goal": "Sport & Hobbys", "text": 'Dein Kumpel war gestern in München Oktoberfest feiern. Er sagt immer wieder „Wiesn" und „Maß"… Du verstehst das nicht. Frag ihn, was es bedeutet.', "level_min": "A2", "level_max": "B1"},
-    {"id": "sport_10", "goal": "Sport & Hobbys", "text": "Du bist auf einer Firmenparty. Du willst mehr über deine Kollegen erfahren. Gerade stehst du auf dem Balkon mit zwei von ihnen. Frage sie, wofür sie sich interessieren und was sie begeistert.", "level_min": "A2", "level_max": "B1"},
-    {"id": "sport_11", "goal": "Sport & Hobbys", "text": "Du hast ein Uber bestellt und quatschst mit dem Fahrer. Plötzlich erfährst du, er teilt dein Hobby. Was sagst du?", "level_min": "A2", "level_max": "B1"},
+    {"id": "sport_1", "npc_role": "der sportliche freundliche Typ im Gym",  "goal": "Sport & Hobbys", "text": "Du bist im Gym und siehst einen sehr sportlichen Typen, der ganz freundlich ist. Du möchtest mehr über seine Trainingsweise erfahren. Frag ihn aus!", "level_min": "A2", "level_max": "B1"},
+    {"id": "sport_2", "npc_role": "die Empfangsmitarbeiterin im Gym",  "goal": "Sport & Hobbys", "text": "Du möchtest eine Mitgliedschaft im Gym kaufen. Die Empfangsmitarbeiterin begrüßt dich und fragt, was du möchtest.", "level_min": "A1", "level_max": "A2"},
+    {"id": "sport_3", "npc_role": "eine Kollegin in der Mittagspause die nach Interessen fragt",  "goal": "Sport & Hobbys", "text": "Du bist zum ersten Mal in der Mittagspause mit deinen Kolleginnen. Eine fragt dich, wofür du dich interessierst. Erzähl ihnen alles!", "level_min": "A2", "level_max": "B1"},
+    {"id": "sport_4", "npc_role": "der nette Nachbar auf der Hofparty",  "goal": "Sport & Hobbys", "text": "Du bist auf einer Hofparty. Ein netter Nachbar erzählt über sein Hobby und fragt dich über deine Hobbys. Erzähl ihm etwas darüber!", "level_min": "A2", "level_max": "B1"},
+    {"id": "sport_5", "npc_role": "die tolle Person im Biergarten",  "goal": "Sport & Hobbys", "text": "Im Biergarten hast du eine tolle Person kennengelernt. Nun fragt sie dich, was dich begeistert und wofür du dich interessierst. Erzähl doch!", "level_min": "A2", "level_max": "B1"},
+    {"id": "sport_6", "npc_role": "die Freundin die über das Hobby erzählt hat",  "goal": "Sport & Hobbys", "text": "Deine Freundin hat dir gerade über ein interessantes Hobby ihres Lebenspartners erzählt. Dir fällt ein, dass ein Bekannter / eine Bekannte von dir auch was Außergewöhnliches macht. Was ist das für ein Hobby?", "level_min": "B1", "level_max": "B2"},
+    {"id": "sport_7", "npc_role": "der Kollege der über den Podcast erzählt",  "goal": "Sport & Hobbys", "text": "Dein Kollege erzählt etwas über einen sehr interessanten Podcast. Das erinnert dich an deinen Lieblingspodcast / YouTube Channel. Teile darüber mit!", "level_min": "B1", "level_max": "B2"},
+    {"id": "sport_8", "npc_role": "die Person die gern bouldern geht",  "goal": "Sport & Hobbys", "text": "Du hast jemanden kennengelernt und diese Person geht gerne bouldern. Du verstehst das nicht. Erfahre, was sie damit meint!", "level_min": "A2", "level_max": "B1"},
+    {"id": "sport_9", "npc_role": "der Kumpel der auf dem Oktoberfest war",  "goal": "Sport & Hobbys", "text": 'Dein Kumpel war gestern in München Oktoberfest feiern. Er sagt immer wieder „Wiesn" und „Maß"… Du verstehst das nicht. Frag ihn, was es bedeutet.', "level_min": "A2", "level_max": "B1"},
+    {"id": "sport_10", "npc_role": "ein Kollege auf dem Balkon der Firmenparty", "goal": "Sport & Hobbys", "text": "Du bist auf einer Firmenparty. Du willst mehr über deine Kollegen erfahren. Gerade stehst du auf dem Balkon mit zwei von ihnen. Frage sie, wofür sie sich interessieren und was sie begeistert.", "level_min": "A2", "level_max": "B1"},
+    {"id": "sport_11", "npc_role": "der Uber-Fahrer", "goal": "Sport & Hobbys", "text": "Du hast ein Uber bestellt und quatschst mit dem Fahrer. Plötzlich erfährst du, er teilt dein Hobby. Was sagst du?", "level_min": "A2", "level_max": "B1"},
 
     # =========================
     # 8. Am Telefon
     # =========================
-    {"id": "telefon_1",  "goal": "Am Telefon", "text": 'Du rufst im Restaurant „Amelia" an und möchtest einen Tisch buchen.', "level_min": "A2", "level_max": "B1"},
-    {"id": "telefon_2",  "goal": "Am Telefon", "text": 'Du schaust im Restaurant „Rosengarten" vorbei und möchtest einen Tisch buchen.', "level_min": "A1", "level_max": "A2"},
-    {"id": "telefon_3",  "goal": "Am Telefon", "text": "Du rufst im Kunden-Support der Deutschen Bahn an und möchtest wissen, warum sie von deinem Konto 50 Euro abgebucht haben.", "level_min": "B1", "level_max": "B2"},
-    {"id": "telefon_4",  "goal": "Am Telefon", "text": "Du rufst bei deinem Internetprovider an und möchtest einen Internetausfall mitteilen und wissen, was du tun sollst.", "level_min": "B1", "level_max": "B2"},
-    {"id": "telefon_5",  "goal": "Am Telefon", "text": "Du rufst in der Praxis deines Hausarztes an und möchtest einen Termin vereinbaren.", "level_min": "A2", "level_max": "B1"},
-    {"id": "telefon_6",  "goal": "Am Telefon", "text": "Du hast eine Zahnarztpraxis gefunden und rufst da an, um zu fragen, ob sie dich als Patienten annehmen können.", "level_min": "A2", "level_max": "B1"},
-    {"id": "telefon_7",  "goal": "Am Telefon", "text": "Du hast deine Bankkarte verloren. Du rufst bei deiner Bank an und möchtest die Karte sperren.", "level_min": "B1", "level_max": "B2"},
-    {"id": "telefon_8",  "goal": "Am Telefon", "text": "Deine Freundin hat Geburtstag. Ruf sie an und gratuliere ihr.", "level_min": "A1", "level_max": "A2"},
-    {"id": "telefon_9",  "goal": "Am Telefon", "text": "Du fühlst dich schlecht. Ruf bei deinem Arbeitgeber an und lass dich krank schreiben.", "level_min": "A2", "level_max": "B1"},
-    {"id": "telefon_10", "goal": "Am Telefon", "text": "Du rufst deinen Kunden an und möchtest euren Termin morgen verschieben. Ruf ihn an. Entschuldige dich, verschiebe den Termin und erkläre, warum.", "level_min": "B1", "level_max": "B2"},
-    {"id": "telefon_11", "goal": "Am Telefon", "text": "Du hast was im Internet bestellt und die Ware war kaputt. Es gibt keinen Internetsupport. Rufe bei dem Verkäufer an.", "level_min": "B1", "level_max": "B2"},
-    {"id": "telefon_12", "goal": "Am Telefon", "text": "Du kannst dich in deinem Kundenkonto in deiner Mobilfunkanbieter-App nicht anmelden. Du hast schon alles versucht. Jetzt rufe den Support an.", "level_min": "B1", "level_max": "B2"},
+    {"id": "telefon_1", "npc_role": "der Mitarbeiter im Restaurant Amelia der das Telefon abnimmt",  "goal": "Am Telefon", "text": 'Du rufst im Restaurant „Amelia" an und möchtest einen Tisch buchen.', "level_min": "A2", "level_max": "B1"},
+    {"id": "telefon_2", "npc_role": "der Mitarbeiter im Restaurant Rosengarten",  "goal": "Am Telefon", "text": 'Du schaust im Restaurant „Rosengarten" vorbei und möchtest einen Tisch buchen.', "level_min": "A1", "level_max": "A2"},
+    {"id": "telefon_3", "npc_role": "der Kundenservice-Mitarbeiter der Deutschen Bahn",  "goal": "Am Telefon", "text": "Du rufst im Kunden-Support der Deutschen Bahn an und möchtest wissen, warum sie von deinem Konto 50 Euro abgebucht haben.", "level_min": "B1", "level_max": "B2"},
+    {"id": "telefon_4", "npc_role": "der Support-Mitarbeiter des Internetproviders",  "goal": "Am Telefon", "text": "Du rufst bei deinem Internetprovider an und möchtest einen Internetausfall mitteilen und wissen, was du tun sollst.", "level_min": "B1", "level_max": "B2"},
+    {"id": "telefon_5", "npc_role": "die Sprechstundenhilfe in der Arztpraxis",  "goal": "Am Telefon", "text": "Du rufst in der Praxis deines Hausarztes an und möchtest einen Termin vereinbaren.", "level_min": "A2", "level_max": "B1"},
+    {"id": "telefon_6", "npc_role": "die Mitarbeiterin der Zahnarztpraxis",  "goal": "Am Telefon", "text": "Du hast eine Zahnarztpraxis gefunden und rufst da an, um zu fragen, ob sie dich als Patienten annehmen können.", "level_min": "A2", "level_max": "B1"},
+    {"id": "telefon_7", "npc_role": "der Bankmitarbeiter im Telefon-Support",  "goal": "Am Telefon", "text": "Du hast deine Bankkarte verloren. Du rufst bei deiner Bank an und möchtest die Karte sperren.", "level_min": "B1", "level_max": "B2"},
+    {"id": "telefon_8", "npc_role": "die Freundin die Geburtstag hat",  "goal": "Am Telefon", "text": "Deine Freundin hat Geburtstag. Ruf sie an und gratuliere ihr.", "level_min": "A1", "level_max": "A2"},
+    {"id": "telefon_9", "npc_role": "der Arbeitgeber / die Sekretärin der den Anruf entgegennimmt",  "goal": "Am Telefon", "text": "Du fühlst dich schlecht. Ruf bei deinem Arbeitgeber an und lass dich krank schreiben.", "level_min": "A2", "level_max": "B1"},
+    {"id": "telefon_10", "npc_role": "der Kunde der angerufen wird um den Termin zu verschieben", "goal": "Am Telefon", "text": "Du rufst deinen Kunden an und möchtest euren Termin morgen verschieben. Ruf ihn an. Entschuldige dich, verschiebe den Termin und erkläre, warum.", "level_min": "B1", "level_max": "B2"},
+    {"id": "telefon_11", "npc_role": "der Verkäufer der angerufen wird wegen der kaputten Ware", "goal": "Am Telefon", "text": "Du hast was im Internet bestellt und die Ware war kaputt. Es gibt keinen Internetsupport. Rufe bei dem Verkäufer an.", "level_min": "B1", "level_max": "B2"},
+    {"id": "telefon_12", "npc_role": "der Support-Mitarbeiter des Mobilfunkanbieters", "goal": "Am Telefon", "text": "Du kannst dich in deinem Kundenkonto in deiner Mobilfunkanbieter-App nicht anmelden. Du hast schon alles versucht. Jetzt rufe den Support an.", "level_min": "B1", "level_max": "B2"},
 
     # =========================
     # 9. Job
     # =========================
-    {"id": "job_1",  "goal": "Job", "text": "Heute ist dein erster Tag im neuen Job. Du lernst dein Team kennen. Erzähl etwas über dich.", "level_min": "A2", "level_max": "B1"},
-    {"id": "job_2",  "goal": "Job", "text": "Du bist im Vorstellungsgespräch. Erzähl etwas über dich.", "level_min": "A2", "level_max": "B2"},
-    {"id": "job_3",  "goal": "Job", "text": 'Du bist im Vorstellungsgespräch. Alles läuft super. Nun fragt die Personalmanagerin „Warum sollen wir uns für Sie entscheiden?". Was sagst du?', "level_min": "B1", "level_max": "C1"},
-    {"id": "job_4",  "goal": "Job", "text": "Du bist im Onboarding. Die HR-Managerin gibt dir Zeit, um dir deine Fragen an sie zu überlegen. Stelle nun deine Fragen an sie.", "level_min": "A2", "level_max": "B1"},
-    {"id": "job_5",  "goal": "Job", "text": "Dein erster Tag im Job. Deine Kollegen sind super nett und nehmen dich in der Mittagspause in die Kantine mit. Nun fragen sie dich, über dich und deinen Weg zu erzählen. Was sagst du?", "level_min": "A2", "level_max": "B1"},
-    {"id": "job_6",  "goal": "Job", "text": "Du triffst dich mit einer Kollegin in der Pause. Sie ist nett und fragt, wie es dir geht. Was sagst du?", "level_min": "A1", "level_max": "A2"},
-    {"id": "job_7",  "goal": "Job", "text": "Dein Kollege erzählt über seinen Urlaub. Du willst was dazu sagen, aber du hast auch ein paar Fragen an ihn, weil du seine Aufgaben während seines Urlaubs übernommen hast. Wie gehst du das an?", "level_min": "B1", "level_max": "B2"},
-    {"id": "job_8",  "goal": "Job", "text": "Du bist im Präsenz-Meeting mit deinen Kollegen. Du hast ein wichtiges Update zu deinem Projekt und nun bist du dran. Teile deinen Kolleginnen darüber mit!", "level_min": "B1", "level_max": "B2"},
-    {"id": "job_9",  "goal": "Job", "text": "Du hast ein Problem mit deiner Software. Du wendest dich an deinen Abteilungsleiter und erklärst ihm, worum es geht.", "level_min": "B1", "level_max": "B2"},
-    {"id": "job_10", "goal": "Job", "text": 'Du bist heute das erste Mal an deinem neuen Arbeitsplatz. Du siehst viele Goodies und eine Willkommenskarte auf deinem Schreibtisch. In der Pause fragt dich eine Kollegin: „Na, wie läuft dein erster Tag so?". Erzähle ihr alles!', "level_min": "A2", "level_max": "B1"},
-    {"id": "job_11", "goal": "Job", "text": "Im Kick-Off Meeting fragt dich dein Manager nach deinem Vorschlag, wie das bevorstehende Event anzugehen ist. Was sagst du?", "level_min": "B2", "level_max": "C1"},
-    {"id": "job_12", "goal": "Job", "text": "Du kannst dich in deinem Firmenlaptop-Profil nicht anmelden. Wie erklärst du das Problem deinem Kollegen aus der IT-Abteilung?", "level_min": "B1", "level_max": "B2"},
-    {"id": "job_13", "goal": "Job", "text": "Du bist krank. Dein Kollege ruft dich an und fragt, wie es dir geht. Quatsch mit ihm.", "level_min": "A2", "level_max": "B1"},
-    {"id": "job_14", "goal": "Job", "text": "Du hast eine Bitte an deine Kollegin. Was für eine Bitte ist das und wie sagst du es auf Deutsch?", "level_min": "A2", "level_max": "B1"},
-    {"id": "job_15", "goal": "Job", "text": "Du kommst mit einem Problem nicht klar. In dem Raum sind ein paar Kolleginnen. Wie führst du es so ein, dass dir geholfen wird?", "level_min": "B1", "level_max": "B2"},
-    {"id": "job_16", "goal": "Job", "text": "Ein Kollege lästert über eine andere Kollegin ab, die du gern hast. Was sagst du zu ihm?", "level_min": "B2", "level_max": "C1"},
-    {"id": "job_17", "goal": "Job", "text": "Ein Kollege braucht deine Hilfe. Das Problem ist dir wohlbekannt. Was antwortest du?", "level_min": "A2", "level_max": "B1"},
-    {"id": "job_18", "goal": "Job", "text": "Eine Kollegin ist krank und bittet dich, für sie morgen einzuspringen. Was sagst du?", "level_min": "A2", "level_max": "B1"},
-    {"id": "job_19", "goal": "Job", "text": 'Du bist im 1-on-1 Meeting mit deiner Abteilungsleiterin. Sie fragt dich: „Na, wie waren die ersten 2 Monate bei uns?" Was sagst du?', "level_min": "B1", "level_max": "B2"},
-    {"id": "job_20", "goal": "Job", "text": "Im Entscheidungsmeeting wird ein wichtiges Problem besprochen. Du hast eine Idee, wie es gelöst werden kann. Teile deine Lösung mit dem Team!", "level_min": "B2", "level_max": "C1"},
+    {"id": "job_1", "npc_role": "ein Teamkollege am ersten Arbeitstag",  "goal": "Job", "text": "Heute ist dein erster Tag im neuen Job. Du lernst dein Team kennen. Erzähl etwas über dich.", "level_min": "A2", "level_max": "B1"},
+    {"id": "job_2", "npc_role": "die Personalmanagerin im Vorstellungsgespräch",  "goal": "Job", "text": "Du bist im Vorstellungsgespräch. Erzähl etwas über dich.", "level_min": "A2", "level_max": "B2"},
+    {"id": "job_3", "npc_role": "die Personalmanagerin im Vorstellungsgespräch",  "goal": "Job", "text": 'Du bist im Vorstellungsgespräch. Alles läuft super. Nun fragt die Personalmanagerin „Warum sollen wir uns für Sie entscheiden?". Was sagst du?', "level_min": "B1", "level_max": "C1"},
+    {"id": "job_4", "npc_role": "die HR-Managerin im Onboarding",  "goal": "Job", "text": "Du bist im Onboarding. Die HR-Managerin gibt dir Zeit, um dir deine Fragen an sie zu überlegen. Stelle nun deine Fragen an sie.", "level_min": "A2", "level_max": "B1"},
+    {"id": "job_5", "npc_role": "ein Kollege in der Kantine",  "goal": "Job", "text": "Dein erster Tag im Job. Deine Kollegen sind super nett und nehmen dich in der Mittagspause in die Kantine mit. Nun fragen sie dich, über dich und deinen Weg zu erzählen. Was sagst du?", "level_min": "A2", "level_max": "B1"},
+    {"id": "job_6", "npc_role": "die Kollegin in der Pause",  "goal": "Job", "text": "Du triffst dich mit einer Kollegin in der Pause. Sie ist nett und fragt, wie es dir geht. Was sagst du?", "level_min": "A1", "level_max": "A2"},
+    {"id": "job_7", "npc_role": "der Kollege der über seinen Urlaub erzählt",  "goal": "Job", "text": "Dein Kollege erzählt über seinen Urlaub. Du willst was dazu sagen, aber du hast auch ein paar Fragen an ihn, weil du seine Aufgaben während seines Urlaubs übernommen hast. Wie gehst du das an?", "level_min": "B1", "level_max": "B2"},
+    {"id": "job_8", "npc_role": "ein Kollege im Meeting der zuhört",  "goal": "Job", "text": "Du bist im Präsenz-Meeting mit deinen Kollegen. Du hast ein wichtiges Update zu deinem Projekt und nun bist du dran. Teile deinen Kolleginnen darüber mit!", "level_min": "B1", "level_max": "B2"},
+    {"id": "job_9", "npc_role": "der Abteilungsleiter",  "goal": "Job", "text": "Du hast ein Problem mit deiner Software. Du wendest dich an deinen Abteilungsleiter und erklärst ihm, worum es geht.", "level_min": "B1", "level_max": "B2"},
+    {"id": "job_10", "npc_role": "die Kollegin die nach dem ersten Tag fragt", "goal": "Job", "text": 'Du bist heute das erste Mal an deinem neuen Arbeitsplatz. Du siehst viele Goodies und eine Willkommenskarte auf deinem Schreibtisch. In der Pause fragt dich eine Kollegin: „Na, wie läuft dein erster Tag so?". Erzähle ihr alles!', "level_min": "A2", "level_max": "B1"},
+    {"id": "job_11", "npc_role": "der Manager im Kick-Off Meeting", "goal": "Job", "text": "Im Kick-Off Meeting fragt dich dein Manager nach deinem Vorschlag, wie das bevorstehende Event anzugehen ist. Was sagst du?", "level_min": "B2", "level_max": "C1"},
+    {"id": "job_12", "npc_role": "der IT-Kollege dem das Problem erklärt wird", "goal": "Job", "text": "Du kannst dich in deinem Firmenlaptop-Profil nicht anmelden. Wie erklärst du das Problem deinem Kollegen aus der IT-Abteilung?", "level_min": "B1", "level_max": "B2"},
+    {"id": "job_13", "npc_role": "der Kollege der anruft und fragt wie es geht", "goal": "Job", "text": "Du bist krank. Dein Kollege ruft dich an und fragt, wie es dir geht. Quatsch mit ihm.", "level_min": "A2", "level_max": "B1"},
+    {"id": "job_14", "npc_role": "die Kollegin die um etwas gebeten wird", "goal": "Job", "text": "Du hast eine Bitte an deine Kollegin. Was für eine Bitte ist das und wie sagst du es auf Deutsch?", "level_min": "A2", "level_max": "B1"},
+    {"id": "job_15", "npc_role": "eine Kollegin im Raum die helfen kann", "goal": "Job", "text": "Du kommst mit einem Problem nicht klar. In dem Raum sind ein paar Kolleginnen. Wie führst du es so ein, dass dir geholfen wird?", "level_min": "B1", "level_max": "B2"},
+    {"id": "job_16", "npc_role": "der Kollege der über die andere Kollegin lästert", "goal": "Job", "text": "Ein Kollege lästert über eine andere Kollegin ab, die du gern hast. Was sagst du zu ihm?", "level_min": "B2", "level_max": "C1"},
+    {"id": "job_17", "npc_role": "der Kollege der Hilfe braucht", "goal": "Job", "text": "Ein Kollege braucht deine Hilfe. Das Problem ist dir wohlbekannt. Was antwortest du?", "level_min": "A2", "level_max": "B1"},
+    {"id": "job_18", "npc_role": "die Kollegin die krank ist und bittet einzuspringen", "goal": "Job", "text": "Eine Kollegin ist krank und bittet dich, für sie morgen einzuspringen. Was sagst du?", "level_min": "A2", "level_max": "B1"},
+    {"id": "job_19", "npc_role": "die Abteilungsleiterin im 1-on-1 Meeting", "goal": "Job", "text": 'Du bist im 1-on-1 Meeting mit deiner Abteilungsleiterin. Sie fragt dich: „Na, wie waren die ersten 2 Monate bei uns?" Was sagst du?', "level_min": "B1", "level_max": "B2"},
+    {"id": "job_20", "npc_role": "das Team im Entscheidungsmeeting", "goal": "Job", "text": "Im Entscheidungsmeeting wird ein wichtiges Problem besprochen. Du hast eine Idee, wie es gelöst werden kann. Teile deine Lösung mit dem Team!", "level_min": "B2", "level_max": "C1"},
 
     # =========================
     # NEW FORMAT — Selbstpräsentation
@@ -726,6 +724,7 @@ def build_system_prompt(chat_id, scenario):
         context = context.replace("[Name]", name)
     # For old-format scenarios (no explicit persona/start), reframe from NPC POV
     # to prevent GPT from confusing "Du" (=user) with itself.
+    npc_role = scenario.get("npc_role", "")
     if "persona" not in scenario:
         context = reframe_context_for_npc(context, name)
 
@@ -852,9 +851,11 @@ SZENARIO:
 {context}
 
 WICHTIG: Du bist die ANDERE Person in dieser Situation — NICHT {name}.
+Du bist: {npc_role}
 {name} führt die oben beschriebene Aktion aus (ruft an, kommt rein, stellt Fragen usw.).
-Du reagierst als deine Rolle auf der anderen Seite der Szene.
-Reagiere direkt, keine Meta-Erklärungen, echtes Gespräch.
+Du reagierst NUR als diese Rolle — niemals als {name}.
+Reagiere direkt, keine Meta-Erklärungen, echtes natürliches Gespräch.
+Du bist ein echter Mensch in dieser Rolle, kein KI-Assistent.
 
 ANREDE & GESCHLECHT:
 {gender_note}
@@ -945,9 +946,11 @@ def send_reply(chat_id, text, voice=True):
     level = user_data.get(str(chat_id), {}).get("level", "B1") if chat_id else "B1"
     text = humanize_text(text, level)
 
-    # Text-only mode: user sent a text message, bot replies with text only
+    # Text-only mode: user sent a text message, bot replies with text + translate button
+    translate_markup = InlineKeyboardMarkup()
+    translate_markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data=f"translate_last"))
     if not voice:
-        bot.send_message(chat_id, text, parse_mode="Markdown")
+        bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=translate_markup)
         return
 
     audio = text_to_speech_stream(text, chat_id)
@@ -956,6 +959,7 @@ def send_reply(chat_id, text, voice=True):
     pending_texts[_text_id_counter] = text
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("📄 Text anzeigen", callback_data=f"show_text:{_text_id_counter}"))
+    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data=f"translate_last"))
     try:
         bot.send_voice(chat_id, audio, reply_markup=markup)
     except Exception as e:
@@ -993,17 +997,19 @@ def get_translation(chat_id, text_to_translate):
     native_lang = user.get("native_language", "Englisch")
     name = user.get("name", "")
 
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=300,
-        system=(
-            f"Du bist ein Übersetzer. Übersetze den folgenden deutschen Text "
-            f"ins {native_lang}. Antworte NUR mit der Übersetzung — "
-            f"keine Erklärungen, kein Kommentar, keine Zusätze."
-        ),
-        messages=[{"role": "user", "content": text_to_translate}]
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[
+            {"role": "system", "content": (
+                f"Du bist ein Übersetzer. Übersetze den folgenden deutschen Text "
+                f"ins {native_lang}. Antworte NUR mit der Übersetzung — "
+                f"keine Erklärungen, kein Kommentar, keine Zusätze."
+            )},
+            {"role": "user", "content": text_to_translate}
+        ],
+        max_tokens=300
     )
-    return response.content[0].text.strip()
+    return response.choices[0].message.content.strip()
 
 
 def ask_gpt(chat_id, user_text):
@@ -1035,19 +1041,12 @@ def ask_gpt(chat_id, user_text):
         "content": user_text
     })
 
-    # Anthropic: split system prompt out of messages list
-    mem = user_memory[chat_id]
-    sys_msg = mem[0]["content"] if mem and mem[0]["role"] == "system" else ""
-    conv_msgs = [m for m in mem if m["role"] != "system"]
-
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=1024,
-        system=sys_msg,
-        messages=conv_msgs
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=user_memory[chat_id]
     )
 
-    reply = response.content[0].text
+    reply = response.choices[0].message.content
 
     goal      = user.get("goal", "Einkauf & Restaurants")
     scenario  = current_scenario.get(chat_id, {})
@@ -1326,12 +1325,12 @@ GESPRÄCH:
 {conversation_text}
 """
 
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
         max_tokens=1024,
         messages=[{"role": "user", "content": prompt}]
     )
-    raw = response.content[0].text
+    raw = response.choices[0].message.content
 
     extracted_errors = []
     if "FEHLER_JSON:" in raw:
@@ -1447,12 +1446,12 @@ WICHTIG: Trenne Aufgaben und Lösungen IMMER mit der Zeile ---ANSWERS--- . Kein 
 GESPRÄCH:
 {conversation_text}
 """
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
         max_tokens=1024,
         messages=[{"role": "user", "content": prompt}]
     )
-    raw = response.content[0].text.strip()
+    raw = response.choices[0].message.content.strip()
 
     if "---ANSWERS---" in raw:
         exercises, answers = raw.split("---ANSWERS---", 1)
@@ -1487,12 +1486,12 @@ WICHTIG:
 - Niveau {target} (einen Schritt über dem aktuellen Niveau {level})
 - Alles auf Deutsch — kurz und einprägsam
 """
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
         max_tokens=512,
         messages=[{"role": "user", "content": prompt}]
     )
-    return response.content[0].text.strip()
+    return response.choices[0].message.content.strip()
 
 
 # START
@@ -1624,6 +1623,23 @@ def handle_onboarding(chat_id, text):
         user_data[str(chat_id)]["native_language"] = lang
         save_users(user_data)
         name = user_data[str(chat_id)].get("name", "")
+
+        # Send a short welcome note in the user's native language via GPT
+        try:
+            welcome_resp = client.chat.completions.create(
+                model="gpt-4.1-mini",
+                max_tokens=120,
+                messages=[{"role": "user", "content": (
+                    f"Write exactly 1 short friendly sentence in {lang} telling the user: "
+                    f"'Whenever you need a translation of my last message, just tap the übersetzen button.' "
+                    f"Use informal tone. Only the sentence, no quotes, no extra text."
+                )}]
+            )
+            lang_note = welcome_resp.choices[0].message.content.strip()
+            bot.send_message(chat_id, f"💬 {lang_note}")
+        except Exception:
+            pass  # if translation fails, just skip
+
         # Skip goal selection — go straight to level test
         user_state[chat_id] = {"mode": "test"}
         markup = InlineKeyboardMarkup()
@@ -1760,13 +1776,15 @@ def start_scenario(chat_id, scenario):
                 "1–2 Sätze. Kein erzwungenes Name-Dropping."
             )
 
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+        resp = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user",   "content": situation_instruction},
+            ],
             max_tokens=120,
-            system=sys_prompt,
-            messages=[{"role": "user", "content": situation_instruction}],
         )
-        opening = resp.content[0].text.strip()
+        opening = resp.choices[0].message.content.strip()
 
     # 5. Store opener as first assistant turn in memory (dialog continues from here)
     user_memory[chat_id].append({"role": "assistant", "content": opening})
@@ -1999,9 +2017,9 @@ def lesson_yes_callback(call):
     bot.send_message(chat_id, "Super! Hier kommen 10 Mini-Lektionen für dich 📚")
     bot.send_chat_action(chat_id, "typing")
 
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        system=(
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{"role": "system", "content": (
                     "Du bist ein Deutschlehrer für Anfänger (A1). "
                     "Erstelle 10 sehr kurze, klare Mini-Lektionen auf Deutsch "
                     "mit Übersetzungen auf Englisch. "
@@ -2012,11 +2030,9 @@ def lesson_yes_callback(call):
                     "Beispielsatz (DE) — translation (EN)\n"
                     "Beispielsatz (DE) — translation (EN)\n\n"
                     "Halte es freundlich und einfach."
-                ),
-        max_tokens=1500,
-        messages=[{"role": "user", "content": "Erstelle die 10 Mini-Lektionen jetzt."}]
+                )}]
     )
-    bot.send_message(chat_id, response.content[0].text)
+    bot.send_message(chat_id, response.choices[0].message.content)
 
 def lesson_no_callback(call):
     chat_id = call.message.chat.id
@@ -2268,19 +2284,17 @@ def start_exercise(chat_id):
         focus = "allgemeine Grammatik auf Niveau " + level
 
     bot.send_message(chat_id, "💪 *Mini-Übung startet...*", parse_mode="Markdown")
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=512,
-        system=(
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{"role": "system", "content": (
                 f"Du bist ein Deutschlehrer. Niveau des Lernenden: {level}.\n"
                 f"Erstelle GENAU EINE kurze Übung (Multiple Choice ODER Lückensatz).\n"
                 f"Thema: {focus}\n"
                 "Format: kurze Aufgabe + 3 Optionen a / b / c.\n"
                 "Kein Kommentar davor oder danach — nur die Übung."
-        ),
-        messages=[{"role": "user", "content": "Erstelle die Übung jetzt."}]
+        )}]
     )
-    bot.send_message(chat_id, response.content[0].text)
+    bot.send_message(chat_id, response.choices[0].message.content)
 
 SHADOWING_SENTENCES = {
     "A1": ["Ich heiße Maria.", "Guten Morgen! Wie geht es dir?", "Ich komme aus Spanien."],
@@ -2584,10 +2598,9 @@ def finish_exercises_callback(call):
 def send_exercise(message):
     chat_id = message.chat.id
 
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=512,
-        system="""Du bist ein Deutschlehrer.
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{"role": "system", "content": """Du bist ein Deutschlehrer.
 
 Erstelle eine kurze Übung (A2-B1 Niveau).
 
@@ -2595,11 +2608,10 @@ Regeln:
 - max. 1 Aufgabe
 - Multiple Choice ODER Lückensatz
 - Thema: Restaurant / Reservierung
-- einfach & klar""",
-        messages=[{"role": "user", "content": "Erstelle die Übung jetzt."}]
+- einfach & klar"""}]
     )
 
-    reply = response.content[0].text
+    reply = response.choices[0].message.content
     send_chat_reply(chat_id, reply)
 
 # STIMME COMMAND
@@ -2761,6 +2773,22 @@ def master_callback_router(call):
         return
 
     # ── NORMAL ROUTING ────────────────────────────────────────────────────────
+    if data == "translate_last":
+        mem = user_memory.get(chat_id, [])
+        last_npc = next(
+            (m["content"] for m in reversed(mem) if m.get("role") == "assistant"),
+            None
+        )
+        if not last_npc:
+            bot.answer_callback_query(call.id, "Noch keine Nachricht zum Übersetzen.")
+            return
+        user = user_data.get(str(chat_id), {})
+        lang = user.get("native_language", "Englisch")
+        bot.answer_callback_query(call.id, "Übersetze...")
+        translation = get_translation(chat_id, last_npc)
+        bot.send_message(chat_id, f"🌍 *{lang}:*\n\n_{translation}_", parse_mode="Markdown")
+        return
+
     if data == "start_chat":
         start_chat_callback(call)
     elif data.startswith("show_text:"):
