@@ -25,6 +25,7 @@ bot.set_my_commands([
     BotCommand("start",     "Start"),
     BotCommand("menu",      "Menü öffnen"),
     BotCommand("level",     "Mein Niveau"),
+    BotCommand("levelup",   "Nächstes Niveau"),
     BotCommand("progress",  "Mein Fortschritt"),
     BotCommand("errors",    "Meine Fehler"),
     BotCommand("practice",  "Übungen"),
@@ -120,43 +121,136 @@ VOICES = ["alloy", "echo", "nova", "shimmer", "fable", "onyx"]
 # QUIZ CONFIG
 TOTAL_QUESTIONS = 12
 LEVELS = ["A0", "A1", "A2", "B1", "B2", "C1"]
-QUIZ_LEVEL_ORDER = ["A1", "A2", "B1", "B2", "C1"]  # quiz only — no A0
+QUIZ_LEVEL_ORDER = ["A1", "A2", "B1", "B2", "C1"]
 
+# ── A0 SCREENING (2 questions — fail = mini lessons or email) ─────────────────
+# Correct answer position is randomised per question so it's never always A/B/C
+A0_QUESTIONS = [
+    {
+        "id": "A0_1",
+        "q": 'Hallo! Ich ____ Maria. Und du?',
+        "options": ["heißt", "heißen", "heiße"],   # correct = C → index 2
+        "answer": "heiße",
+    },
+    {
+        "id": "A0_2",
+        "q": 'Hallo, Maria. Ich bin Alvaro. Ich komme ____ Spanien. Und du?',
+        "options": ["von", "aus", "nach"],           # correct = B → index 1
+        "answer": "aus",
+    },
+]
+
+# ── MAIN QUESTION POOL — 10 questions (2 per level A1→C1) ────────────────────
+# Answers are shuffled so correct answer rotates through A/B/C positions
 QUESTION_POOL = {
     "A1": [
-        {"id": "A1_1", "q": "Ich ___ Maria.", "options": ["heißt", "heiße", "habe"], "a": "heiße"},
-        {"id": "A1_2", "q": "Ich komme ___ Spanien.", "options": ["aus", "von", "in"], "a": "aus"},
-        {"id": "A1_3", "q": "Wie ___ du?", "options": ["heißt", "bist", "hast"], "a": "heißt"},
-        {"id": "A1_4", "q": "Das ___ mein Freund.", "options": ["ist", "bin", "hat"], "a": "ist"},
-        {"id": "A1_5", "q": "Ich ___ 25 Jahre alt.", "options": ["bin", "habe", "sei"], "a": "bin"},
+        {
+            "id": "A1_1",
+            "q": 'Siehst du den Mann, ____ da steht? Das ist mein Chef Max.',
+            "options": ["denen", "der", "den"],      # correct = B
+            "answer": "der",
+        },
+        {
+            "id": "A1_2",
+            "q": 'Sie studiert und arbeitet, ____ später erfolgreich zu sein.',
+            "options": ["um", "damit", "zu"],        # correct = A
+            "answer": "um",
+        },
     ],
     "A2": [
-        {"id": "A2_1", "q": "Ich ___ gestern ins Kino gegangen.", "options": ["bin", "habe", "war"], "a": "bin"},
-        {"id": "A2_2", "q": "Ich habe Hunger, ___ ich heute nichts gegessen habe.", "options": ["weil", "und", "oder"], "a": "weil"},
-        {"id": "A2_3", "q": "Ich ___ seit zwei Jahren Deutsch.", "options": ["lerne", "lernte", "gelernt"], "a": "lerne"},
-        {"id": "A2_4", "q": "Er ___ nicht kommen, weil er krank ist.", "options": ["kann", "könnte", "konnte"], "a": "kann"},
-        {"id": "A2_5", "q": "Wir ___ gestern lange spazieren gegangen.", "options": ["sind", "haben", "waren"], "a": "sind"},
+        {
+            "id": "A2_1",
+            "q": 'Wenn ich mehr Zeit ____, ____ ich mehr Deutsch lernen.',
+            "options": ["hätte, wäre", "hätte, würdet", "hätte, würde"],  # correct = C
+            "answer": "hätte, würde",
+        },
+        {
+            "id": "A2_2",
+            "q": 'Ich weiß nicht, ____ ich morgen mitkommen kann. Ich habe viel zu tun.',
+            "options": ["dass", "warum", "ob"],      # correct = C
+            "answer": "ob",
+        },
     ],
     "B1": [
-        {"id": "B1_1", "q": "Wenn ich mehr Zeit hätte, ___ ich mehr lernen.", "options": ["würde", "werde", "bin"], "a": "würde"},
-        {"id": "B1_2", "q": "Das ist der Mann, ___ ich gestern gesehen habe.", "options": ["den", "der", "dem"], "a": "den"},
-        {"id": "B1_3", "q": "Er hat gesagt, dass er später ___ kommt.", "options": ["vorbei", "danach", "nachher"], "a": "vorbei"},
-        {"id": "B1_4", "q": "Ich ___ gerne reisen, aber ich habe kein Geld.", "options": ["würde", "werde", "will"], "a": "würde"},
-        {"id": "B1_5", "q": "Das Buch, ___ du mir empfohlen hast, ist toll.", "options": ["das", "dem", "den"], "a": "das"},
+        {
+            "id": "B1_1",
+            "q": 'Ich ____ nicht gedacht, dass Marcus so viel verdient!',
+            "options": ["war", "hätte", "wäre"],     # correct = B
+            "answer": "hätte",
+        },
+        {
+            "id": "B1_2",
+            "q": 'Mia hat gesagt, dass sie bei mir später ____schaut.',
+            "options": ["vorbei", "danach", "mit"],  # correct = A
+            "answer": "vorbei",
+        },
     ],
     "B2": [
-        {"id": "B2_1", "q": "Ich arbeite viel, ___ meine Ziele zu erreichen.", "options": ["um", "damit", "weil"], "a": "um"},
-        {"id": "B2_2", "q": "_______ Anna viel verdient, hat sie ständig Geldprobleme.", "options": ["Obwohl", "Weil", "Nachdem"], "a": "Obwohl"},
-        {"id": "B2_3", "q": "Je mehr sie lernt, ___ wird ihr Deutsch.", "options": ["desto besser", "so besser", "desto gut"], "a": "desto besser"},
-        {"id": "B2_4", "q": "Er verhält sich, ___ er der Chef wäre.", "options": ["als ob", "so wie", "wie wenn"], "a": "als ob"},
-        {"id": "B2_5", "q": "Das Problem lässt sich nur ___ enge Zusammenarbeit lösen.", "options": ["durch", "mit", "von"], "a": "durch"},
+        {
+            "id": "B2_1",
+            "q": 'Angesichts der aktuellen Diskussion über ____ gewinnt das Thema alternative Energiequellen zunehmend an Bedeutung.',
+            "options": ["Nachhaltigkeit", "Auseinandersetzung", "Aufenthaltstitel"],  # correct = A
+            "answer": "Nachhaltigkeit",
+        },
+        {
+            "id": "B2_2",
+            "q": 'Er äußerte sich derart differenziert, ___ selbst Experten seine Argumentation ernst nahmen.',
+            "options": ["weil", "dass", "obwohl"],   # correct = B
+            "answer": "dass",
+        },
     ],
     "C1": [
-        {"id": "C1_1", "q": "Angesichts der Krise ___ die Regierung sofortigen Handlungsbedarf.", "options": ["sieht", "betrachtet", "schaut"], "a": "sieht"},
-        {"id": "C1_2", "q": "Sein ausgeprägtes ___ machte ihn zum idealen Redner.", "options": ["Mitteilungsbedürfnis", "Mitteilungswunsch", "Mitteilungsart"], "a": "Mitteilungsbedürfnis"},
-        {"id": "C1_3", "q": "Dem Bericht ___ seien die Ursachen noch unklar.", "options": ["zufolge", "gemäß", "nach"], "a": "zufolge"},
-        {"id": "C1_4", "q": "Die Entscheidung wurde ___ der wirtschaftlichen Lage getroffen.", "options": ["angesichts", "infolge", "bezüglich"], "a": "angesichts"},
+        {
+            "id": "C1_1",
+            "q": "Warte, ich hab' ein starkes ____! Du wirst mir nicht glauben, was gerade im Meeting passiert ist!",
+            "options": ["Mitteilungsbedürfnis", "Mitteilung", "Mitteilungserlebnis"],  # correct = A
+            "answer": "Mitteilungsbedürfnis",
+        },
+        {
+            "id": "C1_2",
+            "q": 'Der Chef hat gesagt, dass du ihm direkt nach dem Meeting ____!',
+            "options": ["Bescheid gegeben haben solltest", "Bescheid sagen hätten", "hättest Bescheid geben sollen"],  # correct = C
+            "answer": "hättest Bescheid geben sollen",
+        },
     ],
+}
+
+# ── NPC SPEECH ADAPTATION per level (GER-based) ──────────────────────────────
+# Used in build_system_prompt to instruct the NPC how to speak
+NPC_LEVEL_INSTRUCTIONS = {
+    "A0": (
+        "Das Niveau des Lernenden ist A0 — absoluter Anfänger. "
+        "Sprich extrem langsam, benutze nur die allereinfachsten Wörter (Hallo, ja, nein, bitte, danke, ich, du). "
+        "Maximal 4-5 Wörter pro Satz. Wiederhol Aussagen wenn nötig."
+    ),
+    "A1": (
+        "Das Niveau des Lernenden ist A1. "
+        "Sprich deutlich langsamer als normal, mach kurze Pausen zwischen Sätzen. "
+        "Benutze einfachen Grundwortschatz, kurze Sätze (max. 8 Wörter), keine Nebensätze. "
+        "Wenn der Lernende etwas falsch sagt, wiederhole deinen Satz korrekt als natürliche Reaktion."
+    ),
+    "A2": (
+        "Das Niveau des Lernenden ist A2. "
+        "Sprich etwas langsamer als normal. Benutze häufige Alltagswörter, einfache Nebensätze mit 'weil', 'wenn', 'dass'. "
+        "Sätze können etwas länger sein, aber bleib klar und verständlich."
+    ),
+    "B1": (
+        "Das Niveau des Lernenden ist B1. "
+        "Normales Sprechtempo. Verwende alltägliche Redewendungen und gängigen Wortschatz. "
+        "Natürliche Satzlänge, gelegentlich Konjunktiv II ('könnte', 'würde'). "
+        "Reagiere natürlich auf Fehler ohne sie explizit zu korrigieren."
+    ),
+    "B2": (
+        "Das Niveau des Lernenden ist B2. "
+        "Normales bis leicht erhöhtes Sprechtempo. Benutze reichhaltigen Wortschatz, Idiome, komplexe Satzstrukturen. "
+        "Zeig Meinungen, Nuancen, implizite Bedeutungen. Reagiere wie ein gebildeter Muttersprachler."
+    ),
+    "C1": (
+        "Das Niveau des Lernenden ist C1 — fortgeschritten, nahe Muttersprachlerniveau. "
+        "Sprich in völlig natürlichem Muttersprachler-Tempo. Benutze anspruchsvollen Wortschatz, Fachbegriffe, "
+        "Redewendungen, Ironie, implizite Bedeutungen. Kein Rücksicht auf Sprachschwierigkeiten — "
+        "genau so wie du mit einem deutschen Muttersprachler sprechen würdest."
+    ),
 }
 
 # SCENARIOS
@@ -683,6 +777,7 @@ def build_system_prompt(chat_id, scenario):
     user    = user_data[str(chat_id)]
     level   = user.get("level", "A2")
     goal    = user.get("goal",  "Einkauf & Restaurants")
+    npc_level_instruction = NPC_LEVEL_INSTRUCTIONS.get(level, NPC_LEVEL_INSTRUCTIONS["B1"])
 
     # Inject turn-phase so NPC knows when to wind down vs. keep going
     _cur  = turn_counter.get(chat_id, 0)
@@ -778,8 +873,10 @@ VOICE ACTING:
 - Vermeide perfekte, formelle Sprache — außer bei SIE
 
 SCHWIERIGKEITSGRAD — Nutzerlevel: {level}
+{npc_level_instruction}
 Das Niveau bestimmt NUR Tempo, Vokabular-Komplexität und Satzlänge — NICHT welche Themen möglich sind.
 Jede Gesprächssituation ist für jedes Niveau verfügbar.
+NIEMALS auf einem höheren Niveau sprechen als {level}. Ein A1-User bekommt nie C1-Sprache, und umgekehrt.
 
 WICHTIG: Du sprichst IMMER grammatikalisch korrektes Deutsch.
 Keine fehlenden Artikel, keine Telegrammsprache, keine gebrochene Grammatik.
@@ -1874,42 +1971,113 @@ def prepare_question(q):
         "correct_index": correct_index,
     }
 
+def _send_raw_question(chat_id, q_dict, label):
+    """Helper: send a single question dict with A/B/C buttons."""
+    import random as _random
+    state = test_state[chat_id]
+
+    # Shuffle options but track where the correct answer ends up
+    options = list(q_dict["options"])
+    correct_text = q_dict["answer"]
+    _random.shuffle(options)
+    correct_index = options.index(correct_text)
+
+    pq = {
+        "id":            q_dict["id"],
+        "question":      q_dict["q"],
+        "options":       options,
+        "correct_index": correct_index,
+    }
+    state["current_q"]          = pq
+    state["waiting_for_answer"] = True
+
+    markup = InlineKeyboardMarkup(row_width=1)
+    for i, opt in enumerate(options):
+        lbl = f"{chr(65 + i)})  {opt}"
+        markup.add(InlineKeyboardButton(lbl, callback_data=f"quiz_answer:{chr(97 + i)}"))
+
+    bot.send_message(chat_id, f"{label}\n\n{pq['question']}", reply_markup=markup)
+
+
 def send_question(chat_id):
-    """Pick and send the next question on-the-fly based on current adaptive level."""
+    """Route to A0 screening or adaptive main phase."""
     state = test_state.get(chat_id)
     if not state:
         bot.send_message(chat_id, "Test nicht gestartet.")
         return
 
-    q_index = state["q_index"]
+    # ── A0 SCREENING PHASE ────────────────────────────────────────────────────
+    if state["phase"] == "a0":
+        idx = state["a0_index"]
+        if idx >= len(A0_QUESTIONS):
+            # Both A0 questions done — check results
+            if state["a0_errors"] > 0:
+                test_state.pop(chat_id, None)
+                _trigger_a0_fail(chat_id)
+            else:
+                # Passed screening — switch to main adaptive phase
+                state["phase"] = "main"
+                bot.send_message(chat_id, "Super! 🎉 Weiter geht's!")
+                send_question(chat_id)
+            return
 
-    if q_index >= TOTAL_QUESTIONS:
+        q = A0_QUESTIONS[idx]
+        label = f"❓ Frage {idx + 1}/2"
+        _send_raw_question(chat_id, q, label)
+        state["current_level"] = "A0"
+        return
+
+    # ── MAIN ADAPTIVE PHASE (10 questions, A1→C1) ────────────────────────────
+    q_index = state["q_index"]
+    if q_index >= 10:
         finish_test(chat_id)
         return
 
-    level = decide_level(q_index, state)
-    q     = get_question(level, chat_id)
-    pq    = prepare_question(q)
+    # Determine level for this question
+    level = QUIZ_LEVEL_ORDER[state["current_level_index"]]
+    state["current_level"] = level
 
-    state["current_q"]          = pq
-    state["current_level"]      = level
-    state["waiting_for_answer"] = True
+    # Pick a question from the pool for this level (not already used)
+    pool = [q for q in QUESTION_POOL[level] if q["id"] not in state["used_ids"]]
+    if not pool:
+        # All questions for this level used — try adjacent levels
+        for alt_level in QUIZ_LEVEL_ORDER:
+            pool = [q for q in QUESTION_POOL[alt_level] if q["id"] not in state["used_ids"]]
+            if pool:
+                level = alt_level
+                break
+    if not pool:
+        finish_test(chat_id)
+        return
 
-    text = f"❓ Frage {q_index + 1}/{TOTAL_QUESTIONS}\n\n{pq['question']}"
+    import random as _random
+    q = _random.choice(pool)
+    state["used_ids"].add(q["id"])
 
-    markup = InlineKeyboardMarkup(row_width=1)
-    for i, opt in enumerate(pq["options"]):
-        label = f"{chr(65 + i)})  {opt}"
-        markup.add(InlineKeyboardButton(label, callback_data=f"quiz_answer:{chr(97 + i)}"))
+    label = f"❓ Frage {q_index + 1}/10  •  Level {level}"
+    _send_raw_question(chat_id, q, label)
 
-    bot.send_message(chat_id, text, reply_markup=markup)
+
+def _trigger_a0_fail(chat_id):
+    """User failed A0 screening — offer mini lessons or email."""
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("Ja! 💪", callback_data="lesson_yes"),
+        InlineKeyboardButton("Nein", callback_data="lesson_no"),
+    )
+    bot.send_message(chat_id,
+        "Ohje 😞 Wollen wir ein bisschen lernen?",
+        reply_markup=markup)
 
 # QUIZ START
 def start_test(chat_id):
     test_state[chat_id] = {
-        "q_index":             0,
-        "current_level_index": 0,   # adaptive phase starts at A1 (index 0) — climbs naturally
-        "used_questions":      set(),
+        "phase":               "a0",          # "a0" → screening, "main" → adaptive
+        "a0_index":            0,             # which A0 question we're on (0 or 1)
+        "a0_errors":           0,             # how many A0 questions wrong
+        "q_index":             0,             # main phase question counter (0–9)
+        "current_level_index": 0,             # adaptive index into QUIZ_LEVEL_ORDER
+        "used_ids":            set(),         # prevent repeating same question
         "score":    {lvl: 0 for lvl in QUIZ_LEVEL_ORDER},
         "attempts": {lvl: 0 for lvl in QUIZ_LEVEL_ORDER},
         "current_q":          None,
@@ -1917,7 +2085,7 @@ def start_test(chat_id):
         "waiting_for_answer": False,
     }
     user_state[chat_id] = {"mode": "test"}
-    bot.send_message(chat_id, "🧠 Level-Test startet!")
+    bot.send_message(chat_id, "🧠 Los geht's! Ein paar Fragen, um dein Niveau zu checken.")
     send_question(chat_id)
 
 def start_test_callback(call):
@@ -1945,23 +2113,31 @@ def handle_answer(chat_id, user_answer):
     elif user_answer.strip() == q["options"][q["correct_index"]]:
         correct = True
 
+    # ── A0 SCREENING PHASE ────────────────────────────────────────────────────
+    if state.get("phase") == "a0":
+        if not correct:
+            state["a0_errors"] += 1
+        state["a0_index"] += 1
+        send_question(chat_id)
+        return
+
+    # ── MAIN ADAPTIVE PHASE ───────────────────────────────────────────────────
     level = state["current_level"]
     state["attempts"][level] = state["attempts"].get(level, 0) + 1
     if correct:
         state["score"][level] = state["score"].get(level, 0) + 1
 
-    # Only shift adaptive index during the adaptive phase (questions 4–10)
-    if state["q_index"] >= 4:
-        if correct:
-            state["current_level_index"] = min(
-                state["current_level_index"] + 1, len(QUIZ_LEVEL_ORDER) - 1)
-        else:
-            state["current_level_index"] = max(
-                state["current_level_index"] - 1, 0)
+    # Adaptive level adjustment — every answer shifts the difficulty
+    if correct:
+        state["current_level_index"] = min(
+            state["current_level_index"] + 1, len(QUIZ_LEVEL_ORDER) - 1)
+    else:
+        state["current_level_index"] = max(
+            state["current_level_index"] - 1, 0)
 
     state["q_index"] += 1
 
-    if state["q_index"] >= TOTAL_QUESTIONS:
+    if state["q_index"] >= 10:
         finish_test(chat_id)
     else:
         send_question(chat_id)
@@ -2358,6 +2534,32 @@ def restart_cmd(message):
 
 # ─────────────────────────────────────────────
 # MAIN LOOP
+@bot.message_handler(commands=["levelup", "level_up", "nächstesniveau"])
+def handle_level_up(message):
+    """Manually advance the user to the next level."""
+    chat_id = message.chat.id
+    uid = str(chat_id)
+    if uid not in user_data:
+        bot.send_message(chat_id, "Bitte starte zuerst mit /start.")
+        return
+    current = user_data[uid].get("level", "A2")
+    idx = LEVEL_ORDER.index(current) if current in LEVEL_ORDER else 2
+    if idx >= len(LEVEL_ORDER) - 1:
+        bot.send_message(chat_id,
+            f"Du bist bereits auf dem höchsten Niveau: *{current}* 🏆\n"
+            "Muttersprachlerniveau — es geht nicht höher! 😄",
+            parse_mode="Markdown")
+        return
+    new_level = LEVEL_ORDER[idx + 1]
+    user_data[uid]["level"] = new_level
+    save_users(user_data)
+    bot.send_message(chat_id,
+        f"🎯 Niveau aktualisiert: *{current}* → *{new_level}*\n\n"
+        f"Die Gespräche werden ab jetzt auf {new_level}-Niveau geführt. "
+        f"Du kannst das Niveau jederzeit wieder mit /level checken oder mit /levelup weiterwechseln.",
+        parse_mode="Markdown")
+
+
 @bot.message_handler(commands=["uebersetzen", "übersetzen", "translate"])
 def handle_translate(message):
     """Translate the last NPC message into the user's native language."""
