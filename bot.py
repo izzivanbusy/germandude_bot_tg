@@ -26,7 +26,7 @@ openai_client = client  # same client for audio
 
 bot.set_my_commands([
     BotCommand("start",     "Start"),
-    BotCommand("menu",      "Menü öffnen"),
+    BotCommand("themen",    "Themen wählen 🎯"),
     BotCommand("level",     "Mein Niveau"),
     BotCommand("levelup",      "Nächstes Niveau"),
     BotCommand("achievements", "Meine Erfolge 🏅"),
@@ -35,6 +35,7 @@ bot.set_my_commands([
     BotCommand("practice",  "Übungen"),
     BotCommand("shadowing", "Shadowing Mode"),
     BotCommand("restart",   "Chat neu starten"),
+    BotCommand("support",   "Support 🆘"),
 ])
 
 # PERSISTENT STORAGE
@@ -1821,7 +1822,23 @@ def start(message):
     chat_id = message.chat.id
     ensure_user(chat_id)
 
-    # full reset
+    uid  = str(chat_id)
+    user = user_data.get(uid, {})
+    name = user.get("name")
+
+    # Returning user — skip onboarding, go straight to Themen
+    if name:
+        test_state.pop(chat_id, None)
+        user_step.pop(chat_id, None)
+        user_state[chat_id] = {"mode": "menu"}
+        bot.send_message(chat_id,
+            f"Hey {name}! 👋 Schön, dass du wieder da bist.\n"
+            f"Womit willst du heute üben?",
+            reply_markup=ReplyKeyboardRemove())
+        send_topic_buttons(chat_id)
+        return
+
+    # New user — full onboarding
     user_state[chat_id] = {"mode": "onboarding", "step": "name"}
     test_state.pop(chat_id, None)
     user_step.pop(chat_id, None)
@@ -1888,7 +1905,7 @@ def send_topic_buttons(chat_id):
         for i, (label, _) in enumerate(TOPIC_LIST)
     ]
     markup.add(*buttons)
-    bot.send_message(chat_id, "🗣️ Wähle dein Thema:", reply_markup=markup)
+    bot.send_message(chat_id, "🎯 Welches Thema willst du heute üben?", reply_markup=markup)
 
 def send_goal_buttons(chat_id):
     markup = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -2043,13 +2060,30 @@ def handle_topic_callback(call):
         bot.answer_callback_query(call.id, "Ungültige Auswahl.")
         return
 
+    bot.answer_callback_query(call.id)
+
+    # Paywall check
+    if not is_premium(chat_id):
+        send_paywall(chat_id)
+        return
+
     user_data[str(chat_id)]["goal"] = goal
     save_users(user_data)
     user_state[chat_id] = {"mode": "chat"}
 
-    bot.answer_callback_query(call.id)
-    bot.send_message(chat_id, f"*{goal}* — los geht's 💪", parse_mode="Markdown")
-    launch_scenario(chat_id)
+    # Pick a random scenario from this topic and show a preview
+    level    = user_data.get(str(chat_id), {}).get("level", "A2")
+    scenario = pick_scenario(chat_id, goal, level)
+    if not scenario:
+        bot.send_message(chat_id, "⚠️ Kein passendes Szenario gefunden. Bitte /restart.")
+        return
+
+    ctx = scenario.get("context") or scenario.get("text", "")
+    bot.send_message(chat_id,
+        f"🎯 *{goal}*\n\n"
+        f"🎭 {ctx}",
+        parse_mode="Markdown")
+    start_scenario(chat_id, scenario)
 
 def start_scenario(chat_id, scenario):
     """
@@ -2681,7 +2715,7 @@ def show_menu(chat_id):
     user_state[chat_id]["mode"] = "menu"
     bot.send_message(chat_id,
         "😄 Was willst du machen?\n\n"
-        "1. 🎯 Neues Gespräch starten\n"
+        "1. 🎯 Themen\n"
         "2. 📊 Mein Fortschritt\n"
         "3. 🧠 Meine Fehler\n"
         "4. 📈 Mein Niveau\n"
@@ -2768,7 +2802,7 @@ def restart_chat(chat_id):
 # COMMAND HANDLERS
 # ─────────────────────────────────────────────
 
-@bot.message_handler(commands=['menu'])
+@bot.message_handler(commands=['themen', 'menu'])  # keep /menu as alias
 def menu_cmd(message):
     ensure_user(message.chat.id)
     show_menu(message.chat.id)
@@ -2797,6 +2831,16 @@ def restart_cmd(message):
 
 # ─────────────────────────────────────────────
 # MAIN LOOP
+@bot.message_handler(commands=["support", "hilfe"])
+def handle_support(message):
+    bot.send_message(message.chat.id,
+        "🆘 *Support*\n\n"
+        "Hast du Fragen, Feedback oder ein Problem?\n\n"
+        "Schreib mir direkt auf Telegram: @hagzussa\n\n"
+        "_Ich antworte so schnell wie möglich! 🙂_",
+        parse_mode="Markdown")
+
+
 @bot.message_handler(commands=["achievements", "badges", "erfolge"])
 def handle_achievements(message):
     chat_id = message.chat.id
