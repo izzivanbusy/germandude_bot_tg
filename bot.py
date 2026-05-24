@@ -1887,15 +1887,15 @@ GOAL_MAP = {
 
 # Ordered topic list for topic-selection buttons (index = callback key)
 TOPIC_LIST = [
-    ("1️⃣  Selbstpräsentation",     "Selbstpräsentation"),
-    ("2️⃣  Freunde & Beziehungen",  "Freunde / Beziehungen"),
-    ("3️⃣  Amt & Arzt",             "Soziales (Ämter, Ärzte)"),
-    ("4️⃣  Freizeit",               "Unterhaltung (Club, Kino etc)"),
-    ("5️⃣  Einkauf & Restaurant",   "Einkauf & Restaurants"),
-    ("6️⃣  Reisen",                 "Tourismus & Reisen"),
-    ("7️⃣  Sport & Hobbys",         "Sport & Hobbys"),
-    ("8️⃣  Telefon",                "Am Telefon"),
-    ("9️⃣  Job",                    "Job"),
+    ("🧍 Selbstpräsentation",      "Selbstpräsentation"),
+    ("🧑‍🤝‍🧑 Freunde & Beziehungen", "Freunde / Beziehungen"),
+    ("🏢 Amt & Arzt",              "Soziales (Ämter, Ärzte)"),
+    ("🎉 Freizeit",                "Unterhaltung (Club, Kino etc)"),
+    ("🍽️ Einkauf & Restaurant",    "Einkauf & Restaurants"),
+    ("✈️ Reisen",                  "Tourismus & Reisen"),
+    ("🏋️ Sport & Hobbys",          "Sport & Hobbys"),
+    ("📞 Telefon",                 "Am Telefon"),
+    ("💼 Job",                     "Job"),
 ]
 
 def send_topic_buttons(chat_id):
