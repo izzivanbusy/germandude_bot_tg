@@ -25,7 +25,8 @@ bot.set_my_commands([
     BotCommand("start",     "Start"),
     BotCommand("menu",      "Menü öffnen"),
     BotCommand("level",     "Mein Niveau"),
-    BotCommand("levelup",   "Nächstes Niveau"),
+    BotCommand("levelup",      "Nächstes Niveau"),
+    BotCommand("achievements", "Meine Erfolge 🏅"),
     BotCommand("progress",  "Mein Fortschritt"),
     BotCommand("errors",    "Meine Fehler"),
     BotCommand("practice",  "Übungen"),
@@ -84,6 +85,10 @@ def ensure_user(chat_id):
             user_data[uid]["gender"] = None
         if "native_language" not in user_data[uid]:
             user_data[uid]["native_language"] = None
+        if "achievements" not in user_data[uid]:
+            user_data[uid]["achievements"] = []
+        if "total_scenarios" not in user_data[uid].get("user_stats", {}):
+            user_data[uid].setdefault("user_stats", {})["total_scenarios"] = 0
     save_users(user_data)
 
 def save_name(chat_id, name):
@@ -1158,47 +1163,162 @@ def ask_gpt(chat_id, user_text):
     return reply
 
 # GAMIFICATION
+# ═══════════════════════════════════════════════════════════════════════════
+#  GAMIFICATION SYSTEM
+#  Psychology hooks: Streak loss pain · Badges · XP bar · Variable rewards
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── XP THRESHOLDS per bot-level (not GER level) ──────────────────────────────
+XP_PER_BOT_LEVEL = 100   # every 100 XP = 1 bot level up
+
 def calculate_xp(turns, difficulty):
     base = turns * 2
     if difficulty == "easy":
-        return base
+        earned = base
     elif difficulty == "normal":
-        return base + 5
+        earned = base + 5
     else:
-        return base + 10
+        earned = base + 10
 
-def get_level(xp):
-    return max(1, int(xp ** 0.5))
+    # 🎰 VARIABLE REWARD — 30% chance of surprise bonus (slot machine effect)
+    bonus = 0
+    bonus_msg = ""
+    if random.random() < 0.30:
+        bonus = random.choice([5, 10, 15, 20])
+        bonus_msg = random.choice([
+            f"🎰 BONUS! +{bonus} XP — heute ist dein Glückstag!",
+            f"⚡ Streak-Boost! +{bonus} Extra-XP für deine harte Arbeit!",
+            f"🌟 Zufalls-Bonus! +{bonus} XP — das Universum belohnt dich!",
+            f"🎁 Überraschung! +{bonus} XP extra — nicht immer, aber heute!",
+        ])
+    return earned + bonus, bonus_msg
+
+def get_xp_bar(xp):
+    """Render a visual XP progress bar — e.g. [████████░░] 80/100"""
+    progress = xp % XP_PER_BOT_LEVEL
+    bot_level = xp // XP_PER_BOT_LEVEL + 1
+    filled = int(progress / XP_PER_BOT_LEVEL * 10)
+    bar = "█" * filled + "░" * (10 - filled)
+    return f"[{bar}] {progress}/{XP_PER_BOT_LEVEL} XP  •  Level {bot_level}"
 
 def update_streak(chat_id):
+    """Update daily streak — return (new_streak, lost_streak_count_if_any)."""
     today = datetime.now().date()
     stats = user_data[str(chat_id)]["user_stats"]
     last  = stats.get("last_active")
+    lost_streak = 0
 
     if last:
         last_date = datetime.fromisoformat(last).date()
         diff = (today - last_date).days
-        if diff == 1:
-            stats["streak"] += 1
-        elif diff > 1:
-            stats["streak"] = 1
+        if diff == 0:
+            pass  # same day, no change
+        elif diff == 1:
+            stats["streak"] = stats.get("streak", 0) + 1
+        else:
+            lost_streak = stats.get("streak", 0)
+            stats["streak"] = 1  # reset
     else:
         stats["streak"] = 1
 
     stats["last_active"] = today.isoformat()
     save_users(user_data)
+    return stats["streak"], lost_streak
 
-BADGES = {
-    3:  "🥉 3-Tage-Streak! Guter Start!",
-    7:  "🏆 7 Tage Streak! Du bist on fire!",
-    14: "🔥 2 Wochen am Stück! Unglaublich!",
-    30: "👑 30 Tage! Du bist eine Legende!",
-}
+# ── ACHIEVEMENT BADGES ────────────────────────────────────────────────────────
+# Each badge: (id, condition_key, threshold, emoji, title, description)
+ACHIEVEMENT_DEFS = [
+    # Streak milestones
+    ("streak_3",    "streak",        3,   "🥉", "Warm-up",          "3 Tage am Stück geübt!"),
+    ("streak_7",    "streak",        7,   "🔥", "On Fire",           "7-Tage-Streak! Duolingo zittert."),
+    ("streak_14",   "streak",        14,  "💎", "Unaufhaltsam",      "2 Wochen durchgehalten!"),
+    ("streak_30",   "streak",        30,  "👑", "Legende",           "30 Tage! Du bist eine Legende."),
+    # XP milestones
+    ("xp_100",      "total_xp",      100, "⭐", "Erster Stern",      "100 XP gesammelt!"),
+    ("xp_500",      "total_xp",      500, "🌟", "Aufsteiger",        "500 XP — du machst das richtig."),
+    ("xp_1000",     "total_xp",     1000, "🏆", "XP-Maschine",       "1000 XP! Beeindruckend."),
+    ("xp_5000",     "total_xp",     5000, "🚀", "Profi",             "5000 XP — fast Muttersprachler!"),
+    # Scenario milestones
+    ("scenarios_1",  "total_scenarios", 1,  "🎭", "Erster Auftritt",  "Erstes Gespräch abgeschlossen!"),
+    ("scenarios_5",  "total_scenarios", 5,  "🗣️", "Gesprächig",       "5 Szenarien gemeistert!"),
+    ("scenarios_20", "total_scenarios", 20, "💬", "Konversationsking", "20 Szenarien — du redest wie ein Profi."),
+    ("scenarios_50", "total_scenarios", 50, "🎖️", "Veteran",          "50 Szenarien! Respekt."),
+    # Level milestones
+    ("reached_b1",  "ger_level",    "B1", "📗", "Fortgeschritten",   "B1 erreicht — du kannst dich verständigen!"),
+    ("reached_b2",  "ger_level",    "B2", "📘", "Fließend",          "B2! Du klingst fast wie ein Muttersprachler."),
+    ("reached_c1",  "ger_level",    "C1", "🏅", "Muttersprachler",   "C1 — Glückwunsch, du hast es geschafft!"),
+]
 
-def check_badges(chat_id, stats):
-    streak = stats.get("streak", 0)
-    if streak in BADGES:
-        bot.send_message(chat_id, BADGES[streak])
+def check_achievements(chat_id):
+    """Check all achievements and award any newly unlocked ones."""
+    uid   = str(chat_id)
+    user  = user_data[uid]
+    stats = user.get("user_stats", {})
+    earned = user.setdefault("achievements", [])
+    newly_unlocked = []
+
+    streak        = stats.get("streak", 0)
+    total_xp      = stats.get("xp", 0)
+    total_scen    = stats.get("total_scenarios", 0)
+    ger_level     = user.get("level", "A2")
+
+    values = {
+        "streak":           streak,
+        "total_xp":         total_xp,
+        "total_scenarios":  total_scen,
+        "ger_level":        ger_level,
+    }
+
+    for badge_id, key, threshold, emoji, title, desc in ACHIEVEMENT_DEFS:
+        if badge_id in earned:
+            continue
+        val = values.get(key)
+        if val is None:
+            continue
+        # Numeric threshold
+        if isinstance(threshold, int) and isinstance(val, int) and val >= threshold:
+            earned.append(badge_id)
+            newly_unlocked.append((emoji, title, desc))
+        # String threshold (GER level)
+        elif isinstance(threshold, str):
+            level_order = ["A0", "A1", "A2", "B1", "B2", "C1"]
+            if level_order.index(val) >= level_order.index(threshold):
+                earned.append(badge_id)
+                newly_unlocked.append((emoji, title, desc))
+
+    if newly_unlocked:
+        save_users(user_data)
+    return newly_unlocked
+
+
+def build_reward_block(chat_id, xp_gain, bonus_msg, turns):
+    """Build the full end-of-scenario reward message block."""
+    uid   = str(chat_id)
+    stats = user_data[uid]["user_stats"]
+    total_xp = stats.get("xp", 0)
+    streak   = stats.get("streak", 0)
+    bot_lvl  = total_xp // XP_PER_BOT_LEVEL + 1
+
+    MOTIVATIONS = [
+        "Du wirst deutlich flüssiger.",
+        "Dein Deutsch klingt immer natürlicher.",
+        "Du denkst schon weniger auf Englisch.",
+        "Muttersprachler würden das kaum merken.",
+        "Noch ein paar Sessions und du sprichst wie ein Profi.",
+        "Jedes Gespräch bringt dich ein Stück näher.",
+        "Du bist besser als gestern — das zählt.",
+    ]
+
+    lines = []
+    lines.append("─────────────────────")
+    lines.append(f"⚡ *+{xp_gain} XP* verdient!")
+    if bonus_msg:
+        lines.append(bonus_msg)
+    lines.append(f"📊 {get_xp_bar(total_xp)}")
+    lines.append(f"🔥 Streak: *{streak} {'Tag' if streak == 1 else 'Tage'}*   •   Level *{bot_lvl}*")
+    lines.append(f"_{random.choice(MOTIVATIONS)}_")
+
+    return "\n".join(lines)
 
 GOAL_TEXT = {
     "Job":                "💼 Sicher im Job sprechen",
@@ -1213,13 +1333,16 @@ GOAL_TEXT = {
 }
 
 def add_xp(chat_id, amount):
+    """Add XP and track total scenarios. Returns True if bot-level increased."""
     stats = user_data[str(chat_id)]["user_stats"]
-    stats["xp"] += amount
-    new_level = get_level(stats["xp"])
-    leveled_up = new_level > stats["level"]
-    stats["level"] = new_level
+    old_bot_level = stats.get("xp", 0) // XP_PER_BOT_LEVEL
+    stats["xp"] = stats.get("xp", 0) + amount
+    new_bot_level = stats["xp"] // XP_PER_BOT_LEVEL
+    stats["level"] = new_bot_level + 1  # keep for backwards compat
+    # Increment total scenario counter
+    stats["total_scenarios"] = stats.get("total_scenarios", 0) + 1
     save_users(user_data)
-    return leveled_up
+    return new_bot_level > old_bot_level
 
 def send_progress(chat_id):
     user  = user_data[str(chat_id)]
@@ -2534,6 +2657,29 @@ def restart_cmd(message):
 
 # ─────────────────────────────────────────────
 # MAIN LOOP
+@bot.message_handler(commands=["achievements", "badges", "erfolge"])
+def handle_achievements(message):
+    chat_id = message.chat.id
+    uid = str(chat_id)
+    if uid not in user_data:
+        bot.send_message(chat_id, "Starte zuerst mit /start.")
+        return
+    earned = user_data[uid].get("achievements", [])
+    if not earned:
+        bot.send_message(chat_id,
+            "Noch keine Achievements 😅\nMach dein erstes Gespräch und leg los! 🎯")
+        return
+
+    lines = ["🏅 *Deine Achievements:*\n"]
+    for badge_id, key, threshold, emoji, title, desc in ACHIEVEMENT_DEFS:
+        if badge_id in earned:
+            lines.append(f"{emoji} *{title}* — _{desc}_")
+
+    total = len(earned)
+    lines.append(f"\n_{total}/{len(ACHIEVEMENT_DEFS)} freigeschaltet_")
+    bot.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
+
+
 @bot.message_handler(commands=["levelup", "level_up", "nächstesniveau"])
 def handle_level_up(message):
     """Manually advance the user to the next level."""
@@ -2747,21 +2893,11 @@ def end_conversation(chat_id):
     bot.send_chat_action(chat_id, "typing")
     exercises_text, answers_text = generate_errors_and_exercises(chat_id, history_snapshot)
 
-    # ── XP block appended to exercises message ────────────────────────────────
-    xp_block = f"\n\n─────────────────────\n*＋{xp_gain} XP verdient* 💥  |  Gesamt: *{total_xp} XP*"
-    if leveled_up:
-        xp_block += f"\n🚀 *Level Up! Du bist jetzt Level {stats['level']}!* 🎉"
-
-    MOTIVATIONS = [
-        "Du wirst deutlich flüssiger.",
-        "Dein Deutsch klingt immer natürlicher.",
-        "Du denkst schon weniger auf Englisch.",
-        "Muttersprachler würden das nicht merken.",
-        "Noch ein paar Sessions und du sprichst wie ein Profi.",
-    ]
-    xp_block += f"\n\n_{random.choice(MOTIVATIONS)}_ 💪"
-
-    safe_markdown_send(chat_id, exercises_text + xp_block)
+    # ── XP / reward block (separate message for impact) ──────────────────────
+    reward_block = build_reward_block(chat_id, xp_gain, bonus_msg, turns)
+    safe_markdown_send(chat_id, exercises_text)
+    time.sleep(0.4)
+    safe_markdown_send(chat_id, reward_block)
 
     # ── Answers (separate message) ────────────────────────────────────────────
     if answers_text:
