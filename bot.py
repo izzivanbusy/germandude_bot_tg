@@ -2791,13 +2791,39 @@ def start_shadowing(chat_id):
     bot.send_message(chat_id, "🎧 Hör zu und sprich nach!\n\n👉 Schick eine Sprachnachricht.")
 
 def restart_chat(chat_id):
-    user_state[chat_id]   = {"mode": "idle", "scenario": None, "step": None}
-    user_memory[chat_id]  = []
-    turn_counter[chat_id] = 0
-    session_state[chat_id] = {"struggle": 0, "success": 0}
+    """Full reset — wipes all user data and restarts onboarding."""
+    uid = str(chat_id)
+
+    # Clear in-memory state
+    user_state.pop(chat_id, None)
+    user_memory.pop(chat_id, None)
+    turn_counter.pop(chat_id, None)
+    session_state.pop(chat_id, None)
     current_scenario.pop(chat_id, None)
-    bot.send_message(chat_id, "🔄 Neustart. Deine Daten bleiben gespeichert.")
-    show_menu(chat_id)
+    test_state.pop(chat_id, None)
+    user_step.pop(chat_id, None)
+    quiz_state.pop(chat_id, None)
+    quiz_scores.pop(chat_id, None)
+    quiz_history.pop(chat_id, None)
+    quiz_a0_results.pop(chat_id, None)
+    asked_questions.pop(chat_id, None)
+
+    # Wipe from persistent storage
+    if uid in user_data:
+        del user_data[uid]
+        save_users(user_data)
+
+    bot.send_message(chat_id,
+        "‼️ Alle deine Daten wurden gelöscht.\n\nFangen wir von vorne an! 🙂")
+
+    # Re-run full onboarding
+    ensure_user(chat_id)
+    user_state[chat_id] = {"mode": "onboarding", "step": "name"}
+    bot.send_message(chat_id,
+        "Hallo! Ich bin dein deutscher Kumpel! 🇩🇪😄\n"
+        "Ich werde dein Deutsch boosten — bald sprichst du wie ein Muttersprachler.\n\n"
+        "Aber erstmal... wie heißt du? So werde ich dich nennen! ☺️",
+        reply_markup=ReplyKeyboardRemove())
 
 # ─────────────────────────────────────────────
 # COMMAND HANDLERS
