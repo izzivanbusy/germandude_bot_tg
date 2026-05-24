@@ -4,9 +4,12 @@ import json
 import random
 import time
 import re
+import stripe
+import threading
 from io import BytesIO
 from datetime import datetime
 from urllib.parse import quote
+from flask import Flask, request, abort
 from openai import OpenAI
 from telebot.types import (InlineKeyboardMarkup, InlineKeyboardButton,
                            ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
