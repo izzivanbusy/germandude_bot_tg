@@ -24,6 +24,22 @@ bot           = telebot.TeleBot(TELEGRAM_TOKEN)
 client        = OpenAI(api_key=OPENAI_KEY)
 openai_client = client  # same client for audio
 
+# ── TRANSLATE BUTTON WRAPPER ─────────────────────────────────────────────────
+# Automatically appends 🌍 übersetzen button to every plain bot message.
+# Messages that already have reply_markup (keyboards, inline buttons) are untouched.
+_orig_send_message = bot.send_message
+
+def _send_message_with_translate(chat_id, text, **kwargs):
+    """Wrap bot.send_message to auto-inject übersetzen button on plain messages."""
+    # Don't inject if message already has buttons or is a system/keyboard message
+    if "reply_markup" not in kwargs or kwargs["reply_markup"] is None:
+        translate_btn = InlineKeyboardMarkup()
+        translate_btn.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+        kwargs["reply_markup"] = translate_btn
+    return _orig_send_message(chat_id, text, **kwargs)
+
+bot.send_message = _send_message_with_translate
+
 bot.set_my_commands([
     BotCommand("start",     "Start"),
     BotCommand("themen",    "Themen wählen 🎯"),
