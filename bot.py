@@ -2529,10 +2529,29 @@ def lesson_no_callback(call):
     if chat_id in test_state:
         bot.answer_callback_query(call.id)
         return
-    bot.send_message(chat_id,
-        "Send an email to: kontakt@erfolgreich-mit-deutsch.de "
-        "to arrange your first free German lesson 🥳 "
-        "I am sure, we will have a chatter in German very soon!")
+    bot.answer_callback_query(call.id)
+
+    # Translate the contact message into the user's native language
+    native_lang = user_data.get(str(chat_id), {}).get("native_language", "Englisch")
+    base_msg = (
+        "Please send an email to kontakt@erfolgreich-mit-deutsch.de "
+        "to arrange your first free German lesson. "
+        "I am sure we will have a great chat in German very soon! 🥳"
+    )
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            max_tokens=200,
+            messages=[{"role": "user", "content": (
+                f"Translate the following text into {native_lang}. "
+                f"Only return the translation, nothing else:\n\n{base_msg}"
+            )}]
+        )
+        translated = resp.choices[0].message.content.strip()
+    except Exception:
+        translated = base_msg  # fallback to English if translation fails
+
+    bot.send_message(chat_id, f"📧 {translated}\n\nkontakt@erfolgreich-mit-deutsch.de")
 
 # Progression benchmarks based on CEFR guidelines + Speakly/Goethe-Institut research:
 # 10 min/day of active speaking ≈ 70 min/week = ~5 hrs/month of focused conversation practice.
