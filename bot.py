@@ -2087,29 +2087,54 @@ def start_scenario(chat_id, scenario):
             "ruf", "anrufen", "telefonier", "anruf", "rufst", "rufe", "telefon"
         ])
 
-        if is_phone:
+        # Refine is_phone: only if NPC role is actually a professional/service context
+        # Colleague/friend calling = NOT a phone pickup scenario
+        npc_role_lower = npc_role.lower() if npc_role else ""
+        is_professional_phone = is_phone and any(kw in npc_role_lower for kw in [
+            "mitarbeiter", "sachbearbeiter", "rezeption", "empfang", "arzt", "praxis",
+            "support", "kundenservice", "restaurant", "hotel", "bank", "sekretär"
+        ])
+        is_friend_call = is_phone and any(kw in npc_role_lower for kw in [
+            "kollege", "freund", "kumpel", "bestie", "schwester", "bruder", "partner",
+            "nachbar", "date", "chef", "abteilungsleiter"
+        ])
+
+        if is_professional_phone and not is_friend_call:
             situation_instruction = (
                 f"SITUATION: {ctx}\n\n"
+                f"Du bist: {npc_role}\n"
                 f"{name} ruft gerade an. Du nimmst das Telefon ab.\n"
-                "Antworte mit einem echten, professionellen Telefongruß:\n"
+                "Antworte mit einem echten, professionellen Telefongruß passend zu deiner Rolle:\n"
                 "→ Format: [Firmen- oder Praxisname] + Gruß + dein Name + Hilfsangebot\n"
                 "→ Beispiel: \"Toller Laden GmbH, guten Tag, hier ist Sara, wie kann ich Ihnen helfen?\"\n"
-                "Erfinde einen passenden Firmennamen, der zur Situation passt.\n"
+                "Erfinde einen passenden Namen der zu deiner Rolle passt.\n"
                 f"Niveau {level}: Tempo und Vokabular anpassen, aber IMMER korrektes Deutsch.\n"
-                "Kein Zögern, keine Pausen beim Abheben — du bist am Arbeitsplatz."
+                "Kein Zögern, keine Pausen beim Abheben."
             )
         else:
             reframed = reframe_context_for_npc(ctx, name)
-            situation_instruction = (
-                f"DEINE AUFGABE: Sprich die ERSTE Zeile des Gesprächs.\n\n"
-                f"SITUATION (aus deiner NPC-Perspektive): {reframed}\n\n"
-                f"Du bist der NPC — du wartest, empfängst, oder bist bereits vor Ort.\n"
-                f"{name or 'Der Lernende'} betritt gerade die Szene / spricht dich gerade an.\n"
-                f"Eröffne das Gespräch so, wie DEINE Rolle es tun würde — nicht wie {name or 'der Lernende'} es tun würde.\n"
-                f"Beispiel Bürgeramt: Du sagst \'Guten Tag, wie kann ich Ihnen helfen?\' — NICHT \'Ich möchte mich anmelden.\'\n"
-                f"Niveau {level}: Sprachtempo und Vokabular anpassen, aber IMMER korrektes Deutsch.\n"
-                "1–2 Sätze. Kein erzwungenes Name-Dropping."
-            )
+            # Friend/colleague call: NPC is the one calling, opens differently
+            if is_friend_call:
+                situation_instruction = (
+                    f"DEINE AUFGABE: Sprich die ERSTE Zeile des Gesprächs — du rufst gerade an.\n\n"
+                    f"Du bist: {npc_role}\n"
+                    f"SITUATION: {ctx}\n\n"
+                    f"{name} nimmt gerade ab. Begrüße ihn/sie natürlich und frag wie es geht.\n"
+                    f"Beispiel: \"Hey {name}, ich bin's! Wie geht's dir? Ich hab gehört du bist krank...\"\n"
+                    f"Niveau {level}: Sprachtempo und Vokabular anpassen.\n"
+                    "1–2 Sätze. Kein formelles Firmen-Greeting — das ist ein Freundes/Kollegen-Anruf!"
+                )
+            else:
+                situation_instruction = (
+                    f"DEINE AUFGABE: Sprich die ERSTE Zeile des Gesprächs.\n\n"
+                    f"Du bist: {npc_role}\n"
+                    f"SITUATION (aus deiner Perspektive): {reframed}\n\n"
+                    f"Eröffne das Gespräch genau so wie es {npc_role} tun würde.\n"
+                    f"Beispiel Bürgeramt-Sachbearbeiter: \'Guten Tag, wie kann ich Ihnen helfen?\'\n"
+                    f"Beispiel Kollege: \'Hey {name}, na wie läuft\'s?\'\n"
+                    f"Niveau {level}: Sprachtempo und Vokabular anpassen, aber IMMER korrektes Deutsch.\n"
+                    "1–2 Sätze. Kein erzwungenes Name-Dropping."
+                )
 
         resp = client.chat.completions.create(
             model="gpt-4.1-mini",
