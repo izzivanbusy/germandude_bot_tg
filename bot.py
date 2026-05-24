@@ -2791,7 +2791,21 @@ def start_shadowing(chat_id):
     bot.send_message(chat_id, "🎧 Hör zu und sprich nach!\n\n👉 Schick eine Sprachnachricht.")
 
 def restart_chat(chat_id):
-    """Full reset — wipes all user data and restarts onboarding."""
+    """Show confirmation dialog before wiping data."""
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("🗑️ Ja, alles löschen", callback_data="confirm_restart"),
+        InlineKeyboardButton("❌ Abbrechen",           callback_data="cancel_restart"),
+    )
+    bot.send_message(chat_id,
+        "‼️ *ACHTUNG — alle deine Daten werden unwiderruflich gelöscht!*\n\n"
+        "XP, Streak, Fortschritt, Niveau — alles weg.\n"
+        "Bist du sicher?",
+        parse_mode="Markdown",
+        reply_markup=markup)
+
+def do_full_reset(chat_id):
+    """Actually wipe everything and restart onboarding."""
     uid = str(chat_id)
 
     # Clear in-memory state
@@ -2814,7 +2828,7 @@ def restart_chat(chat_id):
         save_users(user_data)
 
     bot.send_message(chat_id,
-        "‼️ Alle deine Daten wurden gelöscht.\n\nFangen wir von vorne an! 🙂")
+        "✅ Alles gelöscht. Frischer Start! 🙂")
 
     # Re-run full onboarding
     ensure_user(chat_id)
@@ -3355,6 +3369,17 @@ def master_callback_router(call):
     elif data == "menu_restart":
         bot.answer_callback_query(call.id)
         restart_chat(chat_id)
+        return
+
+    if data == "confirm_restart":
+        bot.answer_callback_query(call.id)
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        do_full_reset(chat_id)
+        return
+    elif data == "cancel_restart":
+        bot.answer_callback_query(call.id, "Abgebrochen ✅")
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        bot.send_message(chat_id, "Okay, nichts gelöscht! 🙂")
         return
 
     if data == "translate_last":
