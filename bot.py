@@ -68,7 +68,11 @@ def ensure_user(chat_id):
             "weak_points": [],
             "errors": [],
             "user_progress": {g: [] for g in ALL_GOALS},
-            "user_stats": {"xp": 0, "level": 1, "streak": 0, "last_active": None}
+            "user_stats": {"xp": 0, "level": 1, "streak": 0, "last_active": None},
+            "trial_start": datetime.now().isoformat(),
+            "premium": False,
+            "stripe_customer_id": None,
+            "stripe_subscription_id": None,
         }
     else:
         if "user_progress" not in user_data[uid]:
@@ -87,6 +91,14 @@ def ensure_user(chat_id):
             user_data[uid]["native_language"] = None
         if "achievements" not in user_data[uid]:
             user_data[uid]["achievements"] = []
+        if "trial_start" not in user_data[uid]:
+            user_data[uid]["trial_start"] = datetime.now().isoformat()
+        if "premium" not in user_data[uid]:
+            user_data[uid]["premium"] = False
+        if "stripe_customer_id" not in user_data[uid]:
+            user_data[uid]["stripe_customer_id"] = None
+        if "stripe_subscription_id" not in user_data[uid]:
+            user_data[uid]["stripe_subscription_id"] = None
         if "total_scenarios" not in user_data[uid].get("user_stats", {}):
             user_data[uid].setdefault("user_stats", {})["total_scenarios"] = 0
     save_users(user_data)
@@ -1249,6 +1261,92 @@ ACHIEVEMENT_DEFS = [
     ("reached_c1",  "ger_level",    "C1", "🏅", "Muttersprachler",   "C1 — Glückwunsch, du hast es geschafft!"),
 ]
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  PAYWALL / SUBSCRIPTION SYSTEM
+# ═══════════════════════════════════════════════════════════════════════════
+
+TRIAL_DAYS = 3
+
+def is_premium(chat_id):
+    """True if user has active premium OR is still in trial period."""
+    uid  = str(chat_id)
+    user = user_data.get(uid, {})
+    if user.get("premium"):
+        return True
+    trial_start = user.get("trial_start")
+    if not trial_start:
+        return True  # fallback: don't block if no trial_start
+    start = datetime.fromisoformat(trial_start)
+    days_used = (datetime.now() - start).days
+    return days_used < TRIAL_DAYS
+
+def days_left_in_trial(chat_id):
+    uid  = str(chat_id)
+    user = user_data.get(uid, {})
+    trial_start = user.get("trial_start")
+    if not trial_start:
+        return TRIAL_DAYS
+    start = datetime.fromisoformat(trial_start)
+    used = (datetime.now() - start).days
+    return max(0, TRIAL_DAYS - used)
+
+def create_stripe_checkout(chat_id):
+    """Create a Stripe Checkout session and return the URL."""
+    uid  = str(chat_id)
+    user = user_data.get(uid, {})
+    name = user.get("name", "")
+
+    try:
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            mode="subscription",
+            line_items=[{"price": STRIPE_PRICE_ID, "quantity": 1}],
+            success_url=f"https://t.me/{BOT_USERNAME}?start=premium_success",
+            cancel_url=f"https://t.me/{BOT_USERNAME}",
+            metadata={"telegram_id": str(chat_id)},
+            customer_email=None,  # optional — user can enter in Stripe
+        )
+        return session.url
+    except Exception as e:
+        return None
+
+def send_paywall(chat_id):
+    """Send paywall message with Stripe checkout button."""
+    uid  = str(chat_id)
+    user = user_data.get(uid, {})
+    name = user.get("name", "")
+    xp   = user.get("user_stats", {}).get("xp", 0)
+    streak = user.get("user_stats", {}).get("streak", 0)
+
+    checkout_url = create_stripe_checkout(chat_id)
+
+    markup = InlineKeyboardMarkup()
+    if checkout_url:
+        markup.add(InlineKeyboardButton(
+            "💳 Jetzt Premium werden — €20/Monat",
+            url=checkout_url
+        ))
+    markup.add(InlineKeyboardButton(
+        "🎁 Freunde einladen & Free Month verdienen",
+        url=f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}&text=Ich%20lerne%20Deutsch%20mit%20diesem%20Bot%20-%20ist%20wirklich%20gut!%20Probier%20es%20aus%20%F0%9F%87%A9%F0%9F%87%AA"
+    ))
+
+    bot.send_message(chat_id,
+        f"⏰ *Deine kostenlose Testphase ist abgelaufen.*\n\n"
+        f"Du hast in {TRIAL_DAYS} Tagen bereits *{xp} XP* gesammelt"
+        + (f" und einen *{streak}-Tage-Streak* aufgebaut" if streak > 1 else "")
+        + f" — schade, das jetzt zu verlieren.\n\n"
+        f"Mit **Premium** (€20/Monat) bekommst du:\n"
+        f"✅ Unbegrenzte Gespräche & Szenarien\n"
+        f"✅ Alle Niveaus A0–C1\n"
+        f"✅ Voice-Nachrichten & Übersetzungen\n"
+        f"✅ XP-System & Achievements\n"
+        f"✅ Jederzeit kündbar\n\n"
+        f"_Dein Streak und deine XP bleiben erhalten — du verlierst nichts._",
+        parse_mode="Markdown",
+        reply_markup=markup
+    )
+
 def check_achievements(chat_id):
     """Check all achievements and award any newly unlocked ones."""
     uid   = str(chat_id)
@@ -1893,6 +1991,20 @@ def start_chat_callback(call):
     # Never interrupt an active test — old callbacks can re-fire from Telegram
     if chat_id in test_state:
         return
+
+    # ── PAYWALL CHECK ─────────────────────────────────────────────────────────
+    if not is_premium(chat_id):
+        send_paywall(chat_id)
+        return
+
+    # ── Trial warning (1 day left) ────────────────────────────────────────────
+    left = days_left_in_trial(chat_id)
+    if 0 < left <= 1 and not user_data.get(str(chat_id), {}).get("premium"):
+        bot.send_message(chat_id,
+            "⚠️ *Noch 1 Tag in deiner Testphase!*\n"
+            "Danach brauchst du Premium um weiterzumachen. 👆",
+            parse_mode="Markdown")
+
     goal = user_data.get(str(chat_id), {}).get("goal")
     if goal:
         # Goal already chosen during onboarding — launch directly
@@ -3150,4 +3262,121 @@ def master_callback_router(call):
     else:
         bot.answer_callback_query(call.id)
 
-bot.infinity_polling()
+# ═══════════════════════════════════════════════════════════════════════════
+#  STRIPE WEBHOOK SERVER (Flask — runs in separate thread)
+# ═══════════════════════════════════════════════════════════════════════════
+
+flask_app = Flask(__name__)
+
+@flask_app.route("/webhook", methods=["POST"])
+def stripe_webhook():
+    payload    = request.get_data()
+    sig_header = request.headers.get("Stripe-Signature", "")
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, STRIPE_WEBHOOK_SECRET
+        )
+    except stripe.error.SignatureVerificationError:
+        abort(400)
+    except Exception:
+        abort(400)
+
+    # ── Handle successful subscription payment ────────────────────────────────
+    if event["type"] in ("checkout.session.completed", "invoice.payment_succeeded"):
+        obj = event["data"]["object"]
+
+        # Get telegram_id from metadata (checkout.session) or subscription
+        telegram_id = None
+        if event["type"] == "checkout.session.completed":
+            telegram_id = obj.get("metadata", {}).get("telegram_id")
+            customer_id = obj.get("customer")
+            subscription_id = obj.get("subscription")
+        else:
+            # invoice.payment_succeeded — get from subscription metadata
+            sub_id = obj.get("subscription")
+            if sub_id:
+                try:
+                    sub = stripe.Subscription.retrieve(sub_id)
+                    telegram_id = sub.get("metadata", {}).get("telegram_id")
+                    customer_id = obj.get("customer")
+                    subscription_id = sub_id
+                except Exception:
+                    pass
+
+        if telegram_id:
+            uid = str(telegram_id)
+            if uid in user_data:
+                user_data[uid]["premium"]              = True
+                user_data[uid]["stripe_customer_id"]   = customer_id
+                user_data[uid]["stripe_subscription_id"] = subscription_id
+                save_users(user_data)
+                # Notify user in Telegram
+                try:
+                    bot.send_message(int(telegram_id),
+                        "🎉 *Zahlung bestätigt! Willkommen bei Premium!*\n\n"
+                        "✅ Unbegrenzte Gespräche ab sofort freigeschaltet.\n"
+                        "Dein Streak und deine XP sind natürlich erhalten.\n\n"
+                        "Tippe /menu um loszulegen! 🚀",
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    pass
+
+    # ── Handle subscription cancellation ─────────────────────────────────────
+    elif event["type"] == "customer.subscription.deleted":
+        obj = event["data"]["object"]
+        customer_id = obj.get("customer")
+        # Find user by stripe_customer_id
+        for uid, user in user_data.items():
+            if user.get("stripe_customer_id") == customer_id:
+                user["premium"] = False
+                user["stripe_subscription_id"] = None
+                save_users(user_data)
+                try:
+                    bot.send_message(int(uid),
+                        "😢 Dein Premium-Abo wurde gekündigt.\n\n"
+                        "Du kannst jederzeit wieder upgraden — "
+                        "deine XP und dein Streak bleiben erhalten! 💪\n"
+                        "Tippe /premium um wieder zu starten.",
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    pass
+                break
+
+    return "", 200
+
+
+@flask_app.route("/health", methods=["GET"])
+def health():
+    return "OK", 200
+
+
+# ── /premium command ──────────────────────────────────────────────────────────
+@bot.message_handler(commands=["premium", "upgrade"])
+def handle_premium_command(message):
+    chat_id = message.chat.id
+    ensure_user(chat_id)
+    if user_data.get(str(chat_id), {}).get("premium"):
+        bot.send_message(chat_id,
+            "✅ Du bist bereits Premium! Danke für deine Unterstützung 🙏")
+        return
+    send_paywall(chat_id)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  MAIN — run Flask + Bot in parallel threads
+# ═══════════════════════════════════════════════════════════════════════════
+
+def run_flask():
+    port = int(os.getenv("PORT", 8080))
+    flask_app.run(host="0.0.0.0", port=port)
+
+if __name__ == "__main__":
+    # Start Flask webhook server in background thread
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    print(f"✅ Webhook server started")
+    print(f"✅ Bot polling started")
+    bot.infinity_polling()
