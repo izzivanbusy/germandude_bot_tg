@@ -2713,17 +2713,17 @@ def fortschritt(message):
 def show_menu(chat_id):
     user_state[chat_id] = user_state.get(chat_id, {})
     user_state[chat_id]["mode"] = "menu"
-    bot.send_message(chat_id,
-        "😄 Was willst du machen?\n\n"
-        "1. 🎯 Themen\n"
-        "2. 📊 Mein Fortschritt\n"
-        "3. 🧠 Meine Fehler\n"
-        "4. 📈 Mein Niveau\n"
-        "5. 🏋️ Übungen\n"
-        "6. 🎧 Shadowing Mode\n"
-        "7. 🔄 Chat neu starten\n\n"
-        "👉 Schreib die Zahl"
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("🎯 Themen wählen",    callback_data="menu_themen"),
+        InlineKeyboardButton("📊 Fortschritt",       callback_data="menu_progress"),
+        InlineKeyboardButton("🧠 Meine Fehler",      callback_data="menu_errors"),
+        InlineKeyboardButton("📈 Mein Niveau",       callback_data="menu_level"),
+        InlineKeyboardButton("🏋️ Übungen",           callback_data="menu_practice"),
+        InlineKeyboardButton("🎧 Shadowing Mode",    callback_data="menu_shadowing"),
+        InlineKeyboardButton("🔄 Chat neu starten",  callback_data="menu_restart"),
     )
+    bot.send_message(chat_id, "😄 Was willst du machen?", reply_markup=markup)
 
 def show_level(chat_id):
     level = user_data.get(str(chat_id), {}).get("level", "A2")
@@ -2802,7 +2802,12 @@ def restart_chat(chat_id):
 # COMMAND HANDLERS
 # ─────────────────────────────────────────────
 
-@bot.message_handler(commands=['themen', 'menu'])  # keep /menu as alias
+@bot.message_handler(commands=['themen'])
+def themen_cmd(message):
+    ensure_user(message.chat.id)
+    send_topic_buttons(message.chat.id)
+
+@bot.message_handler(commands=['menu'])
 def menu_cmd(message):
     ensure_user(message.chat.id)
     show_menu(message.chat.id)
@@ -2930,7 +2935,7 @@ def handle(message):
 
     if mode == "menu":
         if text == "1":
-            launch_scenario(chat_id)
+            send_topic_buttons(chat_id)
         elif text == "2":
             send_progress(chat_id)
         elif text == "3":
@@ -3295,6 +3300,36 @@ def master_callback_router(call):
         return
 
     # ── NORMAL ROUTING ────────────────────────────────────────────────────────
+    # ── MENU CALLBACKS ───────────────────────────────────────────────────────
+    if data == "menu_themen":
+        bot.answer_callback_query(call.id)
+        send_topic_buttons(chat_id)
+        return
+    elif data == "menu_progress":
+        bot.answer_callback_query(call.id)
+        send_progress(chat_id)
+        return
+    elif data == "menu_errors":
+        bot.answer_callback_query(call.id)
+        show_errors(chat_id)
+        return
+    elif data == "menu_level":
+        bot.answer_callback_query(call.id)
+        show_level(chat_id)
+        return
+    elif data == "menu_practice":
+        bot.answer_callback_query(call.id)
+        start_exercise(chat_id)
+        return
+    elif data == "menu_shadowing":
+        bot.answer_callback_query(call.id)
+        start_shadowing(chat_id)
+        return
+    elif data == "menu_restart":
+        bot.answer_callback_query(call.id)
+        restart_chat(chat_id)
+        return
+
     if data == "translate_last":
         mem = user_memory.get(chat_id, [])
         last_npc = next(
