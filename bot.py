@@ -3410,9 +3410,12 @@ def master_callback_router(call):
     data    = call.data
 
     # ── TEST FIREWALL ─────────────────────────────────────────────────────────
-    if chat_id in test_state:
+    # Only block if test is actually active (has a phase key)
+    if chat_id in test_state and test_state[chat_id].get("phase"):
         if data.startswith("quiz_answer:"):
             handle_quiz_answer_callback(call)
+        elif data == "start_test":
+            start_test_callback(call)
         else:
             bot.answer_callback_query(call.id)   # dismiss spinner, do nothing
         return
