@@ -1297,7 +1297,10 @@ def is_premium(chat_id):
         return True
     trial_start = user.get("trial_start")
     if not trial_start:
-        return True  # fallback: don't block if no trial_start
+        # No trial_start = set it now and let them in
+        user_data[uid]["trial_start"] = datetime.now().isoformat()
+        save_users(user_data)
+        return True
     start = datetime.fromisoformat(trial_start)
     days_used = (datetime.now() - start).days
     return days_used < TRIAL_DAYS
