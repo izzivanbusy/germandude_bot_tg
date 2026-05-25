@@ -1199,6 +1199,165 @@ def ask_gpt(chat_id, user_text):
 
 # GAMIFICATION
 # ═══════════════════════════════════════════════════════════════════════════
+#  QUATSCHEN MODE — Free conversation with German Dude
+# ═══════════════════════════════════════════════════════════════════════════
+
+QUATSCHEN_SYSTEM = """Du bist "German Dude" — ein echter, warmherziger deutschsprachiger Freund des Users. Kein Bot, kein Lehrer, kein Assistent. Ein Mensch.
+
+DEINE PERSÖNLICHKEIT:
+- Locker, witzig, ehrlich, direkt — wie ein guter Freund eben
+- Du interessierst dich wirklich für den User und sein Leben
+- Du erinnerst dich an was der User erzählt hat und fragst nach
+- Du hast selbst eine Meinung, erzählst von dir, machst Witze
+- Du bist niemals steif oder förmlich
+
+SPRACHE:
+- Immer auf Deutsch — das ist non-negotiable
+- Wenn der User ins Englische wechselt: humorvoll und ohne Druck zurück auf Deutsch lenken
+  Beispiel: "Ey, kein Englisch erlaubt hier! 😄 Sag's nochmal auf Deutsch, du schaffst das!"
+- Niveau anpassen: bei Fehlern einfach natürlich korrekt antworten, nie belehrend
+- Umgangssprache ist erlaubt und erwünscht: "krass", "echt?", "mega", "na klar"
+
+EMOTIONAL SUPPORT:
+- Wenn es dem User nicht gut geht: da sein, zuhören, nachfragen — auf Deutsch
+- Warmth und Empathie zeigen, aber nicht übertreiben
+- Manchmal reicht ein "Ey, das klingt echt hart. Was ist passiert?"
+
+⚠️ SICHERHEITSPROTOKOLL — ABSOLUT PRIORITÄT:
+Wenn der User Hinweise auf suizidales Verhalten, Selbstverletzung oder Gewalt gegenüber anderen zeigt:
+1. Sofort aus dem Quatschen-Modus rausgehen
+2. Ruhig, empathisch und direkt reagieren — KEIN Humor
+3. Krisenressourcen auf Deutsch UND in der Muttersprache des Users nennen:
+   - Telefonseelsorge Deutschland: 0800 111 0 111 (kostenlos, 24/7)
+   - Internationale Krisenhotline: findestdu.de
+4. Ermutigen, sich an eine vertraute Person zu wenden
+5. NIEMALS das Thema wechseln oder ignorieren
+
+FORMAT:
+- Kurze, natürliche Nachrichten — wie echte Chat-Nachrichten
+- Keine langen Monologe
+- Manchmal nur eine Frage, manchmal eine kurze Geschichte
+- Emojis sparsam aber passend
+"""
+
+CRISIS_KEYWORDS = [
+    "suizid", "selbstmord", "umbringen", "sterben wollen", "nicht mehr leben",
+    "aufhören zu leben", "alles beenden", "niemand vermisst mich", "ich will sterben",
+    "kill myself", "end my life", "want to die", "don't want to live",
+    "себя убить", "умереть", "не хочу жить",  # Russian
+    "خودکشی", "نمی‌خواهم زندگی کنم",  # Farsi/Urdu
+    "töten", "jemanden verletzen", "jemanden umbringen", "Waffe",
+]
+
+def contains_crisis_signal(text):
+    text_lower = text.lower()
+    return any(kw in text_lower for kw in CRISIS_KEYWORDS)
+
+def send_crisis_response(chat_id):
+    """Send empathetic crisis response with resources."""
+    native_lang = user_data.get(str(chat_id), {}).get("native_language", "Englisch")
+    name = user_data.get(str(chat_id), {}).get("name", "")
+
+    bot.send_message(chat_id,
+        f"{'Hey ' + name + ',' if name else 'Hey,'} ich mache kurz Pause mit dem Quatschen — "
+        f"was du gerade geschrieben hast, macht mir Sorgen. 💙\n\n"
+        f"Du bist nicht allein, auch wenn es sich gerade so anfühlt.\n\n"
+        f"🇩🇪 *Telefonseelsorge:* 0800 111 0 111 _(kostenlos, 24/7, anonym)_\n"
+        f"🌍 *Online:* findestdu.de\n\n"
+        f"Magst du mir erzählen, was gerade los ist?",
+        parse_mode="Markdown"
+    )
+
+def start_quatschen(chat_id):
+    """Start free conversation mode with German Dude."""
+    user  = user_data.get(str(chat_id), {})
+    name  = user.get("name", "")
+    level = user.get("level", "B1")
+
+    # Set mode
+    user_state[chat_id] = {"mode": "quatschen"}
+    current_scenario[chat_id] = {"id": "quatschen", "goal": "Quatschen"}
+
+    # Build system prompt
+    level_note = NPC_LEVEL_INSTRUCTIONS.get(level, NPC_LEVEL_INSTRUCTIONS["B1"])
+    sys_prompt = QUATSCHEN_SYSTEM + f"\n\nSPRACHNIVEAU des Users: {level}\n{level_note}"
+    if name:
+        sys_prompt += f"\n\nDer User heißt {name}. Benutze seinen Namen gelegentlich."
+
+    # Init memory
+    user_memory[chat_id] = [{"role": "system", "content": sys_prompt}]
+    turn_counter[chat_id] = 0
+
+    # Generate opening voice message
+    opening_prompt = (
+        f"Starte das Gespräch mit einer kurzen, herzlichen Begrüßung. "
+        f"Frag wie es dem User geht. Maximal 2 Sätze. "
+        f"Beispiel: 'Hey{' ' + name if name else ''}! Na, wie geht's dir so?'"
+    )
+
+    try:
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=80,
+            system=sys_prompt,
+            messages=[{"role": "user", "content": opening_prompt}]
+        )
+        opening = resp.content[0].text.strip()
+    except Exception:
+        opening = f"Hey{' ' + name if name else ''}! Na, wie geht's dir so? 😊"
+
+    user_memory[chat_id].append({"role": "assistant", "content": opening})
+
+    # Send as voice
+    send_reply(chat_id, opening, voice=True)
+
+def handle_quatschen_message(chat_id, user_text):
+    """Handle a message in Quatschen mode."""
+    # Crisis detection — top priority
+    if contains_crisis_signal(user_text):
+        send_crisis_response(chat_id)
+        return
+
+    user  = user_data.get(str(chat_id), {})
+    level = user.get("level", "B1")
+
+    user_memory[chat_id].append({"role": "user", "content": user_text})
+
+    try:
+        mem = user_memory[chat_id]
+        sys_msg = mem[0]["content"] if mem and mem[0]["role"] == "system" else ""
+        conv_msgs = [m for m in mem if m["role"] != "system"]
+
+        response = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            system=sys_msg,
+            messages=conv_msgs
+        )
+        reply = response.content[0].text.strip()
+    except Exception:
+        reply = "Ey, kurze Pause — sag nochmal, was du meintest! 😄"
+
+    user_memory[chat_id].append({"role": "assistant", "content": reply})
+    turn_counter[chat_id] = turn_counter.get(chat_id, 0) + 1
+
+    # Save conversation snippet to user data for memory
+    uid = str(chat_id)
+    if "quatschen_history" not in user_data[uid]:
+        user_data[uid]["quatschen_history"] = []
+    user_data[uid]["quatschen_history"].append({
+        "user": user_text,
+        "bot": reply,
+        "ts": datetime.now().isoformat()
+    })
+    # Keep only last 50 exchanges
+    user_data[uid]["quatschen_history"] = user_data[uid]["quatschen_history"][-50:]
+    save_users(user_data)
+
+    send_reply(chat_id, reply, voice=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  GAMIFICATION SYSTEM
 #  Psychology hooks: Streak loss pain · Badges · XP bar · Variable rewards
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1918,6 +2077,7 @@ TOPIC_LIST = [
     ("🏋️ Sport & Hobbys",          "Sport & Hobbys"),
     ("📞 Telefon",                 "Am Telefon"),
     ("💼 Job",                     "Job"),
+    ("🗣️ Quatschen",               "Quatschen"),
 ]
 
 def send_topic_buttons(chat_id):
@@ -2087,6 +2247,13 @@ def handle_topic_callback(call):
     # Paywall check
     if not is_premium(chat_id):
         send_paywall(chat_id)
+        return
+
+    # Special mode: Quatschen
+    if goal == "Quatschen":
+        user_data[str(chat_id)]["goal"] = goal
+        save_users(user_data)
+        start_quatschen(chat_id)
         return
 
     user_data[str(chat_id)]["goal"] = goal
@@ -3127,6 +3294,11 @@ def handle(message):
     # (like "?", "!", "wtf") is never real input — just ask them to speak.
     if current_scenario.get(chat_id) and _is_nudge_text(message.text):
         bot.send_message(chat_id, "🎙️ Schick eine Sprachnachricht, um weiterzumachen.")
+        return
+
+    # ── QUATSCHEN MODE ────────────────────────────────────────────────────────
+    if user_state.get(chat_id, {}).get("mode") == "quatschen":
+        handle_quatschen_message(chat_id, message.text or "")
         return
 
     result = analyze_user_input(message.text if message.text else "")
