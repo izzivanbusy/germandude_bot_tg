@@ -3608,9 +3608,6 @@ def handle_voice(message):
     if mode == "quatschen":
         user_text = _transcribe_voice(message)
         if user_text:
-            bot.send_message(chat_id,
-                f"_📝 {user_text}_",
-                parse_mode="Markdown")
             handle_quatschen_message(chat_id, user_text)
         else:
             bot.send_message(chat_id, "Ich hab dich nicht verstanden 😅 Sag's nochmal!")
