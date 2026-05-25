@@ -1302,7 +1302,7 @@ FORMAT:
 ABSOLUT VERBOTEN — fang NIEMALS so an:
 "Hmm", "Also", "Nun", "Tja", "Na ja", "Okay so", "Wow", "Oh wow", "Ah"
 Starte IMMER direkt und natürlich — wie ein echter Mensch, nicht wie eine KI.
-""" + HUMAN_SPEECH_STYLE
+"""
 
 CRISIS_KEYWORDS = [
     "suizid", "selbstmord", "umbringen", "sterben wollen", "nicht mehr leben",
@@ -1344,7 +1344,7 @@ def start_quatschen(chat_id):
 
     # Build system prompt
     level_note = NPC_LEVEL_INSTRUCTIONS.get(level, NPC_LEVEL_INSTRUCTIONS["B1"])
-    sys_prompt = QUATSCHEN_SYSTEM + f"\n\nSPRACHNIVEAU des Users: {level}\n{level_note}"
+    sys_prompt = QUATSCHEN_SYSTEM + HUMAN_SPEECH_STYLE + f"\n\nSPRACHNIVEAU des Users: {level}\n{level_note}"
     if name:
         sys_prompt += f"\n\nDer User heißt {name}. Benutze seinen Namen gelegentlich."
 
