@@ -995,7 +995,7 @@ Du bist: {npc_role}
 Du reagierst NUR als diese Rolle — niemals als {name}.
 Reagiere direkt, keine Meta-Erklärungen, echtes natürliches Gespräch.
 Du bist ein echter Mensch in dieser Rolle, kein KI-Assistent.
-VERBOTEN: Fang NIEMALS mit "Hmm", "Also", "Nun", "Tja", "Na ja", "Okay so" oder ähnlichen KI-typischen Füllwörtern an. Starte direkt und natürlich.
+VERBOTEN — ABSOLUT: Fang NIEMALS mit "Hmm", "Also", "Nun", "Tja", "Na ja", "Okay so", "Ah", "Oh", "Wow" oder KI-typischen Füllwörtern an. ERSTE WORT muss ein echtes Wort sein — kein Filler. Starte direkt wie ein echter Mensch.
 
 ANREDE & GESCHLECHT:
 {gender_note}
@@ -1151,6 +1151,30 @@ def get_translation(chat_id, text_to_translate):
     return response.content[0].text.strip()
 
 
+def strip_filler(text: str) -> str:
+    """Remove AI filler words from the start of a response."""
+    import re as _re
+    fillers = [
+        r"^Hmm+[,.]?\s*",
+        r"^Also[,.]?\s*",
+        r"^Nun[,.]?\s*",
+        r"^Tja[,.]?\s*",
+        r"^Na ja[,.]?\s*",
+        r"^Okay so[,.]?\s*",
+        r"^Oh[,!.]?\s*",
+        r"^Ah[,!.]?\s*",
+        r"^Wow[,!.]?\s*",
+        r"^Ach so[,.]?\s*",
+        r"^Na[,.]?\s+",
+    ]
+    for pattern in fillers:
+        text = _re.sub(pattern, "", text, flags=_re.IGNORECASE)
+    # Capitalize first letter after stripping
+    if text:
+        text = text[0].upper() + text[1:]
+    return text.strip()
+
+
 def ask_gpt(chat_id, user_text):
     user = user_data.get(str(chat_id), {})
 
@@ -1185,7 +1209,7 @@ def ask_gpt(chat_id, user_text):
         messages=user_memory[chat_id]
     )
 
-    reply = response.content[0].text
+    reply = strip_filler(response.content[0].text)
 
     goal      = user.get("goal", "Einkauf & Restaurants")
     scenario  = current_scenario.get(chat_id, {})
@@ -1240,6 +1264,10 @@ FORMAT:
 - Keine langen Monologe
 - Manchmal nur eine Frage, manchmal eine kurze Geschichte
 - Emojis sparsam aber passend
+
+ABSOLUT VERBOTEN — fang NIEMALS so an:
+"Hmm", "Also", "Nun", "Tja", "Na ja", "Okay so", "Wow", "Oh wow", "Ah"
+Starte IMMER direkt und natürlich — wie ein echter Mensch, nicht wie eine KI.
 """
 
 CRISIS_KEYWORDS = [
@@ -1304,7 +1332,7 @@ def start_quatschen(chat_id):
             system=sys_prompt,
             messages=[{"role": "user", "content": opening_prompt}]
         )
-        opening = resp.content[0].text.strip()
+        opening = strip_filler(resp.content[0].text.strip())
     except Exception:
         opening = f"Hey{' ' + name if name else ''}! Na, wie geht's dir so? 😊"
 
@@ -1336,7 +1364,7 @@ def handle_quatschen_message(chat_id, user_text):
             system=sys_msg,
             messages=conv_msgs
         )
-        reply = response.content[0].text.strip()
+        reply = strip_filler(response.content[0].text.strip())
     except Exception:
         reply = "Ey, kurze Pause — sag nochmal, was du meintest! 😄"
 
