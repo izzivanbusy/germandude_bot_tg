@@ -33,6 +33,9 @@ _orig_send_message = bot.send_message
 
 def _send_message_with_translate(chat_id, text, **kwargs):
     """Wrap bot.send_message to auto-inject übersetzen button on plain messages."""
+    # Store last bot text regardless
+    if isinstance(text, str):
+        last_bot_text[chat_id] = text
     # Don't inject if message already has buttons or is a system/keyboard message
     if "reply_markup" not in kwargs or kwargs["reply_markup"] is None:
         translate_btn = InlineKeyboardMarkup()
@@ -1083,6 +1086,9 @@ def send_reply(chat_id, text, voice=True):
     level = user_data.get(str(chat_id), {}).get("level", "B1") if chat_id else "B1"
     text = humanize_text(text, level)
 
+    # Store last bot text for übersetzen button
+    last_bot_text[chat_id] = text
+
     # Text-only mode: user sent a text message, bot replies with text + translate button
     translate_markup = InlineKeyboardMarkup()
     translate_markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data=f"translate_last"))
@@ -1129,22 +1135,18 @@ def start_conversation(chat_id, scenario):
 
 # GPT FUNCTION
 def get_translation(chat_id, text_to_translate):
-    """Translate the given German text into the user's native language."""
+    """Translate the given text into the user's native language."""
     user = user_data.get(str(chat_id), {})
     native_lang = user.get("native_language", "Englisch")
-    name = user.get("name", "")
 
     response = claude.messages.create(
         model="claude-haiku-4-5-20251001",
-        messages=[
-            {"role": "system", "content": (
-                f"Du bist ein Übersetzer. Übersetze den folgenden deutschen Text "
-                f"ins {native_lang}. Antworte NUR mit der Übersetzung — "
-                f"keine Erklärungen, kein Kommentar, keine Zusätze."
-            )},
-            {"role": "user", "content": text_to_translate}
-        ],
-        max_tokens=300
+        max_tokens=500,
+        system=(
+            f"You are a translator. Translate the following text into {native_lang}. "
+            f"Return ONLY the translation — no explanations, no comments, nothing else."
+        ),
+        messages=[{"role": "user", "content": text_to_translate}]
     )
     return response.content[0].text.strip()
 
@@ -3648,25 +3650,35 @@ def master_callback_router(call):
         return
 
     if data == "translate_last":
-        mem = user_memory.get(chat_id, [])
-        last_npc = next(
-            (m["content"] for m in reversed(mem) if m.get("role") == "assistant"),
-            None
-        )
-        # Fallback: use the text of the message the button was attached to
+        # Primary: last_bot_text dict (most reliable)
+        last_npc = last_bot_text.get(chat_id)
+
+        # Fallback 1: user_memory
+        if not last_npc:
+            mem = user_memory.get(chat_id, [])
+            last_npc = next(
+                (m["content"] for m in reversed(mem) if m.get("role") == "assistant"),
+                None
+            )
+        # Fallback 2: message text the button was attached to
         if not last_npc:
             try:
                 last_npc = call.message.text or call.message.caption
             except Exception:
                 last_npc = None
+
         if not last_npc:
             bot.answer_callback_query(call.id, "Noch keine Nachricht zum Übersetzen.")
             return
+
         user = user_data.get(str(chat_id), {})
         lang = user.get("native_language", "Englisch")
         bot.answer_callback_query(call.id, "Übersetze...")
-        translation = get_translation(chat_id, last_npc)
-        bot.send_message(chat_id, f"🌍 *{lang}:*\n\n_{translation}_", parse_mode="Markdown")
+        try:
+            translation = get_translation(chat_id, last_npc)
+            bot.send_message(chat_id, f"🌍 {lang}:\n\n{translation}")
+        except Exception:
+            bot.send_message(chat_id, "Übersetzung fehlgeschlagen 😅 Versuch es nochmal.")
         return
 
     if data == "start_chat":
