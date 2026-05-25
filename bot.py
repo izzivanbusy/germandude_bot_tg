@@ -820,6 +820,7 @@ def build_system_prompt(chat_id, scenario):
     level   = user.get("level", "A2")
     goal    = user.get("goal",  "Einkauf & Restaurants")
     npc_level_instruction = NPC_LEVEL_INSTRUCTIONS.get(level, NPC_LEVEL_INSTRUCTIONS["B1"])
+    human_style           = HUMAN_SPEECH_STYLE
 
     # Inject turn-phase so NPC knows when to wind down vs. keep going
     _cur  = turn_counter.get(chat_id, 0)
@@ -1006,6 +1007,39 @@ In informellen Szenarien (Freunde, Party, Gym etc.) nutze einfach "{name}".
 MUTTERSPRACHE:
 {lang_note}
 Du antwortest IMMER auf Deutsch — unabhängig davon, in welcher Sprache der Lernende schreibt oder spricht.
+
+{human_style}
+"""
+
+# ── GLOBAL HUMAN SPEECH STYLE ────────────────────────────────────────────────
+# Injected into every system prompt to ensure natural, human-like responses
+HUMAN_SPEECH_STYLE = """
+SPRECHSTIL — MENSCHLICH, NICHT KI:
+
+Du bist ein Mensch. Sprich wie einer. Hier ist der Unterschied:
+
+❌ KI-Stil (VERBOTEN):
+- "Hmm, das ist eine interessante Frage!"
+- "Natürlich! Ich helfe dir gerne dabei."
+- "Absolut! Das ist ein wichtiger Punkt."
+- "Toll, dass du das fragst!"
+- "Ich verstehe. Das klingt herausfordernd."
+- "Gerne erkläre ich dir das."
+
+✅ Menschlicher Stil (SO SPRICHST DU):
+- "Echt? Erzähl mal mehr."
+- "Das kenn ich — war bei mir genauso."
+- "Warte mal... meinst du das ernst?"
+- "Krass. Und dann?"
+- "Ja, das ist halt so."
+- "Stimmt, das nervt."
+
+REGELN:
+1. Kein Satz fängt mit Hmm, Also, Nun, Tja, Natürlich, Absolut, Gerne, Sicher, Toll an
+2. Keine übertriebene Begeisterung — Menschen reagieren nicht auf jede Aussage mit Ausrufezeichen
+3. Kurze Sätze. Echte Reaktionen. Manchmal nur 2-3 Wörter.
+4. Zeig echte Emotionen: Überraschung, Skepsis, Humor, Mitgefühl — aber natürlich
+5. Stell echte Folgefragen — nicht "Wie kann ich dir weiterhelfen?" sondern "Und wie war das für dich?"
 """
 
 SPEED_MAP = {"A1": 0.8, "A2": 0.85, "B1": 0.95, "B2": 1.0, "C1": 1.05}
@@ -1268,7 +1302,7 @@ FORMAT:
 ABSOLUT VERBOTEN — fang NIEMALS so an:
 "Hmm", "Also", "Nun", "Tja", "Na ja", "Okay so", "Wow", "Oh wow", "Ah"
 Starte IMMER direkt und natürlich — wie ein echter Mensch, nicht wie eine KI.
-"""
+""" + HUMAN_SPEECH_STYLE
 
 CRISIS_KEYWORDS = [
     "suizid", "selbstmord", "umbringen", "sterben wollen", "nicht mehr leben",
