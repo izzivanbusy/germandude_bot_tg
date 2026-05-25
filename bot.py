@@ -17,12 +17,13 @@ from telebot.types import (InlineKeyboardMarkup, InlineKeyboardButton,
 
 # KEYS
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-OPENAI_KEY     = os.getenv("OPENAI_API_KEY")
+OPENAI_KEY      = os.getenv("OPENAI_API_KEY")
+ANTHROPIC_KEY   = os.getenv("ANTHROPIC_API_KEY")
 
 # CLIENTS
 bot           = telebot.TeleBot(TELEGRAM_TOKEN)
-client        = OpenAI(api_key=OPENAI_KEY)
-openai_client = client  # same client for audio
+claude        = anthropic.Anthropic(api_key=ANTHROPIC_KEY)  # text/chat
+openai_client = OpenAI(api_key=OPENAI_KEY)                   # audio only
 
 # ── TRANSLATE BUTTON WRAPPER ─────────────────────────────────────────────────
 # Automatically appends 🌍 übersetzen button to every plain bot message.
@@ -1132,8 +1133,8 @@ def get_translation(chat_id, text_to_translate):
     native_lang = user.get("native_language", "Englisch")
     name = user.get("name", "")
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
+    response = claude.messages.create(
+        model="claude-haiku-4-5-20251001",
         messages=[
             {"role": "system", "content": (
                 f"Du bist ein Übersetzer. Übersetze den folgenden deutschen Text "
@@ -1144,7 +1145,7 @@ def get_translation(chat_id, text_to_translate):
         ],
         max_tokens=300
     )
-    return response.choices[0].message.content.strip()
+    return response.content[0].text.strip()
 
 
 def ask_gpt(chat_id, user_text):
@@ -1176,12 +1177,12 @@ def ask_gpt(chat_id, user_text):
         "content": user_text
     })
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
+    response = claude.messages.create(
+        model="claude-haiku-4-5-20251001",
         messages=user_memory[chat_id]
     )
 
-    reply = response.choices[0].message.content
+    reply = response.content[0].text
 
     goal      = user.get("goal", "Einkauf & Restaurants")
     scenario  = current_scenario.get(chat_id, {})
@@ -1664,12 +1665,12 @@ GESPRÄCH:
 {conversation_text}
 """
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
+    response = claude.messages.create(
+        model="claude-haiku-4-5-20251001",
         max_tokens=1024,
         messages=[{"role": "user", "content": prompt}]
     )
-    raw = response.choices[0].message.content
+    raw = response.content[0].text
 
     extracted_errors = []
     if "FEHLER_JSON:" in raw:
@@ -1785,12 +1786,12 @@ WICHTIG: Trenne Aufgaben und Lösungen IMMER mit der Zeile ---ANSWERS--- . Kein 
 GESPRÄCH:
 {conversation_text}
 """
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
+    response = claude.messages.create(
+        model="claude-haiku-4-5-20251001",
         max_tokens=1024,
         messages=[{"role": "user", "content": prompt}]
     )
-    raw = response.choices[0].message.content.strip()
+    raw = response.content[0].text.strip()
 
     if "---ANSWERS---" in raw:
         exercises, answers = raw.split("---ANSWERS---", 1)
@@ -1825,12 +1826,12 @@ WICHTIG:
 - Niveau {target} (einen Schritt über dem aktuellen Niveau {level})
 - Alles auf Deutsch — kurz und einprägsam
 """
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
+    response = claude.messages.create(
+        model="claude-haiku-4-5-20251001",
         max_tokens=512,
         messages=[{"role": "user", "content": prompt}]
     )
-    return response.choices[0].message.content.strip()
+    return response.content[0].text.strip()
 
 
 # START
@@ -1981,8 +1982,8 @@ def handle_onboarding(chat_id, text):
 
         # Send a short welcome note in the user's native language via GPT
         try:
-            welcome_resp = client.chat.completions.create(
-                model="gpt-4.1-mini",
+            welcome_resp = claude.messages.create(
+                model="claude-haiku-4-5-20251001",
                 max_tokens=120,
                 messages=[{"role": "user", "content": (
                     f"Write exactly 1 short friendly sentence in {lang} telling the user: "
@@ -1990,7 +1991,7 @@ def handle_onboarding(chat_id, text):
                     f"Use informal tone. Only the sentence, no quotes, no extra text."
                 )}]
             )
-            lang_note = welcome_resp.choices[0].message.content.strip()
+            lang_note = welcome_resp.content[0].text.strip()
             bot.send_message(chat_id, f"💬 {lang_note}")
         except Exception:
             pass  # if translation fails, just skip
@@ -2187,15 +2188,15 @@ def start_scenario(chat_id, scenario):
                     "1–2 Sätze. Kein erzwungenes Name-Dropping."
                 )
 
-        resp = client.chat.completions.create(
-            model="gpt-4.1-mini",
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
             messages=[
                 {"role": "system", "content": sys_prompt},
                 {"role": "user",   "content": situation_instruction},
             ],
             max_tokens=120,
         )
-        opening = resp.choices[0].message.content.strip()
+        opening = resp.content[0].text.strip()
 
     # 5. Store opener as first assistant turn in memory (dialog continues from here)
     user_memory[chat_id].append({"role": "assistant", "content": opening})
@@ -2374,14 +2375,25 @@ def send_question(chat_id):
 
 def _trigger_a0_fail(chat_id):
     """User failed A0 screening — offer mini lessons or email."""
+    native_lang = user_data.get(str(chat_id), {}).get("native_language", "Englisch")
     markup = InlineKeyboardMarkup()
     markup.add(
         InlineKeyboardButton("Ja! 💪", callback_data="lesson_yes"),
         InlineKeyboardButton("Nein", callback_data="lesson_no"),
     )
-    bot.send_message(chat_id,
-        "Ohje 😞 Wollen wir ein bisschen lernen?",
-        reply_markup=markup)
+    try:
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=80,
+            messages=[{"role": "user", "content": (
+                f"Translate this into {native_lang}. Only return the translation, nothing else:\n\n"
+                f"Oh no 😞 Shall we learn a little bit?"
+            )}]
+        )
+        msg = resp.content[0].text.strip()
+    except Exception:
+        msg = "Oh no 😞 Shall we learn a little bit?"
+    bot.send_message(chat_id, msg, reply_markup=markup)
 
 # QUIZ START
 def start_test(chat_id):
@@ -2501,28 +2513,55 @@ def trigger_fail_flow(chat_id):
 
 def lesson_yes_callback(call):
     chat_id = call.message.chat.id
+    bot.answer_callback_query(call.id)
     if chat_id in test_state:
-        bot.answer_callback_query(call.id)
         return
-    bot.send_message(chat_id, "Super! Hier kommen 10 Mini-Lektionen für dich 📚")
+
+    native_lang = user_data.get(str(chat_id), {}).get("native_language", "Englisch")
+
+    # Translate the intro message
+    try:
+        intro_resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=80,
+            messages=[{"role": "user", "content": (
+                f"Translate into {native_lang}. Only return the translation:\n\n"
+                f"Here are your first German lessons! 🎓"
+            )}]
+        )
+        intro_msg = intro_resp.content[0].text.strip()
+    except Exception:
+        intro_msg = "Here are your first German lessons! 🎓"
+
+    bot.send_message(chat_id, intro_msg)
     bot.send_chat_action(chat_id, "typing")
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[{"role": "system", "content": (
-                    "Du bist ein Deutschlehrer für Anfänger (A1). "
-                    "Erstelle 10 sehr kurze, klare Mini-Lektionen auf Deutsch "
-                    "mit Übersetzungen auf Englisch. "
-                    "Themen (zufällig auswählen, abwechslungsreich): "
-                    "Begrüßungen, Zahlen, Monate, Wochentage, Sprachen, Hobbys, Essen & Einkaufen. "
-                    "Format pro Lektion:\n"
-                    "1. 🇩🇪 Thema\n"
-                    "Beispielsatz (DE) — translation (EN)\n"
-                    "Beispielsatz (DE) — translation (EN)\n\n"
-                    "Halte es freundlich und einfach."
-                )}]
+    response = claude.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=2000,
+        messages=[{"role": "user", "content": (
+            f"You are a German teacher for absolute beginners. "
+            f"Create structured mini-lessons in German with translations in {native_lang}. "
+            f"Cover ALL of these topics in this exact order:\n"
+            f"1. 👋 Begrüßungen (Greetings) — 4 examples\n"
+            f"2. 🔢 Zahlen 1-20 (Numbers) — all numbers 1-20\n"
+            f"3. 📅 Wochentage (Days of the week) — all 7 days\n"
+            f"4. 🗓️ Monate (Months) — all 12 months\n"
+            f"5. ⚡ Basis-Verben (Basic verbs) — sein, haben, gehen, kommen, möchten + example each\n"
+            f"6. 💬 Wichtige Phrasen (Key phrases) — 6 must-know phrases\n\n"
+            f"Format for each item:\n"
+            f"🇩🇪 Deutsch — {native_lang} translation\n\n"
+            f"Be friendly and encouraging. No extra commentary, just the lessons."
+        )}]
     )
-    bot.send_message(chat_id, response.choices[0].message.content)
+    lesson_text = response.content[0].text.strip()
+
+    # Store in user_memory so übersetzen button works
+    if chat_id not in user_memory:
+        user_memory[chat_id] = []
+    user_memory[chat_id].append({"role": "assistant", "content": lesson_text})
+
+    bot.send_message(chat_id, lesson_text)
 
 def lesson_no_callback(call):
     chat_id = call.message.chat.id
@@ -2539,15 +2578,15 @@ def lesson_no_callback(call):
         "I am sure we will have a great chat in German very soon! 🥳"
     )
     try:
-        resp = client.chat.completions.create(
-            model="gpt-4.1-mini",
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
             max_tokens=200,
             messages=[{"role": "user", "content": (
                 f"Translate the following text into {native_lang}. "
                 f"Only return the translation, nothing else:\n\n{base_msg}"
             )}]
         )
-        translated = resp.choices[0].message.content.strip()
+        translated = resp.content[0].text.strip()
     except Exception:
         translated = base_msg  # fallback to English if translation fails
 
@@ -2793,8 +2832,8 @@ def start_exercise(chat_id):
         focus = "allgemeine Grammatik auf Niveau " + level
 
     bot.send_message(chat_id, "💪 *Mini-Übung startet...*", parse_mode="Markdown")
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
+    response = claude.messages.create(
+        model="claude-haiku-4-5-20251001",
         messages=[{"role": "system", "content": (
                 f"Du bist ein Deutschlehrer. Niveau des Lernenden: {level}.\n"
                 f"Erstelle GENAU EINE kurze Übung (Multiple Choice ODER Lückensatz).\n"
@@ -2803,7 +2842,7 @@ def start_exercise(chat_id):
                 "Kein Kommentar davor oder danach — nur die Übung."
         )}]
     )
-    bot.send_message(chat_id, response.choices[0].message.content)
+    bot.send_message(chat_id, response.content[0].text)
 
 SHADOWING_SENTENCES = {
     "A1": ["Ich heiße Maria.", "Guten Morgen! Wie geht es dir?", "Ich komme aus Spanien."],
@@ -3201,8 +3240,8 @@ def finish_exercises_callback(call):
 def send_exercise(message):
     chat_id = message.chat.id
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
+    response = claude.messages.create(
+        model="claude-haiku-4-5-20251001",
         messages=[{"role": "system", "content": """Du bist ein Deutschlehrer.
 
 Erstelle eine kurze Übung (A2-B1 Niveau).
@@ -3214,7 +3253,7 @@ Regeln:
 - einfach & klar"""}]
     )
 
-    reply = response.choices[0].message.content
+    reply = response.content[0].text
     send_chat_reply(chat_id, reply)
 
 # STIMME COMMAND
@@ -3423,6 +3462,12 @@ def master_callback_router(call):
             (m["content"] for m in reversed(mem) if m.get("role") == "assistant"),
             None
         )
+        # Fallback: use the text of the message the button was attached to
+        if not last_npc:
+            try:
+                last_npc = call.message.text or call.message.caption
+            except Exception:
+                last_npc = None
         if not last_npc:
             bot.answer_callback_query(call.id, "Noch keine Nachricht zum Übersetzen.")
             return
