@@ -1541,24 +1541,8 @@ def days_left_in_trial(chat_id):
     return max(0, TRIAL_DAYS - used)
 
 def create_stripe_checkout(chat_id):
-    """Create a Stripe Checkout session and return the URL."""
-    uid  = str(chat_id)
-    user = user_data.get(uid, {})
-    name = user.get("name", "")
-
-    try:
-        session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            mode="subscription",
-            line_items=[{"price": STRIPE_PRICE_ID, "quantity": 1}],
-            success_url=f"https://t.me/{BOT_USERNAME}?start=premium_success",
-            cancel_url=f"https://t.me/{BOT_USERNAME}",
-            metadata={"telegram_id": str(chat_id)},
-            customer_email=None,  # optional — user can enter in Stripe
-        )
-        return session.url
-    except Exception as e:
-        return None
+    """Stripe disabled — returns None."""
+    return None
 
 def send_paywall(chat_id):
     """Send paywall message with Stripe checkout button."""
@@ -3767,121 +3751,6 @@ def master_callback_router(call):
     else:
         bot.answer_callback_query(call.id)
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  STRIPE WEBHOOK SERVER (Flask — runs in separate thread)
-# ═══════════════════════════════════════════════════════════════════════════
+# Stripe/webhook disabled for stability — re-enable later
 
-flask_app = Flask(__name__)
-
-@flask_app.route("/webhook", methods=["POST"])
-def stripe_webhook():
-    payload    = request.get_data()
-    sig_header = request.headers.get("Stripe-Signature", "")
-
-    try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, STRIPE_WEBHOOK_SECRET
-        )
-    except stripe.error.SignatureVerificationError:
-        abort(400)
-    except Exception:
-        abort(400)
-
-    # ── Handle successful subscription payment ────────────────────────────────
-    if event["type"] in ("checkout.session.completed", "invoice.payment_succeeded"):
-        obj = event["data"]["object"]
-
-        # Get telegram_id from metadata (checkout.session) or subscription
-        telegram_id = None
-        if event["type"] == "checkout.session.completed":
-            telegram_id = obj.get("metadata", {}).get("telegram_id")
-            customer_id = obj.get("customer")
-            subscription_id = obj.get("subscription")
-        else:
-            # invoice.payment_succeeded — get from subscription metadata
-            sub_id = obj.get("subscription")
-            if sub_id:
-                try:
-                    sub = stripe.Subscription.retrieve(sub_id)
-                    telegram_id = sub.get("metadata", {}).get("telegram_id")
-                    customer_id = obj.get("customer")
-                    subscription_id = sub_id
-                except Exception:
-                    pass
-
-        if telegram_id:
-            uid = str(telegram_id)
-            if uid in user_data:
-                user_data[uid]["premium"]              = True
-                user_data[uid]["stripe_customer_id"]   = customer_id
-                user_data[uid]["stripe_subscription_id"] = subscription_id
-                save_users(user_data)
-                # Notify user in Telegram
-                try:
-                    bot.send_message(int(telegram_id),
-                        "🎉 *Zahlung bestätigt! Willkommen bei Premium!*\n\n"
-                        "✅ Unbegrenzte Gespräche ab sofort freigeschaltet.\n"
-                        "Dein Streak und deine XP sind natürlich erhalten.\n\n"
-                        "Tippe /menu um loszulegen! 🚀",
-                        parse_mode="Markdown"
-                    )
-                except Exception:
-                    pass
-
-    # ── Handle subscription cancellation ─────────────────────────────────────
-    elif event["type"] == "customer.subscription.deleted":
-        obj = event["data"]["object"]
-        customer_id = obj.get("customer")
-        # Find user by stripe_customer_id
-        for uid, user in user_data.items():
-            if user.get("stripe_customer_id") == customer_id:
-                user["premium"] = False
-                user["stripe_subscription_id"] = None
-                save_users(user_data)
-                try:
-                    bot.send_message(int(uid),
-                        "😢 Dein Premium-Abo wurde gekündigt.\n\n"
-                        "Du kannst jederzeit wieder upgraden — "
-                        "deine XP und dein Streak bleiben erhalten! 💪\n"
-                        "Tippe /premium um wieder zu starten.",
-                        parse_mode="Markdown"
-                    )
-                except Exception:
-                    pass
-                break
-
-    return "", 200
-
-
-@flask_app.route("/health", methods=["GET"])
-def health():
-    return "OK", 200
-
-
-# ── /premium command ──────────────────────────────────────────────────────────
-@bot.message_handler(commands=["premium", "upgrade"])
-def handle_premium_command(message):
-    chat_id = message.chat.id
-    ensure_user(chat_id)
-    if user_data.get(str(chat_id), {}).get("premium"):
-        bot.send_message(chat_id,
-            "✅ Du bist bereits Premium! Danke für deine Unterstützung 🙏")
-        return
-    send_paywall(chat_id)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-#  MAIN — run Flask + Bot in parallel threads
-# ═══════════════════════════════════════════════════════════════════════════
-
-def run_flask():
-    port = int(os.getenv("PORT", 8080))
-    flask_app.run(host="0.0.0.0", port=port)
-
-if __name__ == "__main__":
-    # Start Flask webhook server in background thread
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    print(f"✅ Webhook server started")
-    print(f"✅ Bot polling started")
-    bot.infinity_polling()
+bot.infinity_polling()
