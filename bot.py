@@ -1163,7 +1163,7 @@ def start_conversation(chat_id, scenario):
     """Legacy entry-point kept for finish_test path; delegates to start_scenario logic."""
     current_scenario[chat_id] = scenario
     opener = ask_gpt(chat_id, "BEGINNE DAS GESPRÄCH in dieser Rolle, 1–2 kurze Sätze.")
-    send_reply(chat_id, opener)
+    send_reply(chat_id, opener, voice=True)
 
 # GPT FUNCTION
 def get_translation(chat_id, text_to_translate):
@@ -2428,7 +2428,7 @@ def start_scenario(chat_id, scenario):
     bot.send_message(chat_id, f"🎭 {ctx}{lang_hint}")
 
     # 7. Send voice nudge
-    send_reply(chat_id, opening)
+    send_reply(chat_id, opening, voice=True)
 
 
 def launch_scenario(chat_id):
