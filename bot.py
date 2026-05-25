@@ -5,12 +5,9 @@ import random
 import time
 import re
 import anthropic
-import stripe
-import threading
 from io import BytesIO
 from datetime import datetime
 from urllib.parse import quote
-from flask import Flask, request, abort
 from openai import OpenAI
 from telebot.types import (InlineKeyboardMarkup, InlineKeyboardButton,
                            ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
@@ -2358,6 +2355,9 @@ def start_scenario(chat_id, scenario):
         is_phone = any(kw in ctx_lower for kw in [
             "ruf", "anrufen", "telefonier", "anruf", "rufst", "rufe", "telefon"
         ])
+
+        # Get npc_role from scenario
+        npc_role = scenario.get("npc_role", "")
 
         # Refine is_phone: only if NPC role is actually a professional/service context
         # Colleague/friend calling = NOT a phone pickup scenario
