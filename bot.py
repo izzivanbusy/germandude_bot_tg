@@ -1,6 +1,13 @@
 import telebot
 import os
 import json
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+log = logging.getLogger("germandude")
 import random
 import time
 import re
@@ -1151,13 +1158,13 @@ def send_reply(chat_id, text, voice=True):
             raise
 
 def send_chat_reply(chat_id, text):
-    send_reply(chat_id, text)
+    send_reply(chat_id, text, voice=True)
 
 def nudge_user(chat_id):
     scenario  = current_scenario.get(chat_id, {})
     followups = scenario.get("followups", [])
     if followups:
-        send_reply(chat_id, random.choice(followups))
+        send_reply(chat_id, random.choice(followups), voice=True)
 
 def start_conversation(chat_id, scenario):
     """Legacy entry-point kept for finish_test path; delegates to start_scenario logic."""
@@ -2697,8 +2704,8 @@ def handle_quiz_answer_callback(call):
     # Remove buttons from the question message so it can't be clicked twice
     try:
         bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug(f"Could not remove quiz buttons: {e}")
     answer = call.data.split(":")[1]   # "a", "b", or "c"
     handle_answer(chat_id, answer)
 
@@ -3081,7 +3088,7 @@ def start_shadowing(chat_id):
     text      = random.choice(sentences)
     user_state[chat_id]["shadowing_text"] = text
 
-    send_reply(chat_id, text)
+    send_reply(chat_id, text, voice=True)
     bot.send_message(chat_id, "🎧 Hör zu und sprich nach!\n\n👉 Schick eine Sprachnachricht.")
 
 def restart_chat(chat_id):
@@ -3265,7 +3272,20 @@ def handle(message):
         handle_onboarding(chat_id, text)
         return
 
-    if mode in ("test", "ready", "exercises", "topic_select") or chat_id in test_state:
+    if chat_id in test_state and test_state[chat_id].get("phase"):
+        return  # Active test — handled by callback router
+
+    if mode == "test":
+        return  # Test mode — handled by callback router
+
+    if mode in ("ready", "topic_select"):
+        # User typed instead of clicking — nudge them
+        send_topic_buttons(chat_id)
+        return
+
+    if mode == "exercises":
+        # User typed during exercise summary — just show menu
+        show_menu(chat_id)
         return
 
     if mode == "menu":
@@ -3346,9 +3366,13 @@ def handle(message):
         return
 
     # ── QUATSCHEN MODE ────────────────────────────────────────────────────────
-    if user_state.get(chat_id, {}).get("mode") == "quatschen":
-        handle_quatschen_message(chat_id, message.text or "")
+    if mode == "quatschen":
+        handle_quatschen_message(chat_id, text)
         return
+
+    # ── CHAT MODE guard ───────────────────────────────────────────────────────
+    if mode not in ("chat", "idle", None) and mode is not None:
+        log.warning(f"Unhandled mode '{mode}' for chat_id {chat_id} — falling through to chat")
 
     result = analyze_user_input(message.text if message.text else "")
     if result == "struggle":
@@ -3393,7 +3417,7 @@ def trigger_natural_close(chat_id):
         "Keine Fragen mehr, kein neues Thema. Nur ein echtes, warmes Gesprächsende.]"
     )
     closing = ask_gpt(chat_id, closing_prompt)
-    send_reply(chat_id, closing)
+    send_reply(chat_id, closing, voice=True)
     end_conversation(chat_id)
 
 def end_conversation(chat_id):
@@ -3415,8 +3439,8 @@ def end_conversation(chat_id):
     # Save weak points silently for spaced-repetition (no output shown)
     try:
         generate_feedback(chat_id, history_snapshot)
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning(f"generate_feedback failed for {chat_id}: {e}")
 
     # ── Error analysis + exercises (GPT) ─────────────────────────────────────
     bot.send_chat_action(chat_id, "typing")
@@ -3536,8 +3560,8 @@ def _transcribe_voice(message) -> str:
     finally:
         try:
             os.remove(tmp_path)
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(f"Could not remove temp file {tmp_path}: {e}")
 
 @bot.message_handler(content_types=['voice'])
 def handle_voice(message):
@@ -3617,7 +3641,7 @@ def handle_voice(message):
     try:
         answer = ask_gpt(chat_id, user_text)
         last_voice_answer[chat_id] = answer   # GPT succeeded; store in case TTS fails next
-        send_reply(chat_id, answer)
+        send_reply(chat_id, answer, voice=True)
         last_voice_answered[chat_id] = True
     except Exception as e:
         bot.send_message(chat_id, "⚠️ Etwas ist schiefgelaufen. Bitte nochmal versuchen.")
