@@ -138,6 +138,7 @@ user_memory = {}
 user_voice = {}  # TTS voice per user
 current_scenario = {}
 last_voice_text     = {}  # last transcribed voice per user
+last_bot_text       = {}  # last text sent by bot (for übersetzen button)
 last_voice_answer   = {}  # GPT reply for that voice (None if ask_gpt itself failed)
 last_voice_answered = {}  # True once the TTS reply was actually delivered
 user_data = load_users()
