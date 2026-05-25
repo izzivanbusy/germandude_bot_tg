@@ -3531,6 +3531,18 @@ def handle_voice(message):
             bot.send_message(chat_id, "Ich hab dich nicht verstanden 😅 Sag bitte A, B oder C.")
         return
 
+    # ── QUATSCHEN MODE ────────────────────────────────────────────────────────
+    if mode == "quatschen":
+        user_text = _transcribe_voice(message)
+        if user_text:
+            bot.send_message(chat_id,
+                f"_📝 {user_text}_",
+                parse_mode="Markdown")
+            handle_quatschen_message(chat_id, user_text)
+        else:
+            bot.send_message(chat_id, "Ich hab dich nicht verstanden 😅 Sag's nochmal!")
+        return
+
     # ── CHAT MODE ─────────────────────────────────────────────────────────────
     # Guard: must be in an active chat mode with a live scenario
     if mode not in ("chat", "idle", None):
