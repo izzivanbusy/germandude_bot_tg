@@ -4,6 +4,7 @@ import json
 import random
 import time
 import re
+import anthropic
 import stripe
 import threading
 from io import BytesIO
