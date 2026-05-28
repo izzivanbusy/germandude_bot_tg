@@ -1102,8 +1102,10 @@ def text_to_speech_stream(text, chat_id=None):
         input=text,
         speed=speed
     )
-    audio_file = BytesIO(response.read())
-    audio_file.name = "voice.ogg"
+    audio_bytes = response.read()
+    audio_file = BytesIO(audio_bytes)
+    audio_file.seek(0)
+    audio_file.name = "voice.mp3"
     return audio_file
 
 def safe_markdown_send(chat_id, text, **kwargs):
@@ -1143,7 +1145,7 @@ def send_reply(chat_id, text, voice=True):
     markup.add(InlineKeyboardButton("📄 Text anzeigen", callback_data=f"show_text:{_text_id_counter}"))
     markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data=f"translate_last"))
     try:
-        bot.send_voice(chat_id, audio, reply_markup=markup)
+        bot.send_audio(chat_id, audio, reply_markup=markup)
     except Exception as e:
         err = str(e)
         if "VOICE_MESSAGES_FORBIDDEN" in err:
