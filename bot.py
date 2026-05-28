@@ -65,6 +65,7 @@ bot.set_my_commands([
     BotCommand("practice",  "Übungen"),
     BotCommand("shadowing", "Shadowing Mode"),
     BotCommand("restart",   "Chat neu starten"),
+    BotCommand("gem",       "German Gem 💎"),
     BotCommand("support",   "Support 🆘"),
 ])
 
@@ -830,6 +831,8 @@ def build_system_prompt(chat_id, scenario):
     goal    = user.get("goal",  "Einkauf & Restaurants")
     npc_level_instruction = NPC_LEVEL_INSTRUCTIONS.get(level, NPC_LEVEL_INSTRUCTIONS["B1"])
     human_style           = HUMAN_SPEECH_STYLE
+    todays_gem            = get_todays_gem(str(chat_id))
+    gem_hint              = get_gem_system_prompt_hint(todays_gem)
 
     # Inject turn-phase so NPC knows when to wind down vs. keep going
     _cur  = turn_counter.get(chat_id, 0)
@@ -1005,6 +1008,7 @@ Du bist: {npc_role}
 Du reagierst NUR als diese Rolle — niemals als {name}.
 Reagiere direkt, keine Meta-Erklärungen, echtes natürliches Gespräch.
 Du bist ein echter Mensch in dieser Rolle, kein KI-Assistent.
+{gem_hint}
 VERBOTEN — ABSOLUT: Fang NIEMALS mit "Hmm", "Also", "Nun", "Tja", "Na ja", "Okay so", "Ah", "Oh", "Wow" oder KI-typischen Füllwörtern an. ERSTE WORT muss ein echtes Wort sein — kein Filler. Starte direkt wie ein echter Mensch.
 
 ANREDE & GESCHLECHT:
@@ -1064,6 +1068,360 @@ REGELN:
 5. Echte Folgefragen — "Und wie war das für dich?" statt "Wie kann ich helfen?"
 6. Humor ist subtil, nie erzwungen — wenn es sich nicht natürlich ergibt, weglassen
 """
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  GERMAN GEMS POOL
+#  Daily vocabulary/phrases — real Alltagssprache used by native speakers
+# ═══════════════════════════════════════════════════════════════════════════
+
+GERMAN_GEMS = [
+    {
+        "id": "gem_01",
+        "gem": "Ich steh auf dem Schlauch.",
+        "type": "Redewendung",
+        "meaning": "Ich verstehe es gerade nicht / ich komme nicht drauf.",
+        "examples": [
+            "Kannst du das nochmal erklären? Ich steh total auf dem Schlauch.",
+            "Sorry, ich steh auf dem Schlauch — was meinst du genau?",
+            "Bei Mathe steh ich immer auf dem Schlauch.",
+        ],
+    },
+    {
+        "id": "gem_02",
+        "gem": "Ich verstehe nur Bahnhof.",
+        "type": "Redewendung",
+        "meaning": "Ich verstehe gar nichts von dem, was gesagt wird.",
+        "examples": [
+            "Der Arzt hat so viel Fachjargon benutzt — ich hab nur Bahnhof verstanden.",
+            "Bei dem Meeting? Nur Bahnhof.",
+            "Wenn meine Oma über Politik redet, versteh ich nur Bahnhof.",
+        ],
+    },
+    {
+        "id": "gem_03",
+        "gem": "Ich hab ein starkes Mitteilungsbedürfnis.",
+        "type": "Ausdruck",
+        "meaning": "Ich muss unbedingt etwas erzählen / ich kann nichts für mich behalten.",
+        "examples": [
+            "Warte, ich hab ein starkes Mitteilungsbedürfnis — du glaubst nicht, was heute passiert ist!",
+            "Er hat ein extremes Mitteilungsbedürfnis, der postet 20 Mal am Tag.",
+            "Ich weiß, ich hab ein Mitteilungsbedürfnis — aber hör kurz zu!",
+        ],
+    },
+    {
+        "id": "gem_04",
+        "gem": "Einen Zahn zulegen.",
+        "type": "Redewendung",
+        "meaning": "Schneller werden / mehr Gas geben.",
+        "examples": [
+            "Wenn wir den Zug noch kriegen wollen, müssen wir einen Zahn zulegen.",
+            "Leg mal einen Zahn zu — wir sind schon spät dran!",
+            "Das Projekt läuft zu langsam, wir müssen einen Zahn zulegen.",
+        ],
+    },
+    {
+        "id": "gem_05",
+        "gem": "Boah!",
+        "type": "Ausruf",
+        "meaning": "Ausdruck von Staunen, Überraschung oder leichtem Genervtsein.",
+        "examples": [
+            "Boah, ist das heiß heute!",
+            "Boah ey, das hätte ich nicht erwartet.",
+            "Boah, der Stau auf der A9 — eine Stunde stehengeblieben.",
+        ],
+    },
+    {
+        "id": "gem_06",
+        "gem": "Krass.",
+        "type": "Slang",
+        "meaning": "Wow / unglaublich / beeindruckend (positiv oder negativ).",
+        "examples": [
+            "Krass, das hast du wirklich geschafft!",
+            "Das ist so krass — ich kann's kaum glauben.",
+            "Krass, wie teuer alles geworden ist.",
+        ],
+    },
+    {
+        "id": "gem_07",
+        "gem": "Bescheuert.",
+        "type": "Slang",
+        "meaning": "Blöd / dumm / nicht in Ordnung.",
+        "examples": [
+            "Das ist doch bescheuert — warum machen die das so?",
+            "Ich hab mein Handy vergessen. Wie bescheuert.",
+            "Die Regel ist echt bescheuert, das versteht kein Mensch.",
+        ],
+    },
+    {
+        "id": "gem_08",
+        "gem": "Ist das dein Ernst?",
+        "type": "Ausdruck",
+        "meaning": "Meinst du das wirklich? / Das kann nicht sein.",
+        "examples": [
+            "Ist das dein Ernst? Der Film kostet 20 Euro?",
+            "Sie haben das Meeting auf 7 Uhr morgens verlegt. Ist das dein Ernst?",
+            "Ist das dein Ernst — du hast das Passwort vergessen?",
+        ],
+    },
+    {
+        "id": "gem_09",
+        "gem": "Hast du sie noch alle?",
+        "type": "Redewendung",
+        "meaning": "Bist du verrückt? / Das ist doch nicht normal!",
+        "examples": [
+            "Du willst im Winter barfuß rausgehen? Hast du sie noch alle?",
+            "Fünf Energydrinks am Tag? Hast du sie noch alle?",
+            "Er hat gekündigt ohne neuen Job. Hast du sie noch alle?",
+        ],
+    },
+    {
+        "id": "gem_10",
+        "gem": "Um den heißen Brei herumreden.",
+        "type": "Redewendung",
+        "meaning": "Das eigentliche Thema vermeiden / nicht direkt sagen was man meint.",
+        "examples": [
+            "Sag's einfach direkt — hör auf, um den heißen Brei herumzureden.",
+            "Er redet seit 10 Minuten um den heißen Brei herum.",
+            "Ich rede nicht gerne um den heißen Brei — also: ich bin nicht happy damit.",
+        ],
+    },
+    {
+        "id": "gem_11",
+        "gem": "Sich etwas gönnen.",
+        "type": "Ausdruck",
+        "meaning": "Sich selbst etwas Schönes/Teures erlauben ohne schlechtes Gewissen.",
+        "examples": [
+            "Einmal im Jahr gönn ich mir ein richtig gutes Restaurant.",
+            "Du arbeitest so viel — gönn dir mal einen freien Tag!",
+            "Ich hab mir ein neues Fahrrad gegönnt. Ich bin so froh.",
+        ],
+    },
+    {
+        "id": "gem_12",
+        "gem": "Sich den Brückentag freinehmen.",
+        "type": "Alltagsausdruck",
+        "meaning": "Den Tag zwischen einem Feiertag und dem Wochenende als Urlaub nehmen.",
+        "examples": [
+            "Donnerstag ist Feiertag — ich nehm mir den Brückentag frei, dann hab ich 4 Tage.",
+            "Hast du dir den Brückentag genommen?",
+            "Brückentage sind Gold wert für lange Wochenenden.",
+        ],
+    },
+    {
+        "id": "gem_13",
+        "gem": "Backpfeifengesicht.",
+        "type": "Wort",
+        "meaning": "Ein Gesicht, das nach einer Ohrfeige aussieht / jemand der einen nervt.",
+        "examples": [
+            "Der Typ mit dem Backpfeifengesicht hat sich schon wieder beschwert.",
+            "Mein Chef manchmal... totales Backpfeifengesicht.",
+            "So ein Backpfeifengesicht — immer dieser selbstgefällige Blick.",
+        ],
+    },
+    {
+        "id": "gem_14",
+        "gem": "Arschgeige.",
+        "type": "Schimpfwort (mild)",
+        "meaning": "Jemand der sich unfair oder blöd verhält (mild, unter Freunden ok).",
+        "examples": [
+            "Der hat mir die Parklücke weggeschnappt — so eine Arschgeige!",
+            "Diese Arschgeige hat meinen Kaffee getrunken!",
+            "Komm, nicht ärgern — der ist einfach eine Arschgeige.",
+        ],
+    },
+    {
+        "id": "gem_15",
+        "gem": "Am Arsch der Welt.",
+        "type": "Redewendung",
+        "meaning": "An einem sehr abgelegenen, schwer erreichbaren Ort.",
+        "examples": [
+            "Das Büro ist am Arsch der Welt — eine Stunde mit dem Bus.",
+            "Wir haben das Airbnb gebucht, das war wirklich am Arsch der Welt.",
+            "Warum liegt das Finanzamt immer am Arsch der Welt?",
+        ],
+    },
+    {
+        "id": "gem_16",
+        "gem": "Du siehst heute umwerfend aus!",
+        "type": "Kompliment",
+        "meaning": "Du siehst fantastisch aus (stark positiv).",
+        "examples": [
+            "Wow, du siehst heute umwerfend aus — neues Outfit?",
+            "Ich muss sagen, du siehst umwerfend aus heute Abend.",
+            "Hast du was verändert? Du siehst umwerfend aus!",
+        ],
+    },
+    {
+        "id": "gem_17",
+        "gem": "Leute, ihr seid ja der Hammer!",
+        "type": "Ausdruck",
+        "meaning": "Ihr seid unglaublich gut / toll / ihr habt mich beeindruckt.",
+        "examples": [
+            "Das habt ihr in einer Stunde fertig? Leute, ihr seid der Hammer!",
+            "Ihr seid ja der Hammer — danke für eure Hilfe!",
+            "Was ein Abend, ihr seid der Hammer!",
+        ],
+    },
+    {
+        "id": "gem_18",
+        "gem": "Stabil! / Gute Leistung.",
+        "type": "Lob",
+        "meaning": "Sehr gut gemacht / das war solide und beeindruckend.",
+        "examples": [
+            "Du hast die ganze Nacht durchgearbeitet? Stabil!",
+            "10km gelaufen? Gute Leistung!",
+            "Stabil — das hätte ich nicht besser machen können.",
+        ],
+    },
+    {
+        "id": "gem_19",
+        "gem": "Wer A sagt, muss auch B sagen.",
+        "type": "Sprichwort",
+        "meaning": "Wer etwas anfängt, muss es auch zu Ende führen.",
+        "examples": [
+            "Du hast das Projekt gestartet — wer A sagt, muss auch B sagen.",
+            "Ich weiß, es ist schwer, aber wer A sagt muss B sagen.",
+            "Jetzt aufhören? Wer A sagt, muss auch B sagen!",
+        ],
+    },
+    {
+        "id": "gem_20",
+        "gem": "Das A und O.",
+        "type": "Redewendung",
+        "meaning": "Das Wichtigste / das Grundlegende / das Entscheidende.",
+        "examples": [
+            "Kommunikation ist das A und O in einer Beziehung.",
+            "Pünktlichkeit ist das A und O in Deutschland.",
+            "Guter Schlaf ist das A und O für die Gesundheit.",
+        ],
+    },
+    {
+        "id": "gem_21",
+        "gem": "Alles klar.",
+        "type": "Alltagsausdruck",
+        "meaning": "Verstanden / OK / alles gut (sehr vielseitig).",
+        "examples": [
+            "Treffen wir uns um 6? — Alles klar!",
+            "Alles klar bei dir?",
+            "Alles klar, ich kümmere mich darum.",
+        ],
+    },
+    {
+        "id": "gem_22",
+        "gem": "Pass auf dich auf.",
+        "type": "Abschiedsformel",
+        "meaning": "Cuidate / Take care — herzliche Verabschiedung.",
+        "examples": [
+            "Schön, dich gesehen zu haben — pass auf dich auf!",
+            "Gute Reise und pass auf dich auf.",
+            "Bis nächste Woche — pass auf dich auf!",
+        ],
+    },
+    {
+        "id": "gem_23",
+        "gem": "Ich freue mich auf dich / euch / Sie.",
+        "type": "Ausdruck",
+        "meaning": "Ich bin gespannt / vorfreudig auf das Treffen mit dir/euch.",
+        "examples": [
+            "Bis Samstag — ich freue mich schon auf dich!",
+            "Wir kommen um 7. — Super, ich freue mich auf euch!",
+            "Herzlich willkommen — wir freuen uns sehr auf Sie.",
+        ],
+    },
+    {
+        "id": "gem_24",
+        "gem": "Haben Sie gut hergefunden?",
+        "type": "Höflichkeitsformel",
+        "meaning": "Sind Sie gut angekommen? / War es leicht, hierher zu kommen?",
+        "examples": [
+            "Guten Tag! Haben Sie gut hergefunden?",
+            "Schön, dass Sie da sind — haben Sie gut hergefunden?",
+            "Herzlich willkommen. Haben Sie gut hergefunden?",
+        ],
+    },
+    {
+        "id": "gem_25",
+        "gem": "Ist das von Ikea / Bauhaus / Zalando?",
+        "type": "Alltagsfrage",
+        "meaning": "Fragen nach der Herkunft von Möbeln / Heimwerkerprodukten / Kleidung.",
+        "examples": [
+            "Das Regal sieht super aus — ist das von Ikea?",
+            "Schöne Jacke! Die ist von Zalando, oder?",
+            "Dieses Werkzeug ist von Bauhaus, stimmt's?",
+        ],
+    },
+    {
+        "id": "gem_26",
+        "gem": "Eine Aufenthaltsgenehmigung beantragen.",
+        "type": "Behördendeutsch",
+        "meaning": "Offiziell eine Erlaubnis zum Aufenthalt in Deutschland beantragen.",
+        "examples": [
+            "Ich muss nächste Woche meine Aufenthaltsgenehmigung beantragen.",
+            "Ohne Aufenthaltsgenehmigung darf man nicht arbeiten.",
+            "Wo beantragt man die Aufenthaltsgenehmigung in Berlin?",
+        ],
+    },
+    {
+        "id": "gem_27",
+        "gem": "Einen Termin vorziehen / verschieben.",
+        "type": "Alltagsausdruck",
+        "meaning": "Termin früher legen (vorziehen) oder auf später verlegen (verschieben).",
+        "examples": [
+            "Können wir den Termin auf Dienstag vorziehen?",
+            "Ich muss den Zahnarzttermin leider verschieben.",
+            "Der Meeting-Termin wurde auf 14 Uhr vorgezogen.",
+        ],
+    },
+    {
+        "id": "gem_28",
+        "gem": "Abstruser Unfug.",
+        "type": "Ausdruck",
+        "meaning": "Kompletter Unsinn / völlig absurdes Zeug.",
+        "examples": [
+            "Was du da redest ist abstruser Unfug!",
+            "Diese Verschwörungstheorie ist abstruser Unfug.",
+            "Ich höre mir diesen abstrusen Unfug nicht länger an.",
+        ],
+    },
+    {
+        "id": "gem_29",
+        "gem": "Ich freue mich wie ein Schnitzel.",
+        "type": "Redewendung",
+        "meaning": "Ich freue mich riesig (humorvoll-übertrieben).",
+        "examples": [
+            "Urlaub nächste Woche — ich freue mich wie ein Schnitzel!",
+            "Das Konzert ist ausverkauft und wir haben Karten — ich freu mich wie ein Schnitzel.",
+            "Neue Folge heute Abend? Ich freu mich wie ein Schnitzel!",
+        ],
+    },
+    {
+        "id": "gem_30",
+        "gem": "Na ja.",
+        "type": "Füllwort",
+        "meaning": "Ausdruck von Zweifel, Zögerlichkeit oder milder Ablehnung.",
+        "examples": [
+            "War der Film gut? — Na ja, es ging so.",
+            "Na ja, ich bin nicht so begeistert davon.",
+            "Na ja, wenn du meinst...",
+        ],
+    },
+]
+
+# Utility functions for German Gems
+def get_todays_gem(user_id: str) -> dict:
+    """Return the gem for today based on date + user rotation."""
+    today = datetime.now()
+    day_index = (today.timetuple().tm_yday + hash(str(user_id))) % len(GERMAN_GEMS)
+    return GERMAN_GEMS[day_index]
+
+def get_gem_system_prompt_hint(gem: dict) -> str:
+    """Short hint injected into NPC system prompt for spaced repetition."""
+    return (
+        f"\n\nSPACED REPETITION GEM: Wenn es natürlich passt, "
+        f"benutze heute gelegentlich den Ausdruck '{gem['gem']}' in deinen Antworten. "
+        f"Nicht erzwungen — nur wenn es sich organisch ergibt."
+    )
 
 SPEED_MAP = {"A1": 0.8, "A2": 0.85, "B1": 0.95, "B2": 1.0, "C1": 1.05}
 
@@ -1381,7 +1739,9 @@ def start_quatschen(chat_id):
 
     # Build system prompt
     level_note = NPC_LEVEL_INSTRUCTIONS.get(level, NPC_LEVEL_INSTRUCTIONS["B1"])
-    sys_prompt = QUATSCHEN_SYSTEM + HUMAN_SPEECH_STYLE + f"\n\nSPRACHNIVEAU des Users: {level}\n{level_note}"
+    todays_gem_q = get_todays_gem(str(chat_id))
+    gem_hint_q   = get_gem_system_prompt_hint(todays_gem_q)
+    sys_prompt = QUATSCHEN_SYSTEM + HUMAN_SPEECH_STYLE + f"\n\nSPRACHNIVEAU des Users: {level}\n{level_note}" + gem_hint_q
     if name:
         sys_prompt += f"\n\nDer User heißt {name}. Benutze seinen Namen gelegentlich."
 
@@ -3255,6 +3615,101 @@ def restart_cmd(message):
 
 # ─────────────────────────────────────────────
 # MAIN LOOP
+@bot.message_handler(commands=["gem", "gems", "wortschatz"])
+def handle_gem_command(message):
+    """Send today's German Gem and start the practice exercise."""
+    chat_id = message.chat.id
+    ensure_user(chat_id)
+    send_daily_gem(chat_id)
+
+
+def send_daily_gem(chat_id):
+    """Send today's gem with examples and invite user to write their own sentence."""
+    uid  = str(chat_id)
+    gem  = get_todays_gem(uid)
+    user = user_data.get(uid, {})
+    native_lang = user.get("native_language", "Englisch")
+
+    # Translate meaning into native language
+    try:
+        tr = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=80,
+            messages=[{"role": "user", "content":
+                f"Translate into {native_lang}. Only the translation: {gem['meaning']}"
+            }]
+        )
+        meaning_translated = tr.content[0].text.strip()
+    except Exception:
+        meaning_translated = gem["meaning"]
+
+    lines = [
+        f"💎 *German Gem des Tages*",
+        f"",
+        f"*{gem['gem']}*",
+        f"_{gem['type']}_",
+        f"",
+        f"📖 Bedeutung: {gem['meaning']}",
+        f"🌍 {native_lang}: _{meaning_translated}_",
+        f"",
+        f"*Beispiele aus dem echten Leben:*",
+    ]
+    for ex in gem["examples"]:
+        lines.append(f"• {ex}")
+
+    lines += [
+        f"",
+        f"✏️ *Deine Aufgabe:* Schreib einen eigenen Satz mit *{gem['gem']}*!",
+        f"Ich überprüfe ihn und gebe dir Feedback. 🙂",
+    ]
+
+    msg = "\n".join(lines)
+    last_bot_text[chat_id] = msg
+
+    # Save gem state so next message triggers exercise check
+    user_state[chat_id] = {
+        "mode": user_state.get(chat_id, {}).get("mode", "idle"),
+        "gem_exercise": gem["id"],
+        "gem_text": gem["gem"],
+    }
+
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data=f"translate_last"))
+    bot.send_message(chat_id, msg, parse_mode="Markdown", reply_markup=markup)
+
+
+def check_gem_exercise(chat_id, user_sentence, gem_text):
+    """Check user's gem exercise sentence and give feedback."""
+    try:
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            messages=[{"role": "user", "content":
+                f"The user is learning German. Today's gem is: '{gem_text}'. "
+                f"The user wrote this sentence: '{user_sentence}'. "
+                f"Check if the gem is used correctly and naturally. "
+                f"Reply in German. Be encouraging. If correct: praise + maybe suggest a variation. "
+                f"If wrong: explain kindly what's off and give a corrected version. "
+                f"Keep it short — max 3 sentences."
+            }]
+        )
+        feedback = resp.content[0].text.strip()
+    except Exception as e:
+        log.warning(f"Gem exercise check failed: {e}")
+        feedback = "Super Versuch! Mach weiter so! 🙂"
+
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("💎 Nächstes Gem", callback_data="next_gem"))
+    markup.add(InlineKeyboardButton("🎯 Zu den Themen", callback_data="menu_themen"))
+    bot.send_message(chat_id, f"📝 {feedback}", parse_mode="Markdown", reply_markup=markup)
+
+    # Clear gem exercise state
+    state = user_state.get(chat_id, {})
+    state.pop("gem_exercise", None)
+    state.pop("gem_text", None)
+    user_state[chat_id] = state
+
+
 @bot.message_handler(commands=["support", "hilfe"])
 def handle_support(message):
     bot.send_message(message.chat.id,
@@ -3440,6 +3895,12 @@ def handle(message):
     # (like "?", "!", "wtf") is never real input — just ask them to speak.
     if current_scenario.get(chat_id) and _is_nudge_text(message.text):
         bot.send_message(chat_id, "🎙️ Schick eine Sprachnachricht, um weiterzumachen.")
+        return
+
+    # ── GEM EXERCISE CHECK ───────────────────────────────────────────────────
+    state = user_state.get(chat_id, {})
+    if state.get("gem_exercise") and text:
+        check_gem_exercise(chat_id, text, state["gem_text"])
         return
 
     # ── QUATSCHEN MODE ────────────────────────────────────────────────────────
@@ -3682,6 +4143,12 @@ def handle_voice(message):
             bot.send_message(chat_id, "Ich hab dich nicht verstanden 😅 Sag bitte A, B oder C.")
         return
 
+    # ── GEM EXERCISE CHECK ───────────────────────────────────────────────────
+    state = user_state.get(chat_id, {})
+    if state.get("gem_exercise") and text:
+        check_gem_exercise(chat_id, text, state["gem_text"])
+        return
+
     # ── QUATSCHEN MODE ────────────────────────────────────────────────────────
     if mode == "quatschen":
         user_text = _transcribe_voice(message)
@@ -3784,6 +4251,11 @@ def master_callback_router(call):
     elif data == "menu_restart":
         bot.answer_callback_query(call.id)
         restart_chat(chat_id)
+        return
+
+    if data == "next_gem":
+        bot.answer_callback_query(call.id)
+        send_daily_gem(chat_id)
         return
 
     if data == "end_quatschen":
@@ -3890,5 +4362,21 @@ def master_callback_router(call):
         bot.answer_callback_query(call.id)
 
 # Stripe/webhook disabled for stability — re-enable later
+
+def broadcast_daily_gem():
+    """Send today's gem to all active users. Called via Railway Cron."""
+    sent = 0
+    for uid, user in user_data.items():
+        if not user.get("name"):
+            continue  # skip incomplete onboarding
+        try:
+            chat_id = int(uid)
+            send_daily_gem(chat_id)
+            sent += 1
+            time.sleep(0.1)  # avoid Telegram flood limits
+        except Exception as e:
+            log.warning(f"Gem broadcast failed for {uid}: {e}")
+    log.info(f"German Gem broadcast done: {sent} users")
+    return sent
 
 bot.infinity_polling()
