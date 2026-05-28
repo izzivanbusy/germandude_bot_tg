@@ -1161,7 +1161,7 @@ def send_reply(chat_id, text, voice=True):
     pending_texts[text_key] = text
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("📄 Text anzeigen", callback_data=f"show_text:{text_key}"))
-    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data=f"translate_last"))
+    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data=f"translate:{text_key}"))
 
     try:
         audio = text_to_speech_stream(text, chat_id)
@@ -3831,23 +3831,22 @@ def master_callback_router(call):
         bot.send_message(chat_id, "Okay, nichts gelöscht! 🙂")
         return
 
-    if data == "translate_last":
-        # Primary: last_bot_text dict (most reliable)
-        last_npc = last_bot_text.get(chat_id)
+    if data == "translate_last" or data.startswith("translate:"):
+        # Get text: either from specific key (voice messages) or last_bot_text
+        last_npc = None
+        if data.startswith("translate:"):
+            key = data.split(":", 1)[1]
+            last_npc = pending_texts.get(key)
 
-        # Fallback 1: user_memory
+        if not last_npc:
+            last_npc = last_bot_text.get(chat_id)
+
         if not last_npc:
             mem = user_memory.get(chat_id, [])
             last_npc = next(
                 (m["content"] for m in reversed(mem) if m.get("role") == "assistant"),
                 None
             )
-        # Fallback 2: message text the button was attached to
-        if not last_npc:
-            try:
-                last_npc = call.message.text or call.message.caption
-            except Exception:
-                last_npc = None
 
         if not last_npc:
             bot.answer_callback_query(call.id, "Noch keine Nachricht zum Übersetzen.")
