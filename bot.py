@@ -2450,12 +2450,14 @@ def start_scenario(chat_id, scenario):
                     f"Niveau {level}."
                 )
             else:
-                reframed = reframe_context_for_npc(ctx, name)
                 instruction = (
-                    f"Du bist {npc_role or 'die andere Person'}. "
-                    f"Situation: {reframed} "
-                    f"Eröffne das Gespräch in 1-2 Sätzen genau so wie deine Rolle es tun würde. "
-                    f"Niveau {level}. Natürlich, direkt, kein Hmm/Also."
+                    f"Du bist: {npc_role or 'die andere Person in dieser Situation'}.\n"
+                    f"Der Lernende ({name}) hat folgende Aufgabe: {ctx}\n\n"
+                    f"WICHTIG: {name} ist derjenige mit der Aufgabe/dem Problem — NICHT du.\n"
+                    f"Du bist die GEGENÜBERSEITE. Deine Rolle ist es, das Gespräch zu eröffnen "
+                    f"und {name} dazu einzuladen zu sprechen.\n"
+                    f"Eröffne mit 1-2 Sätzen die DEINER Rolle entsprechen und {name} motivieren zu antworten.\n"
+                    f"Niveau {level}. Direkt rein, kein Hmm/Also."
                 )
 
             try:
@@ -3683,10 +3685,12 @@ def handle_voice(message):
     # ── QUATSCHEN MODE ────────────────────────────────────────────────────────
     if mode == "quatschen":
         user_text = _transcribe_voice(message)
-        if user_text:
+        if user_text and user_text.strip():
             handle_quatschen_message(chat_id, user_text)
         else:
-            bot.send_message(chat_id, "Ich hab dich nicht verstanden 😅 Sag's nochmal!")
+            bot.send_message(chat_id,
+                "Ich hab dich leider nicht verstanden 😅\n"
+                "Versuch es nochmal — sprich etwas lauter oder näher ans Mikro!")
         return
 
     # ── CHAT MODE ─────────────────────────────────────────────────────────────
