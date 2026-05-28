@@ -14,8 +14,6 @@ import re
 import hashlib
 import unicodedata
 import anthropic
-import threading
-from flask import Flask, request, jsonify
 from io import BytesIO
 from datetime import datetime
 from urllib.parse import quote
@@ -4365,30 +4363,16 @@ def master_callback_router(call):
 
 # Stripe/webhook disabled for stability — re-enable later
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  LIGHTWEIGHT FLASK SERVER — only for Railway Cron webhook
-#  Uses gunicorn in production (see Procfile)
-# ═══════════════════════════════════════════════════════════════════════════
+ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))  # set your Telegram ID in Railway
 
-flask_app = Flask(__name__)
-CRON_SECRET = os.getenv("CRON_SECRET", "geheim123")  # set this in Railway env vars
-
-@flask_app.route("/health", methods=["GET"])
-def health():
-    return jsonify({"status": "ok"}), 200
-
-@flask_app.route("/send_gems", methods=["POST"])
-def send_gems_endpoint():
-    # Simple auth check
-    auth = request.headers.get("X-Cron-Secret", "")
-    if auth != CRON_SECRET:
-        return jsonify({"error": "unauthorized"}), 401
+@bot.message_handler(commands=["broadcastgems"])
+def handle_broadcast_gems(message):
+    """Admin-only: manually trigger daily gem broadcast."""
+    if ADMIN_CHAT_ID and message.chat.id != ADMIN_CHAT_ID:
+        return  # silent ignore for non-admins
+    bot.send_message(message.chat.id, "📤 Starte Gem-Broadcast...")
     sent = broadcast_daily_gem()
-    return jsonify({"sent": sent}), 200
-
-def run_flask():
-    port = int(os.getenv("PORT", 8080))
-    flask_app.run(host="0.0.0.0", port=port)
+    bot.send_message(message.chat.id, f"✅ Gem gesendet an {sent} User!")
 
 
 def broadcast_daily_gem():
@@ -4406,10 +4390,5 @@ def broadcast_daily_gem():
             log.warning(f"Gem broadcast failed for {uid}: {e}")
     log.info(f"German Gem broadcast done: {sent} users")
     return sent
-
-# Start Flask in background thread
-flask_thread = threading.Thread(target=run_flask, daemon=True)
-flask_thread.start()
-log.info("✅ Flask webhook server started")
 
 bot.infinity_polling()
