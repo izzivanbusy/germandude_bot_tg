@@ -460,57 +460,57 @@ SCENARIOS = [
     # =========================
     # NEW FORMAT — Selbstpräsentation
     # =========================
-    {"id": "self_1", "goal": "Selbstpräsentation", "level": ["A1", "A2"], "context": "Du bist umgezogen und triffst einen Nachbarn im Treppenhaus.", "persona": {"name": "Nachbar", "tone": "informal"}, "start": {"text": "Hey 😊 bist du neu hier im Haus?"}},
-    {"id": "self_2", "goal": "Selbstpräsentation", "level": ["A2", "B1"], "context": "Erster Tag im Job, Team stellt sich vor.", "persona": {"name": "Kollege", "tone": "informal"}, "start": {"text": "Hi! Erzähl mal kurz, wer du bist 😄"}},
-    {"id": "self_3", "goal": "Selbstpräsentation", "level": ["B1", "C1"], "context": "Vorstellungsgespräch.", "persona": {"name": "HR Manager", "tone": "formal"}, "start": {"text": "Guten Tag. Erzählen Sie bitte etwas über sich."}},
+    {"id": "self_1", "npc_role": "der freundliche Nachbar im Treppenhaus", "goal": "Selbstpräsentation", "level": ["A1", "A2"], "context": "Du bist umgezogen und triffst einen Nachbarn im Treppenhaus.", "persona": {"name": "Nachbar", "tone": "informal"}, "start": {"text": "Hey 😊 bist du neu hier im Haus?"}},
+    {"id": "self_2", "npc_role": "ein Teamkollege der sich vorstellt", "goal": "Selbstpräsentation", "level": ["A2", "B1"], "context": "Erster Tag im Job, Team stellt sich vor.", "persona": {"name": "Kollege", "tone": "informal"}, "start": {"text": "Hi! Erzähl mal kurz, wer du bist 😄"}},
+    {"id": "self_3", "npc_role": "die Personalmanagerin im Vorstellungsgespräch", "goal": "Selbstpräsentation", "level": ["B1", "C1"], "context": "Vorstellungsgespräch.", "persona": {"name": "HR Manager", "tone": "formal"}, "start": {"text": "Guten Tag. Erzählen Sie bitte etwas über sich."}},
 
     # =========================
     # NEW FORMAT — Freunde & Beziehungen
     # =========================
-    {"id": "friends_1", "goal": "Freunde / Beziehungen", "level": ["A1", "A2"], "context": "Freund ruft dich an und lädt dich ein.", "persona": {"name": "Freund", "tone": "informal"}, "start": {"text": "Ey 😄 hast du am Wochenende Zeit?"}},
-    {"id": "friends_2", "goal": "Freunde / Beziehungen", "level": ["B1", "B2"], "context": "Deine Freundin hat Probleme.", "persona": {"name": "Freundin", "tone": "informal"}, "start": {"text": "Hey… ich brauch kurz deinen Rat 😕"}},
+    {"id": "friends_1", "npc_role": "der Freund der anruft und einlädt", "goal": "Freunde / Beziehungen", "level": ["A1", "A2"], "context": "Freund ruft dich an und lädt dich ein.", "persona": {"name": "Freund", "tone": "informal"}, "start": {"text": "Ey 😄 hast du am Wochenende Zeit?"}},
+    {"id": "friends_2", "npc_role": "die Freundin mit Problemen die Unterstützung sucht", "goal": "Freunde / Beziehungen", "level": ["B1", "B2"], "context": "Deine Freundin hat Probleme.", "persona": {"name": "Freundin", "tone": "informal"}, "start": {"text": "Hey… ich brauch kurz deinen Rat 😕"}},
 
     # =========================
     # NEW FORMAT — Soziales
     # =========================
-    {"id": "social_1", "goal": "Soziales (Ämter, Ärzte)", "level": ["A1", "A2"], "context": "Du bist beim Arzt am Empfang.", "persona": {"name": "Rezeptionistin", "tone": "formal"}, "start": {"text": "Guten Tag. Wie kann ich Ihnen helfen?"}},
-    {"id": "social_2", "goal": "Soziales (Ämter, Ärzte)", "level": ["B1", "B2"], "context": "JobCenter Gespräch.", "persona": {"name": "Sachbearbeiter", "tone": "formal"}, "start": {"text": "Erzählen Sie bitte etwas über Ihre berufliche Situation."}},
+    {"id": "social_1", "npc_role": "die Empfangsdame in der Arztpraxis", "goal": "Soziales (Ämter, Ärzte)", "level": ["A1", "A2"], "context": "Du bist beim Arzt am Empfang.", "persona": {"name": "Rezeptionistin", "tone": "formal"}, "start": {"text": "Guten Tag. Wie kann ich Ihnen helfen?"}},
+    {"id": "social_2", "npc_role": "der Sachbearbeiter im JobCenter", "goal": "Soziales (Ämter, Ärzte)", "level": ["B1", "B2"], "context": "JobCenter Gespräch.", "persona": {"name": "Sachbearbeiter", "tone": "formal"}, "start": {"text": "Erzählen Sie bitte etwas über Ihre berufliche Situation."}},
 
     # =========================
     # NEW FORMAT — Unterhaltung
     # =========================
-    {"id": "fun_1", "goal": "Unterhaltung (Club, Kino etc)", "level": ["A1", "A2"], "context": "Smalltalk im Aufzug.", "persona": {"name": "Nachbar", "tone": "informal"}, "start": {"text": "Puh… heute ist echt kalt, oder?"}},
-    {"id": "fun_2", "goal": "Unterhaltung (Club, Kino etc)", "level": ["B1", "B2"], "context": "Bartender im Ski-Resort.", "persona": {"name": "Bartender", "tone": "informal"}, "start": {"text": "Na 😄 wie war dein erster Tag hier?"}},
+    {"id": "fun_1", "npc_role": "ein Nachbar im Aufzug der Smalltalk macht", "goal": "Unterhaltung (Club, Kino etc)", "level": ["A1", "A2"], "context": "Smalltalk im Aufzug.", "persona": {"name": "Nachbar", "tone": "informal"}, "start": {"text": "Puh… heute ist echt kalt, oder?"}},
+    {"id": "fun_2", "npc_role": "der Bartender im Après-Ski", "goal": "Unterhaltung (Club, Kino etc)", "level": ["B1", "B2"], "context": "Bartender im Ski-Resort.", "persona": {"name": "Bartender", "tone": "informal"}, "start": {"text": "Na 😄 wie war dein erster Tag hier?"}},
 
     # =========================
     # NEW FORMAT — Einkauf & Restaurants
     # =========================
-    {"id": "shop_1", "goal": "Einkauf & Restaurants", "level": ["A1", "A2"], "context": "Im Restaurant.", "persona": {"name": "Kellner", "tone": "formal"}, "start": {"text": "Guten Tag. Was möchten Sie bestellen?"}},
-    {"id": "shop_2", "goal": "Einkauf & Restaurants", "level": ["B1", "B2"], "context": "Reklamation im Laden.", "persona": {"name": "Mitarbeiter", "tone": "formal"}, "start": {"text": "Wie kann ich Ihnen helfen?"}},
+    {"id": "shop_1", "npc_role": "der Kellner im Restaurant", "goal": "Einkauf & Restaurants", "level": ["A1", "A2"], "context": "Im Restaurant.", "persona": {"name": "Kellner", "tone": "formal"}, "start": {"text": "Guten Tag. Was möchten Sie bestellen?"}},
+    {"id": "shop_2", "npc_role": "der Mitarbeiter der die Reklamation entgegennimmt", "goal": "Einkauf & Restaurants", "level": ["B1", "B2"], "context": "Reklamation im Laden.", "persona": {"name": "Mitarbeiter", "tone": "formal"}, "start": {"text": "Wie kann ich Ihnen helfen?"}},
 
     # =========================
     # NEW FORMAT — Reisen
     # =========================
-    {"id": "travel_1", "goal": "Tourismus & Reisen", "level": ["A1", "A2"], "context": "Hotel Check-in.", "persona": {"name": "Rezeption", "tone": "formal"}, "start": {"text": "Willkommen. Haben Sie reserviert?"}},
-    {"id": "travel_2", "goal": "Tourismus & Reisen", "level": ["B1", "B2"], "context": "Problem mit Airbnb.", "persona": {"name": "Host", "tone": "semi_formal"}, "start": {"text": "Hallo, was ist passiert?"}},
+    {"id": "travel_1", "npc_role": "der Empfangsmitarbeiter beim Hotel Check-in", "goal": "Tourismus & Reisen", "level": ["A1", "A2"], "context": "Hotel Check-in.", "persona": {"name": "Rezeption", "tone": "formal"}, "start": {"text": "Willkommen. Haben Sie reserviert?"}},
+    {"id": "travel_2", "npc_role": "der Airbnb-Host der das Problem lösen soll", "goal": "Tourismus & Reisen", "level": ["B1", "B2"], "context": "Problem mit Airbnb.", "persona": {"name": "Host", "tone": "semi_formal"}, "start": {"text": "Hallo, was ist passiert?"}},
 
     # =========================
     # NEW FORMAT — Sport & Hobbys
     # =========================
-    {"id": "hobby_1", "goal": "Sport & Hobbys", "level": ["A1", "A2"], "context": "Im Gym.", "persona": {"name": "Trainer", "tone": "informal"}, "start": {"text": "Hey 😊 was willst du heute trainieren?"}},
-    {"id": "hobby_2", "goal": "Sport & Hobbys", "level": ["B1", "B2"], "context": "Gespräch über Podcast.", "persona": {"name": "Kollege", "tone": "informal"}, "start": {"text": "Kennst du den Podcast XY?"}},
+    {"id": "hobby_1", "npc_role": "ein Gym-Mitglied das ins Gespräch kommt", "goal": "Sport & Hobbys", "level": ["A1", "A2"], "context": "Im Gym.", "persona": {"name": "Trainer", "tone": "informal"}, "start": {"text": "Hey 😊 was willst du heute trainieren?"}},
+    {"id": "hobby_2", "npc_role": "der Kollege der über seinen Lieblingspodcast erzählt", "goal": "Sport & Hobbys", "level": ["B1", "B2"], "context": "Gespräch über Podcast.", "persona": {"name": "Kollege", "tone": "informal"}, "start": {"text": "Kennst du den Podcast XY?"}},
 
     # =========================
     # NEW FORMAT — Telefon
     # =========================
-    {"id": "phone_1", "goal": "Am Telefon", "level": ["A2", "B1"], "context": "Restaurant anrufen.", "persona": {"name": "Restaurant", "tone": "formal"}, "start": {"text": "Restaurant Amelia, guten Tag."}},
-    {"id": "phone_2", "goal": "Am Telefon", "level": ["B1", "B2"], "context": "Support anrufen.", "persona": {"name": "Support", "tone": "formal"}, "start": {"text": "Kundenservice, wie kann ich Ihnen helfen?"}},
+    {"id": "phone_1", "npc_role": "der Mitarbeiter im Restaurant der abnimmt", "goal": "Am Telefon", "level": ["A2", "B1"], "context": "Restaurant anrufen.", "persona": {"name": "Restaurant", "tone": "formal"}, "start": {"text": "Restaurant Amelia, guten Tag."}},
+    {"id": "phone_2", "npc_role": "der Support-Mitarbeiter der den Anruf entgegennimmt", "goal": "Am Telefon", "level": ["B1", "B2"], "context": "Support anrufen.", "persona": {"name": "Support", "tone": "formal"}, "start": {"text": "Kundenservice, wie kann ich Ihnen helfen?"}},
 
     # =========================
     # NEW FORMAT — Job
     # =========================
-    {"id": "job_n1", "goal": "Job", "level": ["A2", "B1"], "context": "Mittagspause mit Kollegen.", "persona": {"name": "Kollege", "tone": "informal"}, "start": {"text": "Und? Wie ist dein erster Eindruck?"}},
-    {"id": "job_n2", "goal": "Job", "level": ["B2", "C1"], "context": "Meeting Update.", "persona": {"name": "Manager", "tone": "formal"}, "start": {"text": "Können Sie uns ein Update geben?"}},
+    {"id": "job_n1", "npc_role": "ein Kollege in der Mittagspause", "goal": "Job", "level": ["A2", "B1"], "context": "Mittagspause mit Kollegen.", "persona": {"name": "Kollege", "tone": "informal"}, "start": {"text": "Und? Wie ist dein erster Eindruck?"}},
+    {"id": "job_n2", "npc_role": "der Teamleiter der das Meeting-Update erwartet", "goal": "Job", "level": ["B2", "C1"], "context": "Meeting Update.", "persona": {"name": "Manager", "tone": "formal"}, "start": {"text": "Können Sie uns ein Update geben?"}},
 ]
 
 def level_to_num(level):
