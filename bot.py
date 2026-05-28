@@ -11,6 +11,8 @@ log = logging.getLogger("germandude")
 import random
 import time
 import re
+import hashlib
+import unicodedata
 import anthropic
 from io import BytesIO
 from datetime import datetime
@@ -29,6 +31,9 @@ ANTHROPIC_KEY   = os.getenv("ANTHROPIC_API_KEY")
 bot           = telebot.TeleBot(TELEGRAM_TOKEN)
 claude        = anthropic.Anthropic(api_key=ANTHROPIC_KEY)  # text/chat
 openai_client = OpenAI(api_key=OPENAI_KEY)                   # audio only
+
+# Defined early — needed by wrapper below
+last_bot_text = {}
 
 # ── TRANSLATE BUTTON WRAPPER ─────────────────────────────────────────────────
 # Automatically appends 🌍 übersetzen button to every plain bot message.
@@ -142,7 +147,7 @@ user_memory = {}
 user_voice = {}  # TTS voice per user
 current_scenario = {}
 last_voice_text     = {}  # last transcribed voice per user
-last_bot_text       = {}  # last text sent by bot (for übersetzen button)
+# last_bot_text defined earlier (before wrapper)
 last_voice_answer   = {}  # GPT reply for that voice (None if ask_gpt itself failed)
 last_voice_answered = {}  # True once the TTS reply was actually delivered
 user_data = load_users()
@@ -542,29 +547,28 @@ def reframe_context_for_npc(context: str, user_name: str = "") -> str:
       "Der Lernende (Farid) möchte sich anmelden und kommt an deinen Schalter."
     Only applied to old-format scenarios (text field); new-format already has explicit persona + start.
     """
-    import re as _re
     name_ref = user_name if user_name else "der Lernende"
 
     # Remove rhetorical question at the end ("was sagst du?", "wie reagierst du?" etc.)
-    ctx = _re.sub(r'[,.]?\s*(was sagst du[^?]*\?|wie reagierst du[^?]*\?|was machst du[^?]*\?)', '', context, flags=_re.IGNORECASE).strip()
-    ctx = _re.sub(r'\?$', '', ctx).strip()  # trailing ? from above
+    ctx = re.sub(r'[,.]?\s*(was sagst du[^?]*\?|wie reagierst du[^?]*\?|was machst du[^?]*\?)', '', context, flags=re.IGNORECASE).strip()
+    ctx = re.sub(r'\?$', '', ctx).strip()  # trailing ? from above
 
     # Replace "Du bist" → third person description
-    ctx = _re.sub(r'^Du bist ', f'{name_ref} ist ', ctx, flags=_re.IGNORECASE)
-    ctx = _re.sub(r'du bist ', f'{name_ref} ist ', ctx, flags=_re.IGNORECASE)
+    ctx = re.sub(r'^Du bist ', f'{name_ref} ist ', ctx, flags=re.IGNORECASE)
+    ctx = re.sub(r'du bist ', f'{name_ref} ist ', ctx, flags=re.IGNORECASE)
 
     # Replace "Du möchtest" → third person
-    ctx = _re.sub(r'^Du möchtest ', f'{name_ref} möchte ', ctx, flags=_re.IGNORECASE)
-    ctx = _re.sub(r' du möchtest ', f' {name_ref} möchte ', ctx, flags=_re.IGNORECASE)
+    ctx = re.sub(r'^Du möchtest ', f'{name_ref} möchte ', ctx, flags=re.IGNORECASE)
+    ctx = re.sub(r' du möchtest ', f' {name_ref} möchte ', ctx, flags=re.IGNORECASE)
 
     # Replace "Du hast" → third person
-    ctx = _re.sub(r'^Du hast ', f'{name_ref} hat ', ctx, flags=_re.IGNORECASE)
-    ctx = _re.sub(r' du hast ', f' {name_ref} hat ', ctx, flags=_re.IGNORECASE)
+    ctx = re.sub(r'^Du hast ', f'{name_ref} hat ', ctx, flags=re.IGNORECASE)
+    ctx = re.sub(r' du hast ', f' {name_ref} hat ', ctx, flags=re.IGNORECASE)
 
     # Replace "Du" standalone → der Lernende / name
-    ctx = _re.sub(r'du', name_ref, ctx, flags=_re.IGNORECASE)
-    ctx = _re.sub(r'dein', f'{name_ref}s', ctx, flags=_re.IGNORECASE)
-    ctx = _re.sub(r'deine', f'{name_ref}s', ctx, flags=_re.IGNORECASE)
+    ctx = re.sub(r'du', name_ref, ctx, flags=re.IGNORECASE)
+    ctx = re.sub(r'dein', f'{name_ref}s', ctx, flags=re.IGNORECASE)
+    ctx = re.sub(r'deine', f'{name_ref}s', ctx, flags=re.IGNORECASE)
 
     # Append clear NPC framing
     ctx = ctx.rstrip('.') + f'. {name_ref} kommt gerade rein / tritt an dich heran / spricht dich an.'
@@ -1019,9 +1023,9 @@ Du antwortest IMMER auf Deutsch — unabhängig davon, in welcher Sprache der Le
 # ── GLOBAL HUMAN SPEECH STYLE ────────────────────────────────────────────────
 # Injected into every system prompt to ensure natural, human-like responses
 HUMAN_SPEECH_STYLE = """
-SPRECHSTIL — MENSCHLICH, NICHT KI:
+SPRECHSTIL — MENSCHLICH, MIT PERSÖNLICHKEIT:
 
-Du bist ein Mensch. Sprich wie einer. Hier ist der Unterschied:
+Du bist ein Mensch mit echtem Charakter. Nicht nett-generisch, sondern echt-menschlich.
 
 ❌ KI-Stil (VERBOTEN):
 - "Hmm, das ist eine interessante Frage!"
@@ -1032,19 +1036,33 @@ Du bist ein Mensch. Sprich wie einer. Hier ist der Unterschied:
 - "Gerne erkläre ich dir das."
 
 ✅ Menschlicher Stil (SO SPRICHST DU):
-- "Echt? Erzähl mal mehr."
-- "Das kenn ich — war bei mir genauso."
-- "Warte mal... meinst du das ernst?"
+- "Echt jetzt? Das hätte ich nicht erwartet."
+- "Warte mal kurz — das versteh ich nicht ganz."
 - "Krass. Und dann?"
-- "Ja, das ist halt so."
-- "Stimmt, das nervt."
+- "Ja, das ist halt leider so."
+- "Okay aber ehrlich gesagt... klingt das nicht ideal."
+- "Das kenn ich, war bei mir genauso. Hat sich gelohnt."
+- "Naja, könnte schlimmer sein." ← leichter Sarkasmus, nie gemein
+
+FÜLLWÖRTER (sparsam einsetzen, wirkt natürlicher):
+"echt", "halt", "eigentlich", "irgendwie", "sozusagen", "quasi", "krass",
+"warte mal", "echt jetzt", "ne?", "oder?", "weißt du", "ich mein",
+"boah" — sehr typisch im Deutschen, besonders im Smalltalk:
+  "Boah, ist das heiß heute!", "Boah, das glaub ich dir sofort.", "Boah ey, echt?"
+
+HUMOR & LEICHTER SARKASMUS (situationsabhängig):
+- Wenn etwas schief läuft: "Na, das war ja vorhersehbar." (mit Augenzwinkern)
+- Bei Übertreibung: "Ja klar, völlig normal."
+- Selbstironie erlaubt: "Ich frag mich manchmal auch warum."
+- NIEMALS sarkastisch wenn jemand traurig/gestresst ist — dann nur warm und ehrlich
 
 REGELN:
 1. Kein Satz fängt mit Hmm, Also, Nun, Tja, Natürlich, Absolut, Gerne, Sicher, Toll an
-2. Keine übertriebene Begeisterung — Menschen reagieren nicht auf jede Aussage mit Ausrufezeichen
-3. Kurze Sätze. Echte Reaktionen. Manchmal nur 2-3 Wörter.
-4. Zeig echte Emotionen: Überraschung, Skepsis, Humor, Mitgefühl — aber natürlich
-5. Stell echte Folgefragen — nicht "Wie kann ich dir weiterhelfen?" sondern "Und wie war das für dich?"
+2. Keine übertriebene Begeisterung — echte Menschen sagen nicht auf alles "Super!"
+3. Kurze Sätze. Manchmal nur 2-3 Wörter als Reaktion.
+4. Meinungen haben — nicht immer zustimmen, ruhig widersprechen wenn es passt
+5. Echte Folgefragen — "Und wie war das für dich?" statt "Wie kann ich helfen?"
+6. Humor ist subtil, nie erzwungen — wenn es sich nicht natürlich ergibt, weglassen
 """
 
 SPEED_MAP = {"A1": 0.8, "A2": 0.85, "B1": 0.95, "B2": 1.0, "C1": 1.05}
@@ -1062,7 +1080,6 @@ def human_delay():
 
 def clean_for_tts(text):
     """Strip everything that a TTS model would read aloud as punctuation or symbols."""
-    import unicodedata
     # Strip parenthetical / bracketed stage directions GPT sometimes generates
     # e.g. "(leichte Pause)", "(seufzt)", "[Pause]", "*(zögert)*"
     text = re.sub(r'\*?\([\w\s,äöüÄÖÜß\-]+\)\*?', '', text)
@@ -1085,28 +1102,31 @@ def clean_for_tts(text):
     return text.strip()
 
 def humanize_text(text, level):
-    # Do NOT replace periods — TTS handles them as pauses naturally
-    starters = ["Ahh okay,", "Hmm,", "Alles klar,", "Interessant,"]
-    if random.random() < 0.4:
-        text = random.choice(starters) + " " + text
+    # Do NOT add filler starters — Claude handles naturalness via prompt
+    # Just return text as-is; strip_filler already handles KI-starters
     return text
 
 def text_to_speech_stream(text, chat_id=None):
     level = user_data.get(str(chat_id), {}).get("level", "B1") if chat_id else "B1"
     speed = get_speed(level)
     voice = user_voice.get(chat_id, "alloy") if chat_id else "alloy"
-    text  = clean_for_tts(text)
-    response = openai_client.audio.speech.create(
-        model="gpt-4o-mini-tts",
-        voice=voice,
-        input=text,
-        speed=speed
-    )
-    audio_bytes = response.read()
-    audio_file = BytesIO(audio_bytes)
-    audio_file.seek(0)
-    audio_file.name = "voice.mp3"
-    return audio_file
+    text = clean_for_tts(text)
+    if not text or len(text.strip()) < 2:
+        log.warning(f"TTS: text became empty after cleaning for {chat_id}")
+        raise ValueError("Empty text after cleaning")
+    try:
+        response = openai_client.audio.speech.create(
+            model="gpt-4o-mini-tts",
+            voice=voice,
+            input=text[:4000],  # API limit safety
+            speed=speed
+        )
+        audio_file = BytesIO(response.read())
+        audio_file.name = "voice.ogg"
+        return audio_file
+    except Exception as e:
+        log.error(f"TTS failed for chat_id={chat_id}: {e}")
+        raise
 
 def safe_markdown_send(chat_id, text, **kwargs):
     """Send with Markdown; if parse fails, retry as plain text."""
@@ -1137,27 +1157,25 @@ def send_reply(chat_id, text, voice=True):
         bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=translate_markup)
         return
 
-    audio = text_to_speech_stream(text, chat_id)
-
-    _text_id_counter += 1
-    pending_texts[_text_id_counter] = text
+    text_key = hashlib.md5(text.encode()).hexdigest()[:8]
+    pending_texts[text_key] = text
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("📄 Text anzeigen", callback_data=f"show_text:{_text_id_counter}"))
+    markup.add(InlineKeyboardButton("📄 Text anzeigen", callback_data=f"show_text:{text_key}"))
     markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data=f"translate_last"))
+
     try:
-        bot.send_audio(chat_id, audio, reply_markup=markup)
+        audio = text_to_speech_stream(text, chat_id)
+        bot.send_voice(chat_id, audio, reply_markup=markup)
     except Exception as e:
         err = str(e)
+        log.error(f"Voice send failed for {chat_id}: {e}")
         if "VOICE_MESSAGES_FORBIDDEN" in err:
-            bot.send_message(
-                chat_id,
-                "🔇 Sprachnachrichten sind in deinen Telegram-Einstellungen deaktiviert.\n\n"
-                "Bitte aktiviere sie: *Einstellungen → Privatsphäre → Sprachnachrichten → Alle*\n\n"
-                f"📄 _{text}_",
-                parse_mode="Markdown"
-            )
+            bot.send_message(chat_id,
+                "🔇 Sprachnachrichten deaktiviert. Bitte aktiviere sie in Telegram-Einstellungen.",
+                reply_markup=markup)
         else:
-            raise
+            # TTS failed — send as text with buttons
+            bot.send_message(chat_id, f"💬 {text}", reply_markup=markup)
 
 def send_chat_reply(chat_id, text):
     send_reply(chat_id, text, voice=True)
@@ -1194,7 +1212,6 @@ def get_translation(chat_id, text_to_translate):
 
 def strip_filler(text: str) -> str:
     """Remove AI filler words from the start of a response."""
-    import re as _re
     fillers = [
         r"^Hmm+[,.]?\s*",
         r"^Also[,.]?\s*",
@@ -1209,7 +1226,7 @@ def strip_filler(text: str) -> str:
         r"^Na[,.]?\s+",
     ]
     for pattern in fillers:
-        text = _re.sub(pattern, "", text, flags=_re.IGNORECASE)
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
     # Capitalize first letter after stripping
     if text:
         text = text[0].upper() + text[1:]
@@ -1245,9 +1262,22 @@ def ask_gpt(chat_id, user_text):
         "content": user_text
     })
 
+    mem = user_memory[chat_id]
+    # Extract system prompt — must NEVER be in messages list for Anthropic API
+    sys_msgs = [m for m in mem if m.get("role") == "system"]
+    sys_msg = sys_msgs[0]["content"] if sys_msgs else ""
+    conv_msgs = [m for m in mem if m.get("role") != "system"]
+    # Ensure conv_msgs only has user/assistant roles
+    conv_msgs = [m for m in conv_msgs if m.get("role") in ("user", "assistant")]
+    # Claude requires at least one message
+    if not conv_msgs:
+        conv_msgs = [{"role": "user", "content": user_text or "..."}]
+
     response = claude.messages.create(
         model="claude-haiku-4-5-20251001",
-        messages=user_memory[chat_id]
+        max_tokens=512,
+        system=sys_msg,
+        messages=conv_msgs
     )
 
     reply = strip_filler(response.content[0].text)
@@ -1355,16 +1385,32 @@ def start_quatschen(chat_id):
     if name:
         sys_prompt += f"\n\nDer User heißt {name}. Benutze seinen Namen gelegentlich."
 
-    # Init memory
+    # Load history first, then build sys_prompt with memory context
+    history = user_data.get(str(chat_id), {}).get("quatschen_history", [])
+    if history:
+        sys_prompt += f"\n\nDu erinnerst dich an frühere Gespräche mit {name}. Benutze dieses Wissen natürlich."
+
+    # Init memory with final sys_prompt
     user_memory[chat_id] = [{"role": "system", "content": sys_prompt}]
     turn_counter[chat_id] = 0
 
-    # Generate opening voice message
-    opening_prompt = (
-        f"Starte das Gespräch mit einer kurzen, herzlichen Begrüßung. "
-        f"Frag wie es dem User geht. Maximal 2 Sätze. "
-        f"Beispiel: 'Hey{' ' + name if name else ''}! Na, wie geht's dir so?'"
-    )
+    # Add last 10 exchanges to memory
+    if history:
+        for exchange in history[-10:]:
+            user_memory[chat_id].append({"role": "user",      "content": exchange["user"]})
+            user_memory[chat_id].append({"role": "assistant", "content": exchange["bot"]})
+
+    # Opening prompt
+    if history:
+        opening_prompt = (
+            f"Du kennst {name} schon. Begrüße ihn/sie kurz und herzlich wie einen alten Freund. "
+            f"Maximal 2 Sätze. Kein 'Willkommen zurück'."
+        )
+    else:
+        opening_prompt = (
+            f"Begrüße {name or 'den User'} kurz und herzlich. "
+            f"Frag wie es ihm/ihr geht. Maximal 2 Sätze."
+        )
 
     try:
         resp = claude.messages.create(
@@ -1374,7 +1420,8 @@ def start_quatschen(chat_id):
             messages=[{"role": "user", "content": opening_prompt}]
         )
         opening = strip_filler(resp.content[0].text.strip())
-    except Exception:
+    except Exception as e:
+        log.warning(f"Quatschen opening generation failed: {e}")
         opening = f"Hey{' ' + name if name else ''}! Na, wie geht's dir so? 😊"
 
     user_memory[chat_id].append({"role": "assistant", "content": opening})
@@ -1396,8 +1443,10 @@ def handle_quatschen_message(chat_id, user_text):
 
     try:
         mem = user_memory[chat_id]
-        sys_msg = mem[0]["content"] if mem and mem[0]["role"] == "system" else ""
-        conv_msgs = [m for m in mem if m["role"] != "system"]
+        sys_msg = next((m["content"] for m in mem if m.get("role") == "system"), "")
+        conv_msgs = [m for m in mem if m.get("role") in ("user", "assistant")]
+        if not conv_msgs:
+            conv_msgs = [{"role": "user", "content": user_text}]
 
         response = claude.messages.create(
             model="claude-haiku-4-5-20251001",
@@ -1410,7 +1459,8 @@ def handle_quatschen_message(chat_id, user_text):
         reply = "Ey, kurze Pause — sag nochmal, was du meintest! 😄"
 
     user_memory[chat_id].append({"role": "assistant", "content": reply})
-    turn_counter[chat_id] = turn_counter.get(chat_id, 0) + 1
+    turns = turn_counter.get(chat_id, 0) + 1
+    turn_counter[chat_id] = turns
 
     # Save conversation snippet to user data for memory
     uid = str(chat_id)
@@ -1421,11 +1471,20 @@ def handle_quatschen_message(chat_id, user_text):
         "bot": reply,
         "ts": datetime.now().isoformat()
     })
-    # Keep only last 50 exchanges
     user_data[uid]["quatschen_history"] = user_data[uid]["quatschen_history"][-50:]
     save_users(user_data)
 
-    send_reply(chat_id, reply, voice=True)
+    # After 5th user message — show "Gespräch beenden" button once
+    if turns == 5:
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("💬 Dieses Gespräch beenden", callback_data="end_quatschen"))
+        send_reply(chat_id, reply, voice=True)
+        bot.send_message(chat_id,
+            "_(Du kannst das Gespräch jederzeit beenden und deine XP einsammeln.)_",
+            parse_mode="Markdown",
+            reply_markup=markup)
+    else:
+        send_reply(chat_id, reply, voice=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1897,7 +1956,6 @@ GESPRÄCH:
         try:
             extracted_errors = json.loads(json_str)
         except Exception:
-            import re
             m = re.search(r'\[.*?\]', json_str, re.DOTALL)
             if m:
                 try:
@@ -2274,8 +2332,8 @@ def start_chat_callback(call):
 
 def show_text_callback(call):
     try:
-        tid = int(call.data.split(":")[1])
-        text = pending_texts.get(tid, "")
+        key = call.data.split(":")[1]
+        text = pending_texts.get(key, "")
     except (IndexError, ValueError):
         bot.answer_callback_query(call.id, "Nicht verfügbar.")
         return
@@ -2283,7 +2341,12 @@ def show_text_callback(call):
     if text:
         bot.send_message(call.message.chat.id, f"💬 {text}")
     else:
-        bot.answer_callback_query(call.id, "Text nicht mehr verfügbar.")
+        # Fallback: use last_bot_text
+        text = last_bot_text.get(call.message.chat.id, "")
+        if text:
+            bot.send_message(call.message.chat.id, f"💬 {text}")
+        else:
+            bot.answer_callback_query(call.id, "Text nicht mehr verfügbar.")
 
 def handle_topic_callback(call):
     chat_id = call.message.chat.id
@@ -2322,11 +2385,8 @@ def handle_topic_callback(call):
         bot.send_message(chat_id, "⚠️ Kein passendes Szenario gefunden. Bitte /restart.")
         return
 
-    ctx = scenario.get("context") or scenario.get("text", "")
-    bot.send_message(chat_id,
-        f"🎯 *{goal}*\n\n"
-        f"🎭 {ctx}",
-        parse_mode="Markdown")
+    # Context text is sent inside start_scenario — don't send here too
+    bot.send_message(chat_id, f"🎯 *{goal}*", parse_mode="Markdown")
     start_scenario(chat_id, scenario)
 
 def start_scenario(chat_id, scenario):
@@ -2355,77 +2415,63 @@ def start_scenario(chat_id, scenario):
     #    - new-format scenarios have a hardcoded start.text → use it with name substitution
     #    - old-format scenarios → generate a vivid, level-appropriate opener via GPT
     if "start" in scenario and scenario["start"].get("text"):
+        # New-format scenario: hardcoded opening
         opening = scenario["start"]["text"].replace("[Name]", name)
     else:
-        level = user_data.get(str(chat_id), {}).get("level", "A2")
-
-        # Detect phone-call scenarios: user is the caller, NPC picks up
-        ctx_lower = ctx.lower()
-        is_phone = any(kw in ctx_lower for kw in [
-            "ruf", "anrufen", "telefonier", "anruf", "rufst", "rufe", "telefon"
-        ])
-
-        # Get npc_role from scenario
+        level    = user_data.get(str(chat_id), {}).get("level", "A2")
         npc_role = scenario.get("npc_role", "")
 
-        # Refine is_phone: only if NPC role is actually a professional/service context
-        # Colleague/friend calling = NOT a phone pickup scenario
-        npc_role_lower = npc_role.lower() if npc_role else ""
-        is_professional_phone = is_phone and any(kw in npc_role_lower for kw in [
-            "mitarbeiter", "sachbearbeiter", "rezeption", "empfang", "arzt", "praxis",
-            "support", "kundenservice", "restaurant", "hotel", "bank", "sekretär"
-        ])
-        is_friend_call = is_phone and any(kw in npc_role_lower for kw in [
-            "kollege", "freund", "kumpel", "bestie", "schwester", "bruder", "partner",
-            "nachbar", "date", "chef", "abteilungsleiter"
-        ])
-
-        if is_professional_phone and not is_friend_call:
-            situation_instruction = (
-                f"SITUATION: {ctx}\n\n"
-                f"Du bist: {npc_role}\n"
-                f"{name} ruft gerade an. Du nimmst das Telefon ab.\n"
-                "Antworte mit einem echten, professionellen Telefongruß passend zu deiner Rolle:\n"
-                "→ Format: [Firmen- oder Praxisname] + Gruß + dein Name + Hilfsangebot\n"
-                "→ Beispiel: \"Toller Laden GmbH, guten Tag, hier ist Sara, wie kann ich Ihnen helfen?\"\n"
-                "Erfinde einen passenden Namen der zu deiner Rolle passt.\n"
-                f"Niveau {level}: Tempo und Vokabular anpassen, aber IMMER korrektes Deutsch.\n"
-                "Kein Zögern, keine Pausen beim Abheben."
-            )
+        # ── SMART EXTRACTION: pull quoted speech directly from scenario text ──
+        # Many scenarios already contain the NPC's first line in quotes e.g.:
+        # „Na, wie läuft dein erster Tag so?" or "Guten Tag, wie kann ich helfen?"
+        quoted = re.findall(r'[„""]([^„"""]+)[""""]', ctx)
+        if quoted:
+            # Use the last quoted phrase — it's usually the NPC's line
+            opening = strip_filler(quoted[-1].strip())
+            log.info(f"Opening extracted from scenario text: {opening!r}")
         else:
-            reframed = reframe_context_for_npc(ctx, name)
-            # Friend/colleague call: NPC is the one calling, opens differently
-            if is_friend_call:
-                situation_instruction = (
-                    f"DEINE AUFGABE: Sprich die ERSTE Zeile des Gesprächs — du rufst gerade an.\n\n"
-                    f"Du bist: {npc_role}\n"
-                    f"SITUATION: {ctx}\n\n"
-                    f"{name} nimmt gerade ab. Begrüße ihn/sie natürlich und frag wie es geht.\n"
-                    f"Beispiel: \"Hey {name}, ich bin's! Wie geht's dir? Ich hab gehört du bist krank...\"\n"
-                    f"Niveau {level}: Sprachtempo und Vokabular anpassen.\n"
-                    "1–2 Sätze. Kein formelles Firmen-Greeting — das ist ein Freundes/Kollegen-Anruf!"
+            # ── GENERATE via Claude ──────────────────────────────────────────
+            ctx_lower    = ctx.lower()
+            npc_lower    = npc_role.lower()
+            is_phone     = any(kw in ctx_lower for kw in ["ruf", "anrufen", "telefonier", "anruf", "rufst", "rufe", "telefon"])
+            is_prof_phone = is_phone and any(kw in npc_lower for kw in ["mitarbeiter", "sachbearbeiter", "rezeption", "empfang", "arzt", "praxis", "support", "kundenservice", "restaurant", "hotel", "bank", "sekretär"])
+            is_friend_call = is_phone and any(kw in npc_lower for kw in ["kollege", "freund", "kumpel", "bestie", "schwester", "bruder", "partner", "nachbar", "date", "chef"])
+
+            if is_prof_phone:
+                instruction = (
+                    f"Du bist {npc_role}. {name} ruft gerade an. "
+                    f"Nimm ab mit einem professionellen Telefongruß: [Firma] + Gruß + Name + Hilfsangebot. "
+                    f"Niveau {level}. Nur 1 Satz."
+                )
+            elif is_friend_call:
+                instruction = (
+                    f"Du bist {npc_role} und rufst {name} gerade an. "
+                    f"Begrüße ihn/sie natürlich — 1-2 Sätze, locker, kein Firmen-Greeting. "
+                    f"Niveau {level}."
                 )
             else:
-                situation_instruction = (
-                    f"DEINE AUFGABE: Sprich die ERSTE Zeile des Gesprächs.\n\n"
-                    f"Du bist: {npc_role}\n"
-                    f"SITUATION (aus deiner Perspektive): {reframed}\n\n"
-                    f"Eröffne das Gespräch genau so wie es {npc_role} tun würde.\n"
-                    f"Beispiel Bürgeramt-Sachbearbeiter: \'Guten Tag, wie kann ich Ihnen helfen?\'\n"
-                    f"Beispiel Kollege: \'Hey {name}, na wie läuft\'s?\'\n"
-                    f"Niveau {level}: Sprachtempo und Vokabular anpassen, aber IMMER korrektes Deutsch.\n"
-                    "1–2 Sätze. Kein erzwungenes Name-Dropping."
+                reframed = reframe_context_for_npc(ctx, name)
+                instruction = (
+                    f"Du bist {npc_role or 'die andere Person'}. "
+                    f"Situation: {reframed} "
+                    f"Eröffne das Gespräch in 1-2 Sätzen genau so wie deine Rolle es tun würde. "
+                    f"Niveau {level}. Natürlich, direkt, kein Hmm/Also."
                 )
 
-        resp = claude.messages.create(
-            model="claude-haiku-4-5-20251001",
-            messages=[
-                {"role": "system", "content": sys_prompt},
-                {"role": "user",   "content": situation_instruction},
-            ],
-            max_tokens=120,
-        )
-        opening = resp.content[0].text.strip()
+            try:
+                resp = claude.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    system=sys_prompt,
+                    messages=[{"role": "user", "content": instruction}],
+                    max_tokens=120,
+                )
+                opening = strip_filler(resp.content[0].text.strip())
+                if not opening:
+                    raise ValueError("Empty response")
+                log.info(f"Opening generated by Claude: {opening!r}")
+            except Exception as e:
+                log.warning(f"Opening generation failed for {chat_id}: {e}")
+                opening = "Guten Tag! Wie kann ich helfen?"
 
     # 5. Store opener as first assistant turn in memory (dialog continues from here)
     user_memory[chat_id].append({"role": "assistant", "content": opening})
@@ -2517,13 +2563,12 @@ def prepare_question(q):
 
 def _send_raw_question(chat_id, q_dict, label):
     """Helper: send a single question dict with A/B/C buttons."""
-    import random as _random
     state = test_state[chat_id]
 
     # Shuffle options but track where the correct answer ends up
     options = list(q_dict["options"])
     correct_text = q_dict["answer"]
-    _random.shuffle(options)
+    random.shuffle(options)
     correct_index = options.index(correct_text)
 
     pq = {
@@ -2594,8 +2639,7 @@ def send_question(chat_id):
         finish_test(chat_id)
         return
 
-    import random as _random
-    q = _random.choice(pool)
+    q = random.choice(pool)
     state["used_ids"].add(q["id"])
 
     label = f"❓ Frage {q_index + 1}/10  •  Level {level}"
@@ -2748,49 +2792,76 @@ def lesson_yes_callback(call):
 
     native_lang = user_data.get(str(chat_id), {}).get("native_language", "Englisch")
 
-    # Translate the intro message
+    # Intro message in native language
     try:
         intro_resp = claude.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=80,
-            messages=[{"role": "user", "content": (
-                f"Translate into {native_lang}. Only return the translation:\n\n"
-                f"Here are your first German lessons! 🎓"
-            )}]
+            messages=[{"role": "user", "content":
+                f"Translate into {native_lang}. Only return the translation: "
+                "Here are your first German lessons!"
+            }]
         )
         intro_msg = intro_resp.content[0].text.strip()
-    except Exception:
+    except Exception as e:
+        log.warning(f"Intro translation failed: {e}")
         intro_msg = "Here are your first German lessons! 🎓"
 
     bot.send_message(chat_id, intro_msg)
     bot.send_chat_action(chat_id, "typing")
 
-    response = claude.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=2000,
-        messages=[{"role": "user", "content": (
-            f"You are a German teacher for absolute beginners. "
-            f"Create structured mini-lessons in German with translations in {native_lang}. "
-            f"Cover ALL of these topics in this exact order:\n"
-            f"1. 👋 Begrüßungen (Greetings) — 4 examples\n"
-            f"2. 🔢 Zahlen 1-20 (Numbers) — all numbers 1-20\n"
-            f"3. 📅 Wochentage (Days of the week) — all 7 days\n"
-            f"4. 🗓️ Monate (Months) — all 12 months\n"
-            f"5. ⚡ Basis-Verben (Basic verbs) — sein, haben, gehen, kommen, möchten + example each\n"
-            f"6. 💬 Wichtige Phrasen (Key phrases) — 6 must-know phrases\n\n"
-            f"Format for each item:\n"
-            f"🇩🇪 Deutsch — {native_lang} translation\n\n"
-            f"Be friendly and encouraging. No extra commentary, just the lessons."
-        )}]
-    )
-    lesson_text = response.content[0].text.strip()
+    # Mini lessons
+    try:
+        lesson_resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=2000,
+            messages=[{"role": "user", "content":
+                f"German teacher for absolute beginners. Create mini-lessons with {native_lang} translations. "
+                f"Cover in order: 1) Begrüßungen (4 examples) 2) Zahlen 1-20 3) Wochentage 4) Monate "
+                f"5) Basis-Verben: sein/haben/gehen/kommen/möchten with examples 6) 6 key phrases. "
+                f"Format: German — {native_lang}. Be friendly."
+            }]
+        )
+        lesson_text = lesson_resp.content[0].text.strip()
+    except Exception as e:
+        log.warning(f"Lesson generation failed: {e}")
+        lesson_text = "Hallo — Hello\nDanke — Thank you\nBitte — Please"
 
-    # Store in user_memory so übersetzen button works
     if chat_id not in user_memory:
         user_memory[chat_id] = []
     user_memory[chat_id].append({"role": "assistant", "content": lesson_text})
+    last_bot_text[chat_id] = lesson_text
 
-    bot.send_message(chat_id, lesson_text)
+    translate_markup = InlineKeyboardMarkup()
+    translate_markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+    bot.send_message(chat_id, lesson_text, reply_markup=translate_markup)
+
+    # Mini dialog
+    bot.send_chat_action(chat_id, "typing")
+    try:
+        dialog_resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=600,
+            messages=[{"role": "user", "content":
+                f"Write a short German dialog: two people meeting. "
+                f"After every German line, write the {native_lang} translation in italics (markdown _text_). "
+                f"Cover: greeting, names, where from, age, nice to meet you. "
+                f"Start with header: 🗣️ Mini-Dialog: Sich vorstellen"
+            }]
+        )
+        dialog_text = dialog_resp.content[0].text.strip()
+    except Exception as e:
+        log.warning(f"Dialog failed: {e}")
+        dialog_text = "🗣️ Mini-Dialog\n— Hallo, ich heiße Anna.\n— Ich bin Max. Woher kommst du?\n— Aus Berlin. Und du?\n— Aus München. Freut mich!"
+
+    last_bot_text[chat_id] = dialog_text
+    user_memory[chat_id].append({"role": "assistant", "content": dialog_text})
+
+    restart_markup = InlineKeyboardMarkup()
+    restart_markup.add(InlineKeyboardButton("🔄 Test erneut starten", callback_data="start_test"))
+    restart_markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+    bot.send_message(chat_id, dialog_text, parse_mode="Markdown", reply_markup=restart_markup)
+
 
 def lesson_no_callback(call):
     chat_id = call.message.chat.id
@@ -3063,13 +3134,15 @@ def start_exercise(chat_id):
     bot.send_message(chat_id, "💪 *Mini-Übung startet...*", parse_mode="Markdown")
     response = claude.messages.create(
         model="claude-haiku-4-5-20251001",
-        messages=[{"role": "system", "content": (
+        max_tokens=512,
+        system=(
                 f"Du bist ein Deutschlehrer. Niveau des Lernenden: {level}.\n"
                 f"Erstelle GENAU EINE kurze Übung (Multiple Choice ODER Lückensatz).\n"
                 f"Thema: {focus}\n"
                 "Format: kurze Aufgabe + 3 Optionen a / b / c.\n"
                 "Kein Kommentar davor oder danach — nur die Übung."
-        )}]
+        ),
+        messages=[{"role": "user", "content": "Erstelle die Übung jetzt."}]
     )
     bot.send_message(chat_id, response.content[0].text)
 
@@ -3256,7 +3329,7 @@ def handle_translate(message):
     lang = user.get("native_language", "Englisch")
     translation = get_translation(chat_id, last_npc)
     bot.send_message(chat_id, f"🌍 Übersetzung ({lang}):\n\n_{translation}_",
-        parse_mode="Markdown")
+        parse_mode="Markdown", reply_markup=InlineKeyboardMarkup())
 
 
 @bot.message_handler(func=lambda message: True)
@@ -3493,7 +3566,8 @@ def send_exercise(message):
 
     response = claude.messages.create(
         model="claude-haiku-4-5-20251001",
-        messages=[{"role": "system", "content": """Du bist ein Deutschlehrer.
+        max_tokens=512,
+        system="""Du bist ein Deutschlehrer.
 
 Erstelle eine kurze Übung (A2-B1 Niveau).
 
@@ -3501,7 +3575,8 @@ Regeln:
 - max. 1 Aufgabe
 - Multiple Choice ODER Lückensatz
 - Thema: Restaurant / Reservierung
-- einfach & klar"""}]
+- einfach & klar""",
+        messages=[{"role": "user", "content": "Erstelle die Übung jetzt."}]
     )
 
     reply = response.content[0].text
@@ -3526,7 +3601,6 @@ def stimme(message):
 
 def extract_quiz_answer(text: str) -> str:
     """Extract a/b/c from a spoken transcript. Returns '' if not found."""
-    import re
     t = text.strip().lower()
     # Direct single letter or starts with it
     if t in ("a", "b", "c"):
@@ -3708,6 +3782,44 @@ def master_callback_router(call):
         restart_chat(chat_id)
         return
 
+    if data == "end_quatschen":
+        bot.answer_callback_query(call.id)
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+
+        turns = turn_counter.get(chat_id, 0)
+        xp_gain, bonus_msg = calculate_xp(turns, "normal")
+        new_streak, lost_streak = update_streak(chat_id)
+
+        if lost_streak >= 2:
+            bot.send_message(chat_id,
+                f"😭 Dein {lost_streak}-Tage-Streak ist weg...\n"
+                f"Aber hey — du bist wieder da! Neuer Streak: 🔥 1 Tag.",
+                parse_mode="Markdown")
+
+        leveled_up = add_xp(chat_id, xp_gain)
+        stats = user_data[str(chat_id)]["user_stats"]
+
+        new_badges = check_achievements(chat_id)
+        for emoji, title, desc in new_badges:
+            bot.send_message(chat_id,
+                f"🏅 *Achievement freigeschaltet!*\n{emoji} *{title}*\n_{desc}_",
+                parse_mode="Markdown")
+
+        if leveled_up:
+            bot.send_message(chat_id,
+                f"🚀 *LEVEL UP!* Du bist jetzt Level {stats['level']}! 💪",
+                parse_mode="Markdown")
+
+        reward = build_reward_block(chat_id, xp_gain, bonus_msg, turns)
+        bot.send_message(chat_id, reward, parse_mode="Markdown")
+
+        # Reset quatschen state
+        user_state[chat_id] = {"mode": "idle"}
+        current_scenario.pop(chat_id, None)
+
+        bot.send_message(chat_id, "Bis zum nächsten Mal! 👋 /themen um weiterzumachen.")
+        return
+
     if data == "confirm_restart":
         bot.answer_callback_query(call.id)
         bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
@@ -3746,7 +3858,7 @@ def master_callback_router(call):
         bot.answer_callback_query(call.id, "Übersetze...")
         try:
             translation = get_translation(chat_id, last_npc)
-            bot.send_message(chat_id, f"🌍 {lang}:\n\n{translation}")
+            bot.send_message(chat_id, f"🌍 {lang}:\n\n{translation}", reply_markup=InlineKeyboardMarkup())
         except Exception:
             bot.send_message(chat_id, "Übersetzung fehlgeschlagen 😅 Versuch es nochmal.")
         return
