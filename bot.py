@@ -1792,6 +1792,39 @@ def start_quatschen(chat_id):
     # Send as voice
     send_reply(chat_id, opening, voice=True)
 
+def _quatschen_end_with_xp(chat_id):
+    """Award XP and show share button after Quatschen session ends."""
+    turns = turn_counter.get(chat_id, 0)
+    xp_gain, bonus_msg = calculate_xp(turns, "normal")
+    new_streak, lost_streak = update_streak(chat_id)
+
+    if lost_streak >= 2:
+        bot.send_message(chat_id,
+            f"😭 Dein {lost_streak}-Tage-Streak ist weg...\n"
+            f"Aber hey — du bist wieder da! Neuer Streak: 🔥 1 Tag.")
+
+    leveled_up = add_xp(chat_id, xp_gain)
+    stats = user_data[str(chat_id)]["user_stats"]
+
+    new_badges = check_achievements(chat_id)
+    for emoji, title, desc in new_badges:
+        bot.send_message(chat_id,
+            f"🏅 *Achievement freigeschaltet!*\n{emoji} *{title}*\n_{desc}_",
+            parse_mode="Markdown")
+
+    if leveled_up:
+        bot.send_message(chat_id,
+            f"🚀 *LEVEL UP!* Du bist jetzt Level {stats['level']}! 💪",
+            parse_mode="Markdown")
+
+    reward = build_reward_block(chat_id, xp_gain, bonus_msg, turns)
+    bot.send_message(chat_id, reward, parse_mode="Markdown")
+
+    user_state[chat_id] = {"mode": "idle"}
+    current_scenario.pop(chat_id, None)
+    bot.send_message(chat_id, "Bis zum nächsten Mal! 👋 /themen um weiterzumachen.")
+
+
 def handle_quatschen_message(chat_id, user_text):
     """Handle a message in Quatschen mode."""
     # Crisis detection — top priority
@@ -1836,6 +1869,13 @@ def handle_quatschen_message(chat_id, user_text):
     })
     user_data[uid]["quatschen_history"] = user_data[uid]["quatschen_history"][-50:]
     save_users(user_data)
+
+    # Auto-detect farewell in Quatschen mode → trigger XP reward
+    if contains_farewell(reply):
+        send_reply(chat_id, reply, voice=True)
+        time.sleep(0.8)
+        _quatschen_end_with_xp(chat_id)
+        return
 
     # After 5th user message — show "Gespräch beenden" button once
     if turns == 5:
@@ -4336,39 +4376,7 @@ def master_callback_router(call):
     if data == "end_quatschen":
         bot.answer_callback_query(call.id)
         bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
-
-        turns = turn_counter.get(chat_id, 0)
-        xp_gain, bonus_msg = calculate_xp(turns, "normal")
-        new_streak, lost_streak = update_streak(chat_id)
-
-        if lost_streak >= 2:
-            bot.send_message(chat_id,
-                f"😭 Dein {lost_streak}-Tage-Streak ist weg...\n"
-                f"Aber hey — du bist wieder da! Neuer Streak: 🔥 1 Tag.",
-                parse_mode="Markdown")
-
-        leveled_up = add_xp(chat_id, xp_gain)
-        stats = user_data[str(chat_id)]["user_stats"]
-
-        new_badges = check_achievements(chat_id)
-        for emoji, title, desc in new_badges:
-            bot.send_message(chat_id,
-                f"🏅 *Achievement freigeschaltet!*\n{emoji} *{title}*\n_{desc}_",
-                parse_mode="Markdown")
-
-        if leveled_up:
-            bot.send_message(chat_id,
-                f"🚀 *LEVEL UP!* Du bist jetzt Level {stats['level']}! 💪",
-                parse_mode="Markdown")
-
-        reward = build_reward_block(chat_id, xp_gain, bonus_msg, turns)
-        bot.send_message(chat_id, reward, parse_mode="Markdown")
-
-        # Reset quatschen state
-        user_state[chat_id] = {"mode": "idle"}
-        current_scenario.pop(chat_id, None)
-
-        bot.send_message(chat_id, "Bis zum nächsten Mal! 👋 /themen um weiterzumachen.")
+        _quatschen_end_with_xp(chat_id)
         return
 
     if data == "confirm_restart":
