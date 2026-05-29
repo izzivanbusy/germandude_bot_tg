@@ -3311,33 +3311,52 @@ GOAL_EXTRA = {
 def send_level_feedback(chat_id, level):
     prog = LEVEL_PROGRESS.get(level, LEVEL_PROGRESS["A1"])
     name = user_data.get(str(chat_id), {}).get("name", "")
-    greeting = f"Glückwunsch, {name}!" if name else "Glückwunsch!"
+    n = f" {name}" if name else ""
 
-    if prog["next"] and prog["weeks"]:
-        promise = (
-            f"Wenn du jeden Tag 10 Minuten mit mir sprichst, "
-            f"bist du in ~*{prog['weeks']} Wochen* auf *{prog['next']}*! 📈"
-        )
-    else:
-        promise = "Mit 10 Minuten täglich bringst du dich auf echtes Muttersprachler-Niveau. 🏆"
-
-    # Message 1: Result + Promise
+    # ── Nachricht 1: Niveau-Ergebnis ────────────────────────────────────────
     bot.send_message(chat_id,
-        f"{greeting} Du bist auf *{prog['emoji']} {level}* 😏\n\n"
-        f"{prog['desc']}\n\n"
-        f"{promise}",
+        f"✅ Test abgeschlossen!\n\n"
+        f"Dein Niveau:{n}\n"
+        f"*{prog['emoji']} {level}*",
         parse_mode="Markdown"
     )
 
-    # Message 2: Mini instruction + privacy note + "Los geht's!" button
+    time.sleep(0.6)
+
+    # ── Nachricht 2: Was das bedeutet ───────────────────────────────────────
+    bot.send_message(chat_id,
+        f"📖 *Was bedeutet das?*\n\n"
+        f"{prog['desc']}",
+        parse_mode="Markdown"
+    )
+
+    time.sleep(0.6)
+
+    # ── Nachricht 3: Dein Ziel ───────────────────────────────────────────────
+    if prog["next"] and prog["weeks"]:
+        goal_msg = (
+            f"🎯 *Dein nächstes Ziel: {prog['next']}*\n\n"
+            f"10 Minuten täglich mit mir sprechen\n"
+            f"= in ~*{prog['weeks']} Wochen* auf dem nächsten Level. 📈"
+        )
+    else:
+        goal_msg = (
+            "🏆 *Du bist auf dem höchsten Niveau!*\n\n"
+            "Muttersprachler-Level — das ist das Ziel. Du bist da."
+        )
+    bot.send_message(chat_id, goal_msg, parse_mode="Markdown")
+
+    time.sleep(0.6)
+
+    # ── Nachricht 4: Wie es funktioniert + Los geht's ───────────────────────
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🚀 Los geht's!", callback_data="start_chat"))
     bot.send_message(chat_id,
-        "🎤 Hier geht es nicht ums Schreiben.\n"
-        "🗣️ Du sprichst. Du hörst zu.\n"
-        "📢 Genau wie im echten Leben — das macht den Unterschied.\n\n"
-        "❗️ *One quick thing:* For voice messages to work, make sure you allow them in Telegram:\n"
-        "*Settings → Privacy and Security → Voice Messages → Everybody*\n\n"
+        "🎤 *Wie funktioniert das hier?*\n\n"
+        "Du sprichst — ich antworte.\n"
+        "Genau wie ein echtes Gespräch.\n\n"
+        "📱 *Wichtig:* Erlaube Sprachnachrichten in Telegram:\n"
+        "Einstellungen → Privatsphäre → Sprachnachrichten → Alle\n\n"
         "Bereit?",
         parse_mode="Markdown",
         reply_markup=markup
