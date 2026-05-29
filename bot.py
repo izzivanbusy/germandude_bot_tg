@@ -3611,24 +3611,137 @@ def start_exercise(chat_id):
     bot.send_message(chat_id, response.content[0].text)
 
 SHADOWING_SENTENCES = {
-    "A1": ["Ich heiße Maria.", "Guten Morgen! Wie geht es dir?", "Ich komme aus Spanien."],
-    "A2": ["Ich hätte gern einen Kaffee.", "Können Sie mir helfen, bitte?", "Wo ist der Bahnhof?"],
-    "B1": ["Ich würde gern einen Termin vereinbaren.", "Das ist eine interessante Frage.", "Wie lange bist du schon hier?"],
-    "B2": ["Ich bin der Meinung, dass wir das überdenken sollten.", "Obwohl es schwierig ist, versuche ich es täglich.", "Das hätte ich nicht gedacht."],
-    "C1": ["Angesichts der Umstände wäre ein anderer Ansatz sinnvoller.", "Er hat sich hervorragend geschlagen, trotz aller Widrigkeiten.", "Das lässt sich nicht so einfach auf einen Nenner bringen."],
+    "A1": [
+        "Ich heiße Maria.",
+        "Guten Morgen! Wie geht es dir?",
+        "Ich komme aus Spanien.",
+        "Das ist mein Freund.",
+        "Wo ist die Toilette?",
+        "Ich spreche ein bisschen Deutsch.",
+        "Wie viel kostet das?",
+        "Danke schön!",
+        "Entschuldigung, ich verstehe nicht.",
+        "Ich wohne in Berlin.",
+    ],
+    "A2": [
+        "Ich hätte gern einen Kaffee.",
+        "Können Sie mir helfen, bitte?",
+        "Wo ist der Bahnhof?",
+        "Ich möchte einen Tisch für zwei Personen reservieren.",
+        "Wann fährt der nächste Zug?",
+        "Ich suche eine Apotheke in der Nähe.",
+        "Können Sie das bitte wiederholen?",
+        "Ich komme um zehn Uhr an.",
+        "Darf ich Sie etwas fragen?",
+        "Das Wetter ist heute schön, oder?",
+    ],
+    "B1": [
+        "Ich würde gern einen Termin vereinbaren.",
+        "Das ist eine interessante Frage.",
+        "Wie lange bist du schon hier?",
+        "Ich habe leider keine Zeit heute Abend.",
+        "Könnten Sie mir erklären, wie das funktioniert?",
+        "Ich versuche jeden Tag Deutsch zu üben.",
+        "Das klingt nach einem guten Plan.",
+        "Ich bin seit drei Jahren in Deutschland.",
+        "Was empfehlen Sie mir in dieser Situation?",
+        "Ich freue mich darauf, dich wiederzusehen.",
+    ],
+    "B2": [
+        "Ich bin der Meinung, dass wir das überdenken sollten.",
+        "Obwohl es schwierig ist, versuche ich es täglich.",
+        "Das hätte ich nicht gedacht.",
+        "Es wäre sinnvoll, das im Voraus zu planen.",
+        "Ich verstehe deinen Standpunkt, sehe das aber etwas anders.",
+        "Das Projekt hat sich als komplizierter erwiesen als erwartet.",
+        "Wir sollten die Vor- und Nachteile sorgfältig abwägen.",
+        "Ich hätte früher damit anfangen sollen.",
+        "Trotz der Herausforderungen bin ich zuversichtlich.",
+        "Das lässt sich auf verschiedene Weisen interpretieren.",
+    ],
+    "C1": [
+        "Angesichts der Umstände wäre ein anderer Ansatz sinnvoller.",
+        "Er hat sich hervorragend geschlagen, trotz aller Widrigkeiten.",
+        "Das lässt sich nicht so einfach auf einen Nenner bringen.",
+        "Die Argumentation ist nachvollziehbar, jedoch nicht vollständig überzeugend.",
+        "Es bleibt abzuwarten, ob sich diese Maßnahmen langfristig bewähren.",
+        "Ich möchte nicht behaupten, dass das die einzig richtige Lösung ist.",
+        "Das wirft grundlegende Fragen über unsere Prioritäten auf.",
+        "Zwischen den Zeilen lässt sich eine gewisse Skepsis herauslesen.",
+        "Er formulierte seinen Einwand mit bemerkenswerter Präzision.",
+        "Das Thema verdient eine differenziertere Betrachtung.",
+    ],
+    "C2": [
+        "Die vielschichtige Problematik entzieht sich einer einfachen Kategorisierung.",
+        "Wer den Subtext dieser Aussage versteht, erkennt die eigentliche Brisanz.",
+        "Es wäre verfehlt, diesen Sachverhalt auf eine rein pragmatische Ebene zu reduzieren.",
+        "Die Ironie liegt darin, dass gerade die vermeintliche Lösung das Problem verschärft.",
+        "Sein Schweigen war in diesem Kontext beredter als jede Erwiderung.",
+        "Das setzt ein Maß an interkultureller Sensibilität voraus, das selten explizit thematisiert wird.",
+        "Man muss zwischen dem Gesagten und dem eigentlich Gemeinten sorgfältig unterscheiden.",
+        "Diese Formulierung ist juristisch wasserdicht, aber moralisch zumindest diskussionswürdig.",
+        "Der Diskurs krankt daran, dass Korrelation und Kausalität systematisch verwechselt werden.",
+        "Wer in dieser Branche bestehen will, braucht mehr als Fachwissen — er braucht Haltung.",
+    ],
 }
 
+SHADOWING_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
+
 def start_shadowing(chat_id):
+    """Show level selection for shadowing — user picks difficulty."""
+    user_state[chat_id] = user_state.get(chat_id, {})
+    user_state[chat_id]["mode"] = "shadowing_level_select"
+
+    markup = InlineKeyboardMarkup(row_width=3)
+    buttons = [
+        InlineKeyboardButton(lvl, callback_data=f"shadow_level:{lvl}")
+        for lvl in SHADOWING_LEVELS
+    ]
+    markup.add(*buttons)
+
+    bot.send_message(
+        chat_id,
+        "🎧 *Shadowing Mode*\n\n"
+        "Wähle dein Niveau — ich spreche, du sprichst nach:\n\n"
+        "A1 = absolute Basics\n"
+        "A2 = Alltag\n"
+        "B1 = flüssige Sätze\n"
+        "B2 = komplexere Strukturen\n"
+        "C1 = Profi-Niveau\n"
+        "C2 = muttersprachlich",
+        parse_mode="Markdown",
+        reply_markup=markup,
+    )
+
+def start_shadowing_level(chat_id, level):
+    """Send a sentence at the chosen level with TTS + repeat/next/change buttons."""
     user_state[chat_id] = user_state.get(chat_id, {})
     user_state[chat_id]["mode"] = "shadowing"
+    user_state[chat_id]["shadowing_level"] = level
 
-    level     = user_data.get(str(chat_id), {}).get("level", "A2")
     sentences = SHADOWING_SENTENCES.get(level, SHADOWING_SENTENCES["A2"])
-    text      = random.choice(sentences)
+    # Avoid repeating the same sentence twice in a row
+    last = user_state[chat_id].get("shadowing_last", "")
+    choices = [s for s in sentences if s != last] or sentences
+    text = random.choice(choices)
     user_state[chat_id]["shadowing_text"] = text
+    user_state[chat_id]["shadowing_last"] = text
 
     send_reply(chat_id, text, voice=True)
-    bot.send_message(chat_id, "🎧 Hör zu und sprich nach!\n\n👉 Schick eine Sprachnachricht.")
+
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("🔁 Nochmal",       callback_data="shadow_repeat"),
+        InlineKeyboardButton("➡️ Nächster Satz", callback_data=f"shadow_next:{level}"),
+    )
+    markup.add(
+        InlineKeyboardButton("🎚️ Level wechseln", callback_data="shadow_change_level"),
+    )
+    bot.send_message(
+        chat_id,
+        "🎧 Hör zu und sprich nach!\n👉 Schick eine Sprachnachricht.",
+        reply_markup=markup,
+    )
 
 def restart_chat(chat_id):
     """Show confirmation dialog before wiping data."""
@@ -4243,8 +4356,17 @@ def handle_voice(message):
     # ── SHADOWING MODE ────────────────────────────────────────────────────────
     if mode == "shadowing":
         user_text = _transcribe_voice(message)
+        level = user_state[chat_id].get("shadowing_level", "A2")
         bot.send_message(chat_id, f"_📝 Du hast gesagt: {user_text}_", parse_mode="Markdown")
-        bot.send_message(chat_id, "👍 Gut! Noch einmal? Oder /menu für mehr Optionen.")
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            InlineKeyboardButton("🔁 Nochmal",        callback_data="shadow_repeat"),
+            InlineKeyboardButton("➡️ Nächster Satz",  callback_data=f"shadow_next:{level}"),
+        )
+        markup.add(
+            InlineKeyboardButton("🎚️ Level wechseln", callback_data="shadow_change_level"),
+        )
+        bot.send_message(chat_id, "👍 Gut gemacht! Was möchtest du tun?", reply_markup=markup)
         return
 
     # ── ONBOARDING — covers ALL steps so nothing falls through to chat ───────
@@ -4380,6 +4502,45 @@ def master_callback_router(call):
         bot.answer_callback_query(call.id)
         start_shadowing(chat_id)
         return
+
+    if data.startswith("shadow_level:"):
+        level = data.split(":", 1)[1]
+        bot.answer_callback_query(call.id, f"Level {level} gewählt!")
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        start_shadowing_level(chat_id, level)
+        return
+
+    if data == "shadow_repeat":
+        bot.answer_callback_query(call.id)
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        text  = user_state.get(chat_id, {}).get("shadowing_text", "")
+        level = user_state.get(chat_id, {}).get("shadowing_level", "A2")
+        if text:
+            send_reply(chat_id, text, voice=True)
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            InlineKeyboardButton("🔁 Nochmal",        callback_data="shadow_repeat"),
+            InlineKeyboardButton("➡️ Nächster Satz",  callback_data=f"shadow_next:{level}"),
+        )
+        markup.add(
+            InlineKeyboardButton("🎚️ Level wechseln", callback_data="shadow_change_level"),
+        )
+        bot.send_message(chat_id, "🎧 Hör zu und sprich nach!\n👉 Schick eine Sprachnachricht.", reply_markup=markup)
+        return
+
+    if data.startswith("shadow_next:"):
+        level = data.split(":", 1)[1]
+        bot.answer_callback_query(call.id)
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        start_shadowing_level(chat_id, level)
+        return
+
+    if data == "shadow_change_level":
+        bot.answer_callback_query(call.id)
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        start_shadowing(chat_id)
+        return
+
     elif data == "menu_restart":
         bot.answer_callback_query(call.id)
         restart_chat(chat_id)
