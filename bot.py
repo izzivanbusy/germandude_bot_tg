@@ -3349,15 +3349,29 @@ def send_level_feedback(chat_id, level):
     time.sleep(0.6)
 
     # ── Nachricht 4: Wie es funktioniert + Los geht's ───────────────────────
+    native_lang = user_data.get(str(chat_id), {}).get("native_language", "Englisch")
+    try:
+        tr = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            messages=[{"role": "user", "content":
+                f"Translate into {native_lang}. Only return the translation, nothing else:\n\n"
+                f"Important: To use voice messages, allow them in Telegram:\n"
+                f"Settings → Privacy and Security → Voice Messages → Everybody"
+            }]
+        )
+        voice_hint = tr.content[0].text.strip()
+    except Exception:
+        voice_hint = "Settings → Privacy and Security → Voice Messages → Everybody"
+
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🚀 Los geht's!", callback_data="start_chat"))
     bot.send_message(chat_id,
-        "🎤 *Wie funktioniert das hier?*\n\n"
-        "Du sprichst — ich antworte.\n"
-        "Genau wie ein echtes Gespräch.\n\n"
-        "📱 *Wichtig:* Erlaube Sprachnachrichten in Telegram:\n"
-        "Einstellungen → Privatsphäre → Sprachnachrichten → Alle\n\n"
-        "Bereit?",
+        f"🎤 *Wie funktioniert das hier?*\n\n"
+        f"Du sprichst — ich antworte.\n"
+        f"Genau wie ein echtes Gespräch.\n\n"
+        f"📱 {voice_hint}\n\n"
+        f"Bereit?",
         parse_mode="Markdown",
         reply_markup=markup
     )
