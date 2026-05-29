@@ -3970,6 +3970,19 @@ def handle_end_convo(call):
         return
     trigger_natural_close(chat_id)
 
+FAREWELL_SIGNALS = [
+    "tschüss", "auf wiedersehen", "tschau", "ciao", "bis bald",
+    "bis dann", "bis später", "mach's gut", "alles gute", "viel erfolg",
+    "viel spaß", "gute reise", "pass auf dich auf", "hab dich lieb",
+    "schönen tag noch", "schönen abend", "schöne woche", "guten abend",
+    "verabschied", "ich muss los", "ich gehe jetzt", "bis nächste",
+]
+
+def contains_farewell(text: str) -> bool:
+    """Check if NPC reply contains a natural farewell signal."""
+    t = text.lower()
+    return any(kw in t for kw in FAREWELL_SIGNALS)
+
 def trigger_natural_close(chat_id):
     """NPC gives one warm goodbye, then feedback + share fires."""
     closing_prompt = (
