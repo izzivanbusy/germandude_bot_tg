@@ -4514,4 +4514,4 @@ def _run_flask():
 _flask_thread = threading.Thread(target=_run_flask, daemon=True)
 _flask_thread.start()
 log.info("✅ Bot polling started")
-bot.infinity_polling(non_stop=True, timeout=60, long_polling_timeout=60)
+bot.infinity_polling(timeout=60, long_polling_timeout=60)
