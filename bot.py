@@ -3645,8 +3645,17 @@ def restart_chat(chat_id):
         reply_markup=markup)
 
 def do_full_reset(chat_id):
-    """Actually wipe everything and restart onboarding."""
+    """Actually wipe everything and restart onboarding.
+    Billing info (trial_start, premium, Stripe IDs) is preserved so
+    /restart cannot be used to game the free trial."""
     uid = str(chat_id)
+
+    # Preserve billing data before wiping
+    existing = user_data.get(uid, {})
+    _trial_start          = existing.get("trial_start")
+    _premium              = existing.get("premium", False)
+    _stripe_customer_id   = existing.get("stripe_customer_id")
+    _stripe_subscription_id = existing.get("stripe_subscription_id")
 
     # Clear in-memory state
     user_state.pop(chat_id, None)
@@ -3672,6 +3681,14 @@ def do_full_reset(chat_id):
 
     # Re-run full onboarding
     ensure_user(chat_id)
+
+    # Restore billing info — /restart must never reset the trial clock
+    user_data[uid]["trial_start"]            = _trial_start or user_data[uid]["trial_start"]
+    user_data[uid]["premium"]                = _premium
+    user_data[uid]["stripe_customer_id"]     = _stripe_customer_id
+    user_data[uid]["stripe_subscription_id"] = _stripe_subscription_id
+    save_users(user_data)
+
     user_state[chat_id] = {"mode": "onboarding", "step": "name"}
     bot.send_message(chat_id,
         "Hallo! Ich bin dein deutscher Kumpel! 🇩🇪😄\n"
