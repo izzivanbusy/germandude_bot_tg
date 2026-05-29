@@ -3207,7 +3207,10 @@ def lesson_yes_callback(call):
                 f"German teacher for absolute beginners. Create mini-lessons with {native_lang} translations. "
                 f"Cover in order: 1) Begrüßungen (4 examples) 2) Zahlen 1-20 3) Wochentage 4) Monate "
                 f"5) Basis-Verben: sein/haben/gehen/kommen/möchten with examples 6) 6 key phrases. "
-                f"Format: German — {native_lang}. Be friendly."
+                f"IMPORTANT FORMAT RULES: No markdown, no tables, no asterisks, no headers with ##. "
+                f"Use ONLY plain text with emoji bullets. Each item on its own line like this: "
+                f"👋 Hallo — (translation)\n"
+                f"Keep it simple, warm and encouraging."
             }]
         )
         lesson_text = lesson_resp.content[0].text.strip()
