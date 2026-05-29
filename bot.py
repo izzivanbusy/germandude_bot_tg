@@ -3634,7 +3634,17 @@ def start_exercise(chat_id):
         f"Für Lückensätze: Satz mit _____ als Lücke, dann 3 Optionen.\n"
         f"Niveau: angemessen für {level} — weder zu leicht noch zu schwer.\n"
         f"Schreibe NUR die 10 Aufgaben, kein Kommentar davor oder danach.\n"
-        f"Keine Lösungen angeben."
+        f"Keine Lösungen angeben.\n\n"
+        f"WICHTIG — ALLTAGSRELEVANZ:\n"
+        f"Alle Sätze müssen in echten, alltäglichen Situationen vorkommen können: "
+        f"Gespräche mit Freunden, Kollegen, im Café, beim Einkaufen, am Telefon, auf der Arbeit usw.\n"
+        f"NIEMALS grammatikalisch korrekte aber alltagsfremde Sätze — z.B. Präteritum für mündliche "
+        f"Alltagserzählungen ist FALSCH, weil Muttersprachler dort Perfekt benutzen. "
+        f"Beispiel VERBOTEN: \'Gestern ging ich ins Kino\' → RICHTIG: \'Gestern bin ich ins Kino gegangen\'.\n"
+        f"Präteritum NUR bei: sein/haben/Modalverben ODER schriftlichen/formellen Kontexten.\n"
+        f"Faustregel: Würde ein Berliner das so sagen? Wenn nein — umformulieren.\n"
+        f"Erlaubte Kontexte: WhatsApp, Smalltalk, Bürogespräche, Restaurant, Arzt, spontane Kommentare.\n"
+        f"Verbotene Kontexte: Literatur, Märchen, Zeitungsartikel, Schulbuch-Deutsch."
     )
 
     response = claude.messages.create(
