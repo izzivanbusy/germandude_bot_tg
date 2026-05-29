@@ -1939,6 +1939,14 @@ ACHIEVEMENT_DEFS = [
 
 TRIAL_DAYS = 3
 
+# Stripe
+STRIPE_SECRET_KEY     = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_PRICE_ID       = os.getenv("STRIPE_PRICE_ID", "")
+RAILWAY_DOMAIN        = os.getenv("RAILWAY_PUBLIC_DOMAIN", "germandudebottg-production.up.railway.app")
+if STRIPE_SECRET_KEY:
+    stripe.api_key = STRIPE_SECRET_KEY
+
 def is_premium(chat_id):
     """True if user has active premium OR is still in trial period."""
     uid  = str(chat_id)
@@ -1966,8 +1974,23 @@ def days_left_in_trial(chat_id):
     return max(0, TRIAL_DAYS - used)
 
 def create_stripe_checkout(chat_id):
-    """Stripe disabled — returns None."""
-    return None
+    """Create Stripe Checkout session and return URL."""
+    if not STRIPE_SECRET_KEY or not STRIPE_PRICE_ID:
+        log.warning("Stripe not configured — keys missing")
+        return None
+    try:
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            mode="subscription",
+            line_items=[{"price": STRIPE_PRICE_ID, "quantity": 1}],
+            success_url=f"https://t.me/{BOT_USERNAME}?start=premium_ok",
+            cancel_url=f"https://t.me/{BOT_USERNAME}",
+            metadata={"telegram_id": str(chat_id)},
+        )
+        return session.url
+    except Exception as e:
+        log.error(f"Stripe checkout failed for {chat_id}: {e}")
+        return None
 
 def send_paywall(chat_id):
     """Send paywall message with Stripe checkout button."""
@@ -4391,4 +4414,88 @@ def broadcast_daily_gem():
     log.info(f"German Gem broadcast done: {sent} users")
     return sent
 
-bot.infinity_polling()
+# ═══════════════════════════════════════════════════════════════════════════
+#  FLASK WEBHOOK SERVER — Stripe payments + Cron gem broadcast
+# ═══════════════════════════════════════════════════════════════════════════
+
+CRON_SECRET = os.getenv("CRON_SECRET", "geheim123")
+
+flask_app = Flask(__name__)
+
+@flask_app.route("/health")
+def health():
+    return jsonify({"status": "ok"}), 200
+
+@flask_app.route("/send_gems", methods=["POST"])
+def send_gems_endpoint():
+    auth = request.headers.get("X-Cron-Secret", "")
+    if auth != CRON_SECRET:
+        return jsonify({"error": "unauthorized"}), 401
+    try:
+        sent = broadcast_daily_gem()
+        return jsonify({"ok": True, "sent": sent}), 200
+    except Exception as e:
+        log.error(f"Gem broadcast error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@flask_app.route("/stripe_webhook", methods=["POST"])
+def stripe_webhook():
+    payload    = request.get_data()
+    sig_header = request.headers.get("Stripe-Signature", "")
+    if not STRIPE_WEBHOOK_SECRET:
+        return jsonify({"error": "not configured"}), 500
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+    except Exception:
+        return jsonify({"error": "invalid signature"}), 400
+
+    if event["type"] == "checkout.session.completed":
+        session     = event["data"]["object"]
+        telegram_id = session.get("metadata", {}).get("telegram_id")
+        customer_id = session.get("customer")
+        sub_id      = session.get("subscription")
+        if telegram_id and str(telegram_id) in user_data:
+            uid = str(telegram_id)
+            user_data[uid]["premium"]                = True
+            user_data[uid]["stripe_customer_id"]     = customer_id
+            user_data[uid]["stripe_subscription_id"] = sub_id
+            save_users(user_data)
+            log.info(f"✅ Premium activated: {telegram_id}")
+            try:
+                bot.send_message(int(telegram_id),
+                    "🎉 *Willkommen im Premium-Club!*\n\n"
+                    "Du hast jetzt vollen Zugriff auf alles. 💪\n"
+                    "Dein Streak und deine XP sind natürlich noch da.\n\n"
+                    "Tippe /themen um weiterzumachen!",
+                    parse_mode="Markdown")
+            except Exception as e:
+                log.warning(f"Could not notify {telegram_id}: {e}")
+
+    elif event["type"] == "customer.subscription.deleted":
+        customer_id = event["data"]["object"].get("customer")
+        for uid, user in user_data.items():
+            if user.get("stripe_customer_id") == customer_id:
+                user_data[uid]["premium"]                = False
+                user_data[uid]["stripe_subscription_id"] = None
+                save_users(user_data)
+                try:
+                    bot.send_message(int(uid),
+                        "😢 Dein Premium-Abo wurde gekündigt.\n"
+                        "XP und Streak bleiben erhalten.\n"
+                        "Tippe /premium um wieder zu starten.",
+                        parse_mode="Markdown")
+                except Exception as e:
+                    log.warning(f"Could not notify cancelled user: {e}")
+                break
+
+    return jsonify({"ok": True}), 200
+
+def _run_flask():
+    port = int(os.getenv("PORT", 8080))
+    log.info(f"✅ Flask on port {port}")
+    flask_app.run(host="0.0.0.0", port=port, use_reloader=False, threaded=True, debug=False)
+
+_flask_thread = threading.Thread(target=_run_flask, daemon=True)
+_flask_thread.start()
+log.info("✅ Bot polling started")
+bot.infinity_polling(non_stop=True, timeout=60, long_polling_timeout=60)
