@@ -58,6 +58,8 @@ def _send_message_with_translate(chat_id, text, **kwargs):
 bot.send_message = _send_message_with_translate
 
 bot.set_my_commands([
+    BotCommand("info",      "So funktioniert der Bot ℹ️"),
+    BotCommand("code",      "Trial-Code einlösen 🎁"),
     BotCommand("start",     "Start"),
     BotCommand("themen",    "Themen wählen 🎯"),
     BotCommand("level",     "Mein Niveau"),
@@ -107,8 +109,9 @@ def ensure_user(chat_id):
             "errors": [],
             "user_progress": {g: [] for g in ALL_GOALS},
             "user_stats": {"xp": 0, "level": 1, "streak": 0, "last_active": None},
-            "trial_start": datetime.now().isoformat(),
+            "trial_start": None,
             "premium": False,
+            "trial_code_used": None,
             "stripe_customer_id": None,
             "stripe_subscription_id": None,
         }
@@ -130,7 +133,9 @@ def ensure_user(chat_id):
         if "achievements" not in user_data[uid]:
             user_data[uid]["achievements"] = []
         if "trial_start" not in user_data[uid]:
-            user_data[uid]["trial_start"] = datetime.now().isoformat()
+            user_data[uid]["trial_start"] = None
+        if "trial_code_used" not in user_data[uid]:
+            user_data[uid]["trial_code_used"] = None
         if "premium" not in user_data[uid]:
             user_data[uid]["premium"] = False
         if "stripe_customer_id" not in user_data[uid]:
@@ -1980,7 +1985,14 @@ ACHIEVEMENT_DEFS = [
 #  PAYWALL / SUBSCRIPTION SYSTEM
 # ═══════════════════════════════════════════════════════════════════════════
 
-TRIAL_DAYS = 3
+# Trial codes — add/remove here, or move to env var later
+# Format: { "CODE": days_granted }
+TRIAL_CODES = {
+    "GERMANDUDE3": 3,
+    "GERMANDUDE7": 7,
+    "PARTNER7":    7,
+    "LAUNCH14":   14,
+}
 
 # Stripe
 STRIPE_SECRET_KEY     = os.getenv("STRIPE_SECRET_KEY", "")
@@ -1991,30 +2003,58 @@ if STRIPE_SECRET_KEY:
     stripe.api_key = STRIPE_SECRET_KEY
 
 def is_premium(chat_id):
-    """True if user has active premium OR is still in trial period."""
+    """True if user has active paid premium OR a valid trial code is active."""
     uid  = str(chat_id)
     user = user_data.get(uid, {})
+    # Paid subscriber — always in
     if user.get("premium"):
         return True
+    # No trial activated yet — locked
     trial_start = user.get("trial_start")
     if not trial_start:
-        # No trial_start = set it now and let them in
-        user_data[uid]["trial_start"] = datetime.now().isoformat()
-        save_users(user_data)
-        return True
-    start = datetime.fromisoformat(trial_start)
-    days_used = (datetime.now() - start).days
-    return days_used < TRIAL_DAYS
+        return False
+    # Trial activated — check if still valid
+    trial_days = TRIAL_CODES.get(user.get("trial_code_used", ""), 3)
+    start      = datetime.fromisoformat(trial_start)
+    days_used  = (datetime.now() - start).days
+    return days_used < trial_days
 
 def days_left_in_trial(chat_id):
     uid  = str(chat_id)
     user = user_data.get(uid, {})
     trial_start = user.get("trial_start")
     if not trial_start:
-        return TRIAL_DAYS
-    start = datetime.fromisoformat(trial_start)
-    used = (datetime.now() - start).days
-    return max(0, TRIAL_DAYS - used)
+        return 0
+    trial_days = TRIAL_CODES.get(user.get("trial_code_used", ""), 3)
+    start      = datetime.fromisoformat(trial_start)
+    used       = (datetime.now() - start).days
+    return max(0, trial_days - used)
+
+def redeem_trial_code(chat_id, code: str) -> tuple[bool, str]:
+    """Try to redeem a trial code. Returns (success, message)."""
+    uid  = str(chat_id)
+    user = user_data.get(uid, {})
+    code = code.strip().upper()
+
+    if user.get("premium"):
+        return False, "Du hast bereits Premium — kein Code nötig! 🎉"
+
+    if user.get("trial_start") and user.get("trial_code_used"):
+        days_left = days_left_in_trial(chat_id)
+        if days_left > 0:
+            return False, f"Du hast bereits einen aktiven Trial — noch *{days_left} Tage* übrig! ⏳"
+
+    if code not in TRIAL_CODES:
+        return False, "❌ Ungültiger Code. Überprüf die Schreibweise oder hol dir einen neuen Code!"
+
+    days = TRIAL_CODES[code]
+    user_data[uid]["trial_start"]    = datetime.now().isoformat()
+    user_data[uid]["trial_code_used"] = code
+    save_users(user_data)
+    return True, (
+        f"🎉 *Code eingelöst!* Du hast *{days} Tage* kostenlose Trial freigeschaltet.\n\n"
+        f"Dein deutscher Freund wartet — leg los! 👇"
+    )
 
 def create_stripe_checkout(chat_id):
     """Create Stripe Checkout session and return URL."""
@@ -2056,18 +2096,22 @@ def send_paywall(chat_id):
         url=f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}&text=Ich%20lerne%20Deutsch%20mit%20diesem%20Bot%20-%20ist%20wirklich%20gut!%20Probier%20es%20aus%20%F0%9F%87%A9%F0%9F%87%AA"
     ))
 
+    xp_streak_line = f"Du hast bereits *{xp} XP* gesammelt"
+    if streak > 1:
+        xp_streak_line += f" und einen *{streak}-Tage-Streak* aufgebaut"
+    xp_streak_line += " — schade, das jetzt zu unterbrechen.\n\n"
+
     bot.send_message(chat_id,
-        f"⏰ *Deine kostenlose Testphase ist abgelaufen.*\n\n"
-        f"Du hast in {TRIAL_DAYS} Tagen bereits *{xp} XP* gesammelt"
-        + (f" und einen *{streak}-Tage-Streak* aufgebaut" if streak > 1 else "")
-        + f" — schade, das jetzt zu verlieren.\n\n"
-        f"Mit **Premium** (€20/Monat) bekommst du:\n"
+        f"🔒 *Kein Zugang — Trial abgelaufen oder nicht aktiviert.*\n\n"
+        + xp_streak_line +
+        f"Mit *Premium* (€20/Monat) bekommst du:\n"
         f"✅ Unbegrenzte Gespräche & Szenarien\n"
-        f"✅ Alle Niveaus A0–C1\n"
+        f"✅ Alle Niveaus A1–C2\n"
         f"✅ Voice-Nachrichten & Übersetzungen\n"
-        f"✅ XP-System & Achievements\n"
+        f"✅ XP-System, Achievements & Shadowing\n"
         f"✅ Jederzeit kündbar\n\n"
-        f"_Dein Streak und deine XP bleiben erhalten — du verlierst nichts._",
+        f"_Noch keinen Trial? Schreib uns — wir schicken dir einen Code!_\n"
+        f"_Dein Streak und deine XP bleiben erhalten._",
         parse_mode="Markdown",
         reply_markup=markup
     )
@@ -2537,6 +2581,32 @@ WICHTIG:
 
 
 # START
+@bot.message_handler(commands=["code", "freischalten", "redeem"])
+def handle_code(message):
+    """Redeem a trial access code."""
+    chat_id = message.chat.id
+    ensure_user(chat_id)
+    parts = message.text.strip().split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("🎯 Thema wählen", callback_data="menu_themen"))
+        bot.send_message(chat_id,
+            "🎁 *Trial-Code einlösen*\n\n"
+            "Schreib einfach:\n"
+            "`/code DEINCODE`\n\n"
+            "Noch keinen Code? Schreib uns auf @germandude_support!",
+            parse_mode="Markdown")
+        return
+
+    code = parts[1].strip()
+    success, msg = redeem_trial_code(chat_id, code)
+
+    markup = InlineKeyboardMarkup()
+    if success:
+        markup.add(InlineKeyboardButton("🎯 Jetzt loslegen!", callback_data="menu_themen"))
+    bot.send_message(chat_id, msg, parse_mode="Markdown", reply_markup=markup)
+
+
 @bot.message_handler(commands=['start'])
 def start(message):
     chat_id = message.chat.id
@@ -2742,8 +2812,8 @@ def start_chat_callback(call):
     left = days_left_in_trial(chat_id)
     if 0 < left <= 1 and not user_data.get(str(chat_id), {}).get("premium"):
         bot.send_message(chat_id,
-            "⚠️ *Noch 1 Tag in deiner Testphase!*\n"
-            "Danach brauchst du Premium um weiterzumachen. 👆",
+            f"⚠️ *Noch {left} Tag in deiner Testphase!*\n"
+            "Danach brauchst du Premium um weiterzumachen. 💳",
             parse_mode="Markdown")
 
     goal = user_data.get(str(chat_id), {}).get("goal")
