@@ -59,7 +59,7 @@ bot.send_message = _send_message_with_translate
 
 bot.set_my_commands([
     BotCommand("info",      "So funktioniert der Bot ℹ️"),
-    BotCommand("code",      "Trial-Code einlösen 🎁"),
+    BotCommand("freecode",  "Zugangscode einlösen 🎁"),
     BotCommand("start",     "Start"),
     BotCommand("themen",    "Themen wählen 🎯"),
     BotCommand("level",     "Mein Niveau"),
@@ -1987,12 +1987,34 @@ ACHIEVEMENT_DEFS = [
 
 # Trial codes — add/remove here, or move to env var later
 # Format: { "CODE": days_granted }
+# Single-use trial codes — format: "CODE": (days, used_by_uid_or_None)
+# Once a code is redeemed, used_by is set to the user's uid.
+# Add new codes here freely; they persist in memory until redeploy.
+# For permanent storage across redeploys, save to a separate JSON (future improvement).
 TRIAL_CODES = {
-    "GERMANDUDE3": 3,
-    "GERMANDUDE7": 7,
-    "PARTNER7":    7,
-    "LAUNCH14":   14,
+    "GERMANDUDE3":      {"days": 3,  "used_by": None},
+    "GERMANDUDE7":      {"days": 7,  "used_by": None},
+    "GDAPPLECORP1":     {"days": 7,  "used_by": None},
+    "PARTNER7":         {"days": 7,  "used_by": None},
+    "LAUNCH14":         {"days": 14, "used_by": None},
 }
+
+# Localised prompts for /freecode flow — add languages as needed
+_FREECODE_PROMPTS = {
+    "Englisch":    ("🎁 Enter your access code:", "✅ Code accepted! You have *{days} days* of free access. Let's go! 👇", "❌ Invalid or already used code. Double-check and try again!", "⏳ You already have an active trial — *{left} days* left.", "🎉 You already have Premium — no code needed!"),
+    "Deutsch":     ("🎁 Gib deinen Zugangscode ein:", "✅ Code akzeptiert! Du hast *{days} Tage* kostenlosen Zugang. Los geht's! 👇", "❌ Ungültiger oder bereits verwendeter Code. Überprüf die Schreibweise!", "⏳ Du hast bereits einen aktiven Trial — noch *{left} Tage* übrig.", "🎉 Du hast bereits Premium — kein Code nötig!"),
+    "Russisch":    ("🎁 Введи свой код доступа:", "✅ Код принят! У тебя *{days} дней* бесплатного доступа. Поехали! 👇", "❌ Неверный или уже использованный код. Проверь написание!", "⏳ У тебя уже есть активный пробный период — осталось *{left} дн.*", "🎉 У тебя уже Premium — код не нужен!"),
+    "Spanisch":    ("🎁 Introduce tu código de acceso:", "✅ ¡Código aceptado! Tienes *{days} días* de acceso gratuito. ¡Vamos! 👇", "❌ Código inválido o ya utilizado. ¡Comprueba la escritura!", "⏳ Ya tienes un trial activo — quedan *{left} días*.", "🎉 Ya tienes Premium — ¡no necesitas código!"),
+    "Französisch": ("🎁 Entre ton code d'accès :", "✅ Code accepté ! Tu as *{days} jours* d'accès gratuit. C'est parti ! 👇", "❌ Code invalide ou déjà utilisé. Vérifie l'orthographe !", "⏳ Tu as déjà un trial actif — encore *{left} jours*.", "🎉 Tu as déjà Premium — pas besoin de code !"),
+    "Italienisch": ("🎁 Inserisci il tuo codice di accesso:", "✅ Codice accettato! Hai *{days} giorni* di accesso gratuito. Andiamo! 👇", "❌ Codice non valido o già usato. Controlla la scrittura!", "⏳ Hai già un trial attivo — ancora *{left} giorni*.", "🎉 Hai già Premium — nessun codice necessario!"),
+    "Türkisch":    ("🎁 Erişim kodunu gir:", "✅ Kod kabul edildi! *{days} gün* ücretsiz erişimin var. Hadi başlayalım! 👇", "❌ Geçersiz veya zaten kullanılmış kod. Yazımı kontrol et!", "⏳ Zaten aktif bir deneme süren var — *{left} gün* kaldı.", "🎉 Zaten Premium'sun — koda gerek yok!"),
+    "Polnisch":    ("🎁 Podaj swój kod dostępu:", "✅ Kod przyjęty! Masz *{days} dni* bezpłatnego dostępu. Zaczynamy! 👇", "❌ Nieprawidłowy lub już użyty kod. Sprawdź pisownię!", "⏳ Masz już aktywny trial — pozostało *{left} dni*.", "🎉 Masz już Premium — nie potrzebujesz kodu!"),
+}
+_FREECODE_DEFAULT = _FREECODE_PROMPTS["Englisch"]
+
+def _get_freecode_strings(chat_id):
+    lang = user_data.get(str(chat_id), {}).get("native_language", "Englisch")
+    return _FREECODE_PROMPTS.get(lang, _FREECODE_DEFAULT)
 
 # Stripe
 STRIPE_SECRET_KEY     = os.getenv("STRIPE_SECRET_KEY", "")
@@ -2003,20 +2025,18 @@ if STRIPE_SECRET_KEY:
     stripe.api_key = STRIPE_SECRET_KEY
 
 def is_premium(chat_id):
-    """True if user has active paid premium OR a valid trial code is active."""
+    """True if user has active paid premium OR a valid trial code is still running."""
     uid  = str(chat_id)
     user = user_data.get(uid, {})
-    # Paid subscriber — always in
     if user.get("premium"):
         return True
-    # No trial activated yet — locked
     trial_start = user.get("trial_start")
     if not trial_start:
         return False
-    # Trial activated — check if still valid
-    trial_days = TRIAL_CODES.get(user.get("trial_code_used", ""), 3)
-    start      = datetime.fromisoformat(trial_start)
-    days_used  = (datetime.now() - start).days
+    code_entry = TRIAL_CODES.get(user.get("trial_code_used", ""), {})
+    trial_days = code_entry.get("days", 3) if isinstance(code_entry, dict) else 3
+    start     = datetime.fromisoformat(trial_start)
+    days_used = (datetime.now() - start).days
     return days_used < trial_days
 
 def days_left_in_trial(chat_id):
@@ -2025,36 +2045,42 @@ def days_left_in_trial(chat_id):
     trial_start = user.get("trial_start")
     if not trial_start:
         return 0
-    trial_days = TRIAL_CODES.get(user.get("trial_code_used", ""), 3)
-    start      = datetime.fromisoformat(trial_start)
-    used       = (datetime.now() - start).days
+    code_entry = TRIAL_CODES.get(user.get("trial_code_used", ""), {})
+    trial_days = code_entry.get("days", 3) if isinstance(code_entry, dict) else 3
+    start = datetime.fromisoformat(trial_start)
+    used  = (datetime.now() - start).days
     return max(0, trial_days - used)
 
 def redeem_trial_code(chat_id, code: str) -> tuple[bool, str]:
-    """Try to redeem a trial code. Returns (success, message)."""
-    uid  = str(chat_id)
-    user = user_data.get(uid, {})
-    code = code.strip().upper()
+    """Try to redeem a single-use trial code. Returns (success, message) in user's language."""
+    uid    = str(chat_id)
+    user   = user_data.get(uid, {})
+    code   = code.strip().upper()
+    _, ok_msg, err_msg, active_msg, premium_msg = _get_freecode_strings(chat_id)
 
     if user.get("premium"):
-        return False, "Du hast bereits Premium — kein Code nötig! 🎉"
+        return False, premium_msg
 
     if user.get("trial_start") and user.get("trial_code_used"):
-        days_left = days_left_in_trial(chat_id)
-        if days_left > 0:
-            return False, f"Du hast bereits einen aktiven Trial — noch *{days_left} Tage* übrig! ⏳"
+        left = days_left_in_trial(chat_id)
+        if left > 0:
+            return False, active_msg.format(left=left)
 
-    if code not in TRIAL_CODES:
-        return False, "❌ Ungültiger Code. Überprüf die Schreibweise oder hol dir einen neuen Code!"
+    entry = TRIAL_CODES.get(code)
+    if not entry:
+        return False, err_msg
 
-    days = TRIAL_CODES[code]
-    user_data[uid]["trial_start"]    = datetime.now().isoformat()
+    # Single-use check
+    if entry.get("used_by") and entry["used_by"] != uid:
+        return False, err_msg  # show same error — don't reveal it's been used
+
+    days = entry["days"]
+    # Mark as used
+    TRIAL_CODES[code]["used_by"] = uid
+    user_data[uid]["trial_start"]     = datetime.now().isoformat()
     user_data[uid]["trial_code_used"] = code
     save_users(user_data)
-    return True, (
-        f"🎉 *Code eingelöst!* Du hast *{days} Tage* kostenlose Trial freigeschaltet.\n\n"
-        f"Dein deutscher Freund wartet — leg los! 👇"
-    )
+    return True, ok_msg.format(days=days)
 
 def create_stripe_checkout(chat_id):
     """Create Stripe Checkout session and return URL."""
@@ -2581,30 +2607,28 @@ WICHTIG:
 
 
 # START
-@bot.message_handler(commands=["code", "freischalten", "redeem"])
-def handle_code(message):
-    """Redeem a trial access code."""
+@bot.message_handler(commands=["freecode", "code", "freischalten", "redeem"])
+def handle_freecode(message):
+    """Ask user to enter their access code — reply comes in user's native language."""
     chat_id = message.chat.id
     ensure_user(chat_id)
+
+    # If code already inline (e.g. /code GERMANDUDE3) — redeem immediately
     parts = message.text.strip().split(maxsplit=1)
-    if len(parts) < 2 or not parts[1].strip():
+    if len(parts) > 1 and parts[1].strip():
+        code = parts[1].strip()
+        success, msg = redeem_trial_code(chat_id, code)
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🎯 Thema wählen", callback_data="menu_themen"))
-        bot.send_message(chat_id,
-            "🎁 *Trial-Code einlösen*\n\n"
-            "Schreib einfach:\n"
-            "`/code DEINCODE`\n\n"
-            "Noch keinen Code? Schreib uns auf @germandude_support!",
-            parse_mode="Markdown")
+        if success:
+            markup.add(InlineKeyboardButton("🎯 Let's go!", callback_data="menu_themen"))
+        bot.send_message(chat_id, msg, parse_mode="Markdown", reply_markup=markup)
         return
 
-    code = parts[1].strip()
-    success, msg = redeem_trial_code(chat_id, code)
-
-    markup = InlineKeyboardMarkup()
-    if success:
-        markup.add(InlineKeyboardButton("🎯 Jetzt loslegen!", callback_data="menu_themen"))
-    bot.send_message(chat_id, msg, parse_mode="Markdown", reply_markup=markup)
+    # No code inline — ask for it in user's language
+    prompt, *_ = _get_freecode_strings(chat_id)
+    user_state[chat_id] = user_state.get(chat_id, {})
+    user_state[chat_id]["mode"] = "awaiting_code"
+    bot.send_message(chat_id, prompt, parse_mode="Markdown")
 
 
 @bot.message_handler(commands=['start'])
@@ -4137,6 +4161,16 @@ def handle(message):
     if mode == "shadowing":
         bot.send_message(chat_id, "🎧 Schick bitte eine *Sprachnachricht* zum Nachsprechen.",
             parse_mode="Markdown")
+        return
+
+    if mode == "awaiting_code":
+        code = (message.text or "").strip()
+        success, msg = redeem_trial_code(chat_id, code)
+        user_state[chat_id]["mode"] = "idle"
+        markup = InlineKeyboardMarkup()
+        if success:
+            markup.add(InlineKeyboardButton("🎯 Let's go!", callback_data="menu_themen"))
+        bot.send_message(chat_id, msg, parse_mode="Markdown", reply_markup=markup)
         return
 
     if mode == "exercise":
