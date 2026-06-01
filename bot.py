@@ -58,21 +58,20 @@ def _send_message_with_translate(chat_id, text, **kwargs):
 bot.send_message = _send_message_with_translate
 
 bot.set_my_commands([
-    BotCommand("info",          "So funktioniert der Bot ℹ️"),
-    BotCommand("freecode",      "Code einlösen 🎁"),
-    BotCommand("start",         "Start"),
-    BotCommand("themen",        "Themen wählen 🎯"),
-    BotCommand("level",         "Mein Niveau"),
-    BotCommand("levelup",       "Nächstes Niveau"),
-    BotCommand("achievements",  "Meine Erfolge 🏅"),
-    BotCommand("progress",      "Mein Fortschritt"),
-    BotCommand("errors",        "Meine Fehler"),
-    BotCommand("practice",      "Übungen"),
-    BotCommand("shadowing",     "Shadowing Mode"),
-    BotCommand("share",         "Bot teilen 🤝"),
-    BotCommand("restart",       "Chat neu starten"),
-    BotCommand("gem",           "German Gem 💎"),
-    BotCommand("support",       "Support 🆘"),
+    BotCommand("info",      "So funktioniert der Bot ℹ️"),
+    BotCommand("code",      "Trial-Code einlösen 🎁"),
+    BotCommand("start",     "Start"),
+    BotCommand("themen",    "Themen wählen 🎯"),
+    BotCommand("level",     "Mein Niveau"),
+    BotCommand("levelup",      "Nächstes Niveau"),
+    BotCommand("achievements", "Meine Erfolge 🏅"),
+    BotCommand("progress",  "Mein Fortschritt"),
+    BotCommand("errors",    "Meine Fehler"),
+    BotCommand("practice",  "Übungen"),
+    BotCommand("shadowing", "Shadowing Mode"),
+    BotCommand("restart",   "Chat neu starten"),
+    BotCommand("gem",       "German Gem 💎"),
+    BotCommand("support",   "Support 🆘"),
 ])
 
 # PERSISTENT STORAGE
@@ -1995,6 +1994,26 @@ TRIAL_CODES = {
     "LAUNCH14":   14,
 }
 
+def _translate_for_user(chat_id: int, text: str) -> str:
+    """Translate a short string into the user's native language via Claude.
+    Falls back to the original text if translation fails."""
+    lang = user_data.get(str(chat_id), {}).get("native_language", "English")
+    try:
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=150,
+            system=(
+                f"Translate the following text into {lang}. "
+                "Return ONLY the translated text — no explanation, no quotes. "
+                "Keep all emojis. No Markdown, no asterisks, plain text only."
+            ),
+            messages=[{"role": "user", "content": text}]
+        )
+        return resp.content[0].text.strip()
+    except Exception:
+        return text  # fallback: original
+
+
 # Stripe
 STRIPE_SECRET_KEY     = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
@@ -2581,51 +2600,32 @@ WICHTIG:
     return response.content[0].text.strip()
 
 
-@bot.message_handler(commands=["share", "teilen", "empfehlen"])
-def handle_share(message):
-    """Send a share link so the user can recommend the bot to friends."""
-    chat_id = message.chat.id
-    from urllib.parse import quote
-    share_text = quote(
-        "Ich spreche Deutsch mit meinem deutschen Kumpel hier — "
-        "probier's aus und boost dein Deutsch! 🇩🇪🚀"
-    )
-    share_url = f"https://t.me/share/url?url={quote(BOT_LINK)}&text={share_text}"
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🤝 Bot teilen", url=share_url))
-    bot.send_message(
-        chat_id,
-        "🤝 Kennst du jemanden, der auch Deutsch üben will?\n\n"
-        "Schick ihnen diesen Link — je mehr üben, desto besser wird man zusammen! 💪",
-        reply_markup=markup,
-    )
-
-
 # START
 @bot.message_handler(commands=["freecode", "code", "freischalten", "redeem"])
-def handle_code(message):
-    """Redeem a trial access code."""
+def handle_freecode(message):
+    """Ask user to enter their access code in their own language, then redeem it."""
     chat_id = message.chat.id
     ensure_user(chat_id)
+
+    # Code already inline (e.g. /code GERMANDUDE3) — redeem immediately
     parts = message.text.strip().split(maxsplit=1)
-    if len(parts) < 2 or not parts[1].strip():
+    if len(parts) > 1 and parts[1].strip():
+        success, msg = redeem_trial_code(chat_id, parts[1].strip())
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🎯 Thema wählen", callback_data="menu_themen"))
-        bot.send_message(chat_id,
-            "🎁 *Trial-Code einlösen*\n\n"
-            "Schreib einfach:\n"
-            "`/code DEINCODE`\n\n"
-            "Noch keinen Code? Schreib uns auf @germandude_support!",
-            parse_mode="Markdown")
+        if success:
+            markup.add(InlineKeyboardButton("🎯 Let's go!", callback_data="menu_themen"))
+        bot.send_message(chat_id, msg, reply_markup=markup)
         return
 
-    code = parts[1].strip()
-    success, msg = redeem_trial_code(chat_id, code)
+    # No inline code — ask in user's native language + übersetzen button
+    prompt = _translate_for_user(chat_id, "🎁 Please enter your access code:")
+    last_bot_text[chat_id] = prompt
+    user_state[chat_id] = user_state.get(chat_id, {})
+    user_state[chat_id]["mode"] = "awaiting_code"
 
     markup = InlineKeyboardMarkup()
-    if success:
-        markup.add(InlineKeyboardButton("🎯 Jetzt loslegen!", callback_data="menu_themen"))
-    bot.send_message(chat_id, msg, parse_mode="Markdown", reply_markup=markup)
+    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+    bot.send_message(chat_id, prompt, reply_markup=markup)
 
 
 @bot.message_handler(commands=['start'])
@@ -4158,6 +4158,16 @@ def handle(message):
     if mode == "shadowing":
         bot.send_message(chat_id, "🎧 Schick bitte eine *Sprachnachricht* zum Nachsprechen.",
             parse_mode="Markdown")
+        return
+
+    if mode == "awaiting_code":
+        code = (message.text or "").strip()
+        success, msg = redeem_trial_code(chat_id, code)
+        user_state[chat_id]["mode"] = "idle"
+        markup = InlineKeyboardMarkup()
+        if success:
+            markup.add(InlineKeyboardButton("🎯 Let's go!", callback_data="menu_themen"))
+        bot.send_message(chat_id, msg, reply_markup=markup)
         return
 
     if mode == "exercise":
