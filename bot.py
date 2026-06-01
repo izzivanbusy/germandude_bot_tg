@@ -1994,26 +1994,6 @@ TRIAL_CODES = {
     "LAUNCH14":   14,
 }
 
-def _translate_for_user(chat_id: int, text: str) -> str:
-    """Translate a short string into the user's native language via Claude.
-    Falls back to the original text if translation fails."""
-    lang = user_data.get(str(chat_id), {}).get("native_language", "English")
-    try:
-        resp = claude.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=150,
-            system=(
-                f"Translate the following text into {lang}. "
-                "Return ONLY the translated text — no explanation, no quotes. "
-                "Keep all emojis. No Markdown, no asterisks, plain text only."
-            ),
-            messages=[{"role": "user", "content": text}]
-        )
-        return resp.content[0].text.strip()
-    except Exception:
-        return text  # fallback: original
-
-
 # Stripe
 STRIPE_SECRET_KEY     = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
@@ -2086,8 +2066,8 @@ def create_stripe_checkout(chat_id):
             payment_method_types=["card"],
             mode="subscription",
             line_items=[{"price": STRIPE_PRICE_ID, "quantity": 1}],
-            success_url=f"https://t.me/{BOT_USERNAME}?start=premium_ok",
-            cancel_url=f"https://t.me/{BOT_USERNAME}",
+            success_url="https://t.me/germandude_bot?start=premium_ok",
+            cancel_url="https://t.me/germandude_bot",
             metadata={"telegram_id": str(chat_id)},
         )
         return session.url
@@ -2113,7 +2093,7 @@ def send_paywall(chat_id):
         ))
     markup.add(InlineKeyboardButton(
         "🎁 Freunde einladen & Free Month verdienen",
-        url=f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}&text=Ich%20lerne%20Deutsch%20mit%20diesem%20Bot%20-%20ist%20wirklich%20gut!%20Probier%20es%20aus%20%F0%9F%87%A9%F0%9F%87%AA"
+        url=f"https://t.me/share/url?url={quote(BOT_LINK)}&text=Ich%20lerne%20Deutsch%20mit%20diesem%20Bot%20-%20ist%20wirklich%20gut!%20Probier%20es%20aus%20%F0%9F%87%A9%F0%9F%87%AA"
     ))
 
     xp_streak_line = f"Du hast bereits *{xp} XP* gesammelt"
@@ -2601,31 +2581,30 @@ WICHTIG:
 
 
 # START
-@bot.message_handler(commands=["freecode", "code", "freischalten", "redeem"])
-def handle_freecode(message):
-    """Ask user to enter their access code in their own language, then redeem it."""
+@bot.message_handler(commands=["code", "freischalten", "redeem"])
+def handle_code(message):
+    """Redeem a trial access code."""
     chat_id = message.chat.id
     ensure_user(chat_id)
-
-    # Code already inline (e.g. /code GERMANDUDE3) — redeem immediately
     parts = message.text.strip().split(maxsplit=1)
-    if len(parts) > 1 and parts[1].strip():
-        success, msg = redeem_trial_code(chat_id, parts[1].strip())
+    if len(parts) < 2 or not parts[1].strip():
         markup = InlineKeyboardMarkup()
-        if success:
-            markup.add(InlineKeyboardButton("🎯 Let's go!", callback_data="menu_themen"))
-        bot.send_message(chat_id, msg, reply_markup=markup)
+        markup.add(InlineKeyboardButton("🎯 Thema wählen", callback_data="menu_themen"))
+        bot.send_message(chat_id,
+            "🎁 *Trial-Code einlösen*\n\n"
+            "Schreib einfach:\n"
+            "`/code DEINCODE`\n\n"
+            "Noch keinen Code? Schreib uns auf @germandude_support!",
+            parse_mode="Markdown")
         return
 
-    # No inline code — ask in user's native language + übersetzen button
-    prompt = _translate_for_user(chat_id, "🎁 Please enter your access code:")
-    last_bot_text[chat_id] = prompt
-    user_state[chat_id] = user_state.get(chat_id, {})
-    user_state[chat_id]["mode"] = "awaiting_code"
+    code = parts[1].strip()
+    success, msg = redeem_trial_code(chat_id, code)
 
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
-    bot.send_message(chat_id, prompt, reply_markup=markup)
+    if success:
+        markup.add(InlineKeyboardButton("🎯 Jetzt loslegen!", callback_data="menu_themen"))
+    bot.send_message(chat_id, msg, parse_mode="Markdown", reply_markup=markup)
 
 
 @bot.message_handler(commands=['start'])
@@ -4158,16 +4137,6 @@ def handle(message):
     if mode == "shadowing":
         bot.send_message(chat_id, "🎧 Schick bitte eine *Sprachnachricht* zum Nachsprechen.",
             parse_mode="Markdown")
-        return
-
-    if mode == "awaiting_code":
-        code = (message.text or "").strip()
-        success, msg = redeem_trial_code(chat_id, code)
-        user_state[chat_id]["mode"] = "idle"
-        markup = InlineKeyboardMarkup()
-        if success:
-            markup.add(InlineKeyboardButton("🎯 Let's go!", callback_data="menu_themen"))
-        bot.send_message(chat_id, msg, reply_markup=markup)
         return
 
     if mode == "exercise":
