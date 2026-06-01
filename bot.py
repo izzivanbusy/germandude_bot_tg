@@ -1559,29 +1559,19 @@ def start_conversation(chat_id, scenario):
     send_reply(chat_id, opener, voice=True)
 
 # GPT FUNCTION
-def _strip_markdown(text: str) -> str:
-    """Remove Telegram Markdown formatting so translations come back clean."""
-    text = re.sub(r"\*\*?(.*?)\*\*?", r"\1", text)   # *bold* / **bold**
-    text = re.sub(r"_(.*?)_", r"\1", text)            # _italic_
-    text = re.sub(r"`(.*?)`", r"\1", text)            # `code`
-    return text
-
 def get_translation(chat_id, text_to_translate):
-    """Translate the given text into the user's native language.
-    Strips Markdown before translating so no stray asterisks bleed through."""
+    """Translate the given text into the user's native language."""
     user = user_data.get(str(chat_id), {})
     native_lang = user.get("native_language", "Englisch")
-    clean_text  = _strip_markdown(text_to_translate)
 
     response = claude.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=600,
+        max_tokens=500,
         system=(
             f"You are a translator. Translate the following text into {native_lang}. "
-            "Return ONLY the plain translation — no asterisks, no Markdown, "
-            "no explanations, no comments. Keep emojis."
+            f"Return ONLY the translation — no explanations, no comments, nothing else."
         ),
-        messages=[{"role": "user", "content": clean_text}]
+        messages=[{"role": "user", "content": text_to_translate}]
     )
     return response.content[0].text.strip()
 
@@ -2591,6 +2581,89 @@ WICHTIG:
 
 
 # START
+@bot.message_handler(commands=["info", "hilfe", "anleitung", "instructions"])
+def handle_info(message):
+    send_info_part(message.chat.id, part=1)
+
+
+INFO_PART1 = (
+    "🇩🇪 Dein Deutscher Kumpel — so funktioniert er!\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    "👤 Wer ist German Dude?\n"
+    "Ich bin dein virtueller Muttersprachler — immer verfügbar, nie ungeduldig. "
+    "Kein Schulbuch, kein Lehrerblick. Einfach quatschen wie mit einem echten deutschen Freund. "
+    "Mein Versprechen: Du redest, ich reagiere. Echt, spontan, auf deinem Niveau.\n\n"
+    "🎙️ So funktioniert der Bot — als Hör- & Sprachtrainer\n"
+    "Der Bot ist für Sprachnachrichten gebaut — wie ein echter Voice-Message-Chat mit einem Freund.\n"
+    "1️⃣ Tippe auf 🎤 in Telegram\n"
+    "2️⃣ Sprich einfach drauflos — kein Perfektionismus!\n"
+    "3️⃣ German Dude antwortet per Voice + Text\n"
+    "4️⃣ Du hörst zu, sprichst nach, antwortest\n\n"
+    "💡 Tipp: Stell dir vor, du schickst einem deutschen Freund eine Sprachnachricht."
+)
+
+INFO_PART2 = (
+    "⚙️ Mikrofon freigeben nicht vergessen!\n"
+    "📱 iPhone: Einstellungen → Datenschutz → Mikrofon → Telegram ✅\n"
+    "🤖 Android: Einstellungen → Apps → Telegram → Berechtigungen → Mikrofon ✅\n\n"
+    "🎯 9 Gesprächsthemen — ein Button genügt:\n"
+    "1️⃣ 🧍 Selbstpräsentation — Wer bist du? Woher kommst du?\n"
+    "2️⃣ 🧑‍🤝‍🧑 Freunde & Beziehungen — Smalltalk, Freundschaft, Familie\n"
+    "3️⃣ 🏢 Amt & Arzt — Behörden, Termine, Formulare\n"
+    "4️⃣ 🎉 Freizeit — Club, Kino, Wochenende, Pläne\n"
+    "5️⃣ 🍽️ Einkauf & Restaurant — Bestellen, Reklamieren, Bezahlen\n"
+    "6️⃣ ✈️ Reisen — Hotel, Bahnhof, Ausflüge\n"
+    "7️⃣ 🏋️ Sport & Hobbys — Was machst du gerne?\n"
+    "8️⃣ 📞 Telefon — Anrufe führen, Termine vereinbaren\n"
+    "9️⃣ 💼 Job — Bewerbung, Büroalltag, Kollegen\n\n"
+    "🗣️ Quatschmodus — einfach reden\n"
+    "Kein Thema, kein Plan — German Dude startet ein freies Gespräch. "
+    "Perfekt für alle, die einfach üben wollen ohne Struktur. Wie ein echter Plausch beim Kaffee. ☕"
+)
+
+INFO_PART3 = (
+    "🧭 Die wichtigsten Commands:\n"
+    "/themen — Thema auswählen & Gespräch starten\n"
+    "/practice — Grammatikübungen auf deinem Niveau 💪\n"
+    "/shadowing — Satz anhören & nachsprechen 🎧\n"
+    "/gem — Deutscher Ausdruck des Tages 💎\n"
+    "/level — Dein aktuelles Niveau\n"
+    "/levelup — Nächstes Niveau freischalten\n"
+    "/progress — XP & Streak\n"
+    "/achievements — Deine Badges 🏅\n"
+    "/errors — Deine häufigsten Fehler\n"
+    "/freecode — Zugangscode einlösen 🎁\n"
+    "/restart — Alles neu starten\n\n"
+    "💬 Buttons — was sie machen:\n"
+    "🌍 übersetzen — übersetzt die letzte Nachricht in deine Sprache\n"
+    "📖 Text anzeigen — zeigt den gesprochenen Text als Text\n"
+    "➡️ Weiter / Nächstes Thema — startet ein neues Gespräch\n\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "❓ Funktioniert etwas nicht? → /support\n"
+    "Wir helfen dir so schnell wie möglich! 🙂"
+)
+
+def send_info_part(chat_id, part: int):
+    """Send one of the 3 info pages with translate + next/finish buttons."""
+    texts = {1: INFO_PART1, 2: INFO_PART2, 3: INFO_PART3}
+    text  = texts.get(part, INFO_PART1)
+    last_bot_text[chat_id] = text
+    user_state[chat_id] = user_state.get(chat_id, {})
+    if part < 3:
+        next_cb  = f"info_next:{part + 1}"
+        next_btn = InlineKeyboardButton("Weiter ⏭️", callback_data=next_cb)
+    else:
+        next_cb  = "menu_themen"
+        next_btn = InlineKeyboardButton("🎯 Thema wählen & loslegen", callback_data="menu_themen")
+    user_state[chat_id]["info_next_callback"] = next_cb
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"),
+        next_btn,
+    )
+    bot.send_message(chat_id, text, reply_markup=markup)
+
+
 @bot.message_handler(commands=["code", "freischalten", "redeem"])
 def handle_code(message):
     """Redeem a trial access code."""
@@ -4619,9 +4692,26 @@ def master_callback_router(call):
         bot.answer_callback_query(call.id, "Übersetze...")
         try:
             translation = get_translation(chat_id, last_npc)
-            bot.send_message(chat_id, f"🌍 {lang}:\n\n{translation}", reply_markup=InlineKeyboardMarkup())
+            # After translation: restore the "next" button if we're in an info flow
+            next_cb = user_state.get(chat_id, {}).get("info_next_callback")
+            if next_cb:
+                markup = InlineKeyboardMarkup()
+                if next_cb == "menu_themen":
+                    markup.add(InlineKeyboardButton("🎯 Thema wählen & loslegen", callback_data="menu_themen"))
+                elif next_cb.startswith("info_next:"):
+                    markup.add(InlineKeyboardButton("Weiter ⏭️", callback_data=next_cb))
+            else:
+                markup = InlineKeyboardMarkup()
+            bot.send_message(chat_id, f"🌍 {lang}:\n\n{translation}", reply_markup=markup)
         except Exception:
             bot.send_message(chat_id, "Übersetzung fehlgeschlagen 😅 Versuch es nochmal.")
+        return
+
+    if data.startswith("info_next:"):
+        part = int(data.split(":")[1])
+        bot.answer_callback_query(call.id)
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        send_info_part(chat_id, part)
         return
 
     if data == "start_chat":
