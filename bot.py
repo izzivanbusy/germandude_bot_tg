@@ -58,20 +58,21 @@ def _send_message_with_translate(chat_id, text, **kwargs):
 bot.send_message = _send_message_with_translate
 
 bot.set_my_commands([
-    BotCommand("info",      "So funktioniert der Bot ℹ️"),
-    BotCommand("code",      "Trial-Code einlösen 🎁"),
-    BotCommand("start",     "Start"),
-    BotCommand("themen",    "Themen wählen 🎯"),
-    BotCommand("level",     "Mein Niveau"),
-    BotCommand("levelup",      "Nächstes Niveau"),
-    BotCommand("achievements", "Meine Erfolge 🏅"),
-    BotCommand("progress",  "Mein Fortschritt"),
-    BotCommand("errors",    "Meine Fehler"),
-    BotCommand("practice",  "Übungen"),
-    BotCommand("shadowing", "Shadowing Mode"),
-    BotCommand("restart",   "Chat neu starten"),
-    BotCommand("gem",       "German Gem 💎"),
-    BotCommand("support",   "Support 🆘"),
+    BotCommand("info",          "So funktioniert der Bot ℹ️"),
+    BotCommand("freecode",      "Code einlösen 🎁"),
+    BotCommand("start",         "Start"),
+    BotCommand("themen",        "Themen wählen 🎯"),
+    BotCommand("level",         "Mein Niveau"),
+    BotCommand("levelup",       "Nächstes Niveau"),
+    BotCommand("achievements",  "Meine Erfolge 🏅"),
+    BotCommand("progress",      "Mein Fortschritt"),
+    BotCommand("errors",        "Meine Fehler"),
+    BotCommand("practice",      "Übungen"),
+    BotCommand("shadowing",     "Shadowing Mode"),
+    BotCommand("share",         "Bot teilen 🤝"),
+    BotCommand("restart",       "Chat neu starten"),
+    BotCommand("gem",           "German Gem 💎"),
+    BotCommand("support",       "Support 🆘"),
 ])
 
 # PERSISTENT STORAGE
@@ -2580,91 +2581,28 @@ WICHTIG:
     return response.content[0].text.strip()
 
 
-# START
-@bot.message_handler(commands=["info", "hilfe", "anleitung", "instructions"])
-def handle_info(message):
-    send_info_part(message.chat.id, part=1)
-
-
-INFO_PART1 = (
-    "🇩🇪 Dein Deutscher Kumpel — so funktioniert er!\n"
-    "━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    "👤 Wer ist German Dude?\n"
-    "Ich bin dein virtueller Muttersprachler — immer verfügbar, nie ungeduldig. "
-    "Kein Schulbuch, kein Lehrerblick. Einfach quatschen wie mit einem echten deutschen Freund. "
-    "Mein Versprechen: Du redest, ich reagiere. Echt, spontan, auf deinem Niveau.\n\n"
-    "🎙️ So funktioniert der Bot — als Hör- & Sprachtrainer\n"
-    "Der Bot ist für Sprachnachrichten gebaut — wie ein echter Voice-Message-Chat mit einem Freund.\n"
-    "1️⃣ Tippe auf 🎤 in Telegram\n"
-    "2️⃣ Sprich einfach drauflos — kein Perfektionismus!\n"
-    "3️⃣ German Dude antwortet per Voice + Text\n"
-    "4️⃣ Du hörst zu, sprichst nach, antwortest\n\n"
-    "💡 Tipp: Stell dir vor, du schickst einem deutschen Freund eine Sprachnachricht."
-)
-
-INFO_PART2 = (
-    "⚙️ Mikrofon freigeben nicht vergessen!\n"
-    "📱 iPhone: Einstellungen → Datenschutz → Mikrofon → Telegram ✅\n"
-    "🤖 Android: Einstellungen → Apps → Telegram → Berechtigungen → Mikrofon ✅\n\n"
-    "🎯 9 Gesprächsthemen — ein Button genügt:\n"
-    "1️⃣ 🧍 Selbstpräsentation — Wer bist du? Woher kommst du?\n"
-    "2️⃣ 🧑‍🤝‍🧑 Freunde & Beziehungen — Smalltalk, Freundschaft, Familie\n"
-    "3️⃣ 🏢 Amt & Arzt — Behörden, Termine, Formulare\n"
-    "4️⃣ 🎉 Freizeit — Club, Kino, Wochenende, Pläne\n"
-    "5️⃣ 🍽️ Einkauf & Restaurant — Bestellen, Reklamieren, Bezahlen\n"
-    "6️⃣ ✈️ Reisen — Hotel, Bahnhof, Ausflüge\n"
-    "7️⃣ 🏋️ Sport & Hobbys — Was machst du gerne?\n"
-    "8️⃣ 📞 Telefon — Anrufe führen, Termine vereinbaren\n"
-    "9️⃣ 💼 Job — Bewerbung, Büroalltag, Kollegen\n\n"
-    "🗣️ Quatschmodus — einfach reden\n"
-    "Kein Thema, kein Plan — German Dude startet ein freies Gespräch. "
-    "Perfekt für alle, die einfach üben wollen ohne Struktur. Wie ein echter Plausch beim Kaffee. ☕"
-)
-
-INFO_PART3 = (
-    "🧭 Die wichtigsten Commands:\n"
-    "/themen — Thema auswählen & Gespräch starten\n"
-    "/practice — Grammatikübungen auf deinem Niveau 💪\n"
-    "/shadowing — Satz anhören & nachsprechen 🎧\n"
-    "/gem — Deutscher Ausdruck des Tages 💎\n"
-    "/level — Dein aktuelles Niveau\n"
-    "/levelup — Nächstes Niveau freischalten\n"
-    "/progress — XP & Streak\n"
-    "/achievements — Deine Badges 🏅\n"
-    "/errors — Deine häufigsten Fehler\n"
-    "/freecode — Zugangscode einlösen 🎁\n"
-    "/restart — Alles neu starten\n\n"
-    "💬 Buttons — was sie machen:\n"
-    "🌍 übersetzen — übersetzt die letzte Nachricht in deine Sprache\n"
-    "📖 Text anzeigen — zeigt den gesprochenen Text als Text\n"
-    "➡️ Weiter / Nächstes Thema — startet ein neues Gespräch\n\n"
-    "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    "❓ Funktioniert etwas nicht? → /support\n"
-    "Wir helfen dir so schnell wie möglich! 🙂"
-)
-
-def send_info_part(chat_id, part: int):
-    """Send one of the 3 info pages with translate + next/finish buttons."""
-    texts = {1: INFO_PART1, 2: INFO_PART2, 3: INFO_PART3}
-    text  = texts.get(part, INFO_PART1)
-    last_bot_text[chat_id] = text
-    user_state[chat_id] = user_state.get(chat_id, {})
-    if part < 3:
-        next_cb  = f"info_next:{part + 1}"
-        next_btn = InlineKeyboardButton("Weiter ⏭️", callback_data=next_cb)
-    else:
-        next_cb  = "menu_themen"
-        next_btn = InlineKeyboardButton("🎯 Thema wählen & loslegen", callback_data="menu_themen")
-    user_state[chat_id]["info_next_callback"] = next_cb
-    markup = InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"),
-        next_btn,
+@bot.message_handler(commands=["share", "teilen", "empfehlen"])
+def handle_share(message):
+    """Send a share link so the user can recommend the bot to friends."""
+    chat_id = message.chat.id
+    from urllib.parse import quote
+    share_text = quote(
+        "Ich spreche Deutsch mit meinem deutschen Kumpel hier — "
+        "probier's aus und boost dein Deutsch! 🇩🇪🚀"
     )
-    bot.send_message(chat_id, text, reply_markup=markup)
+    share_url = f"https://t.me/share/url?url={quote(BOT_LINK)}&text={share_text}"
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🤝 Bot teilen", url=share_url))
+    bot.send_message(
+        chat_id,
+        "🤝 Kennst du jemanden, der auch Deutsch üben will?\n\n"
+        "Schick ihnen diesen Link — je mehr üben, desto besser wird man zusammen! 💪",
+        reply_markup=markup,
+    )
 
 
-@bot.message_handler(commands=["code", "freischalten", "redeem"])
+# START
+@bot.message_handler(commands=["freecode", "code", "freischalten", "redeem"])
 def handle_code(message):
     """Redeem a trial access code."""
     chat_id = message.chat.id
@@ -4692,26 +4630,9 @@ def master_callback_router(call):
         bot.answer_callback_query(call.id, "Übersetze...")
         try:
             translation = get_translation(chat_id, last_npc)
-            # After translation: restore the "next" button if we're in an info flow
-            next_cb = user_state.get(chat_id, {}).get("info_next_callback")
-            if next_cb:
-                markup = InlineKeyboardMarkup()
-                if next_cb == "menu_themen":
-                    markup.add(InlineKeyboardButton("🎯 Thema wählen & loslegen", callback_data="menu_themen"))
-                elif next_cb.startswith("info_next:"):
-                    markup.add(InlineKeyboardButton("Weiter ⏭️", callback_data=next_cb))
-            else:
-                markup = InlineKeyboardMarkup()
-            bot.send_message(chat_id, f"🌍 {lang}:\n\n{translation}", reply_markup=markup)
+            bot.send_message(chat_id, f"🌍 {lang}:\n\n{translation}", reply_markup=InlineKeyboardMarkup())
         except Exception:
             bot.send_message(chat_id, "Übersetzung fehlgeschlagen 😅 Versuch es nochmal.")
-        return
-
-    if data.startswith("info_next:"):
-        part = int(data.split(":")[1])
-        bot.answer_callback_query(call.id)
-        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
-        send_info_part(chat_id, part)
         return
 
     if data == "start_chat":
