@@ -2066,8 +2066,8 @@ def create_stripe_checkout(chat_id):
             payment_method_types=["card"],
             mode="subscription",
             line_items=[{"price": STRIPE_PRICE_ID, "quantity": 1}],
-            success_url=f"https://t.me/{BOT_USERNAME}?start=premium_ok",
-            cancel_url=f"https://t.me/{BOT_USERNAME}",
+            success_url=BOT_LINK + "?start=premium_ok",
+            cancel_url=BOT_LINK,
             metadata={"telegram_id": str(chat_id)},
         )
         return session.url
@@ -2085,6 +2085,12 @@ def send_paywall(chat_id):
 
     checkout_url = create_stripe_checkout(chat_id)
 
+    ref_link  = BOT_LINK + f"?start=ref_{chat_id}"
+    share_msg = quote(
+        "Ich übe gerade Deutsch mit meinem deutschen Kumpel im Chat — probier's mal aus! 🇩🇪\n" + ref_link
+    )
+    share_url = f"https://t.me/share/url?url={quote(ref_link)}&text={share_msg}"
+
     markup = InlineKeyboardMarkup()
     if checkout_url:
         markup.add(InlineKeyboardButton(
@@ -2092,8 +2098,8 @@ def send_paywall(chat_id):
             url=checkout_url
         ))
     markup.add(InlineKeyboardButton(
-        "🎁 Freunde einladen & Free Month verdienen",
-        url=f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}&text=Ich%20lerne%20Deutsch%20mit%20diesem%20Bot%20-%20ist%20wirklich%20gut!%20Probier%20es%20aus%20%F0%9F%87%A9%F0%9F%87%AA"
+        "🎁 Freunde einladen & 3 Tage gratis sichern",
+        url=share_url
     ))
 
     xp_streak_line = f"Du hast bereits *{xp} XP* gesammelt"
@@ -2241,20 +2247,21 @@ def send_progress(chat_id):
 BOT_LINK = "https://t.me/germandude_bot"
 
 def send_referral(chat_id):
+    ref_link   = BOT_LINK + f"?start=ref_{chat_id}"
     share_text = quote(
-        "I've been practicing real German conversations with this bot — it's actually good 😅\n\n"
-        + BOT_LINK
+        "Ich übe gerade Deutsch mit meinem deutschen Kumpel im Chat — probier's aus! 🇩🇪\n" + ref_link
     )
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton(
-        text="Send to a friend 👀",
-        url=f"https://t.me/share/url?url={quote(BOT_LINK)}&text={share_text}"
+        text="🎁 Freund einladen & 3 Tage gratis sichern",
+        url=f"https://t.me/share/url?url={quote(ref_link)}&text={share_text}"
     ))
     bot.send_message(
         chat_id,
-        "🔥 Das war eine deiner besten Sessions.\n\n"
-        "Kennst du jemanden, der auch mit Deutsch struggelt?\n"
-        "Schick ihm das mal 😏",
+        "🔥 Das war eine deiner besten Sessions!\n\n"
+        "Kennst du jemanden, der auch Deutsch üben will?\n"
+        "Lad ihn ein — wenn er joint, kriegst du *3 Tage gratis*! 🎁",
+        parse_mode="Markdown",
         reply_markup=markup
     )
 
@@ -2607,16 +2614,69 @@ def handle_code(message):
     bot.send_message(chat_id, msg, parse_mode="Markdown", reply_markup=markup)
 
 
+def _grant_referral_days(referrer_id: int, new_user_id: int):
+    """Give the referrer 3 extra trial days when their friend joins."""
+    uid  = str(referrer_id)
+    if uid not in user_data:
+        return
+    user = user_data[uid]
+    # Only reward once per referred friend
+    refs = user.setdefault("referrals_rewarded", [])
+    if str(new_user_id) in refs:
+        return
+    refs.append(str(new_user_id))
+
+    # Extend trial: push trial_start back by 3 days (or activate if none)
+    trial_start = user.get("trial_start")
+    if trial_start:
+        from datetime import timedelta
+        start_dt = datetime.fromisoformat(trial_start)
+        new_start = start_dt - timedelta(days=3)
+        user_data[uid]["trial_start"] = new_start.isoformat()
+    else:
+        # No trial yet — gift 3 days starting from today
+        user_data[uid]["trial_start"]     = datetime.now().isoformat()
+        user_data[uid]["trial_code_used"] = "REFERRAL"
+        if "REFERRAL" not in TRIAL_CODES:
+            TRIAL_CODES["REFERRAL"] = {"days": 3, "used_by": None}
+
+    save_users(user_data)
+    log.info(f"Referral reward: {referrer_id} gets +3 days for inviting {new_user_id}")
+
+    # Notify referrer
+    referrer_name = user_data[uid].get("name", "")
+    try:
+        bot.send_message(referrer_id,
+            f"🎉 Dein Freund ist beigetreten!\n"
+            f"+3 Tage Trial geschenkt — viel Spaß zusammen auf Deutsch! 🇩🇪",
+            parse_mode="Markdown")
+    except Exception:
+        pass
+
+
 @bot.message_handler(commands=['start'])
 def start(message):
     chat_id = message.chat.id
     ensure_user(chat_id)
 
-    uid  = str(chat_id)
-    user = user_data.get(uid, {})
-    name = user.get("name")
+    uid     = str(chat_id)
+    user    = user_data.get(uid, {})
+    name    = user.get("name")
 
-    # Returning user — skip onboarding, go straight to Themen
+    # Parse deep link payload: /start ref_12345 or /start premium_ok
+    parts   = message.text.strip().split(maxsplit=1)
+    payload = parts[1].strip() if len(parts) > 1 else ""
+
+    # Handle referral deep link — reward referrer
+    if payload.startswith("ref_") and not name:
+        try:
+            referrer_id = int(payload[4:])
+            if referrer_id != chat_id:
+                _grant_referral_days(referrer_id, chat_id)
+        except ValueError:
+            pass
+
+    # Returning user — skip onboarding
     if name:
         test_state.pop(chat_id, None)
         user_step.pop(chat_id, None)
@@ -4419,33 +4479,8 @@ def handle_voice(message):
     # ── SHADOWING MODE ────────────────────────────────────────────────────────
     if mode == "shadowing":
         user_text = _transcribe_voice(message)
-        shadow_set = user_state.get(chat_id, {}).get("shadow_set", [])
-
-        # Safety: if set not initialized (e.g. old session), restart shadowing
-        if not shadow_set:
-            start_shadowing(chat_id)
-            return
-
-        original = user_state.get(chat_id, {}).get("shadow_current", "")
-        idx   = user_state.get(chat_id, {}).get("shadow_idx", 0)
-        total = len(shadow_set)
-
-        # Quick feedback: show what they said vs original
-        feedback_lines = [f"📝 Du: _{user_text}_"]
-        if original:
-            feedback_lines.append(f"✅ Original: _{original}_")
-
-        # Encouragement based on position
-        if idx + 1 < total:
-            feedback_lines.append(f"\n👉 Weiter mit Satz {idx + 2}!")
-        else:
-            feedback_lines.append("\n🏆 Letzter Satz — fast geschafft!")
-
-        bot.send_message(chat_id, "\n".join(feedback_lines), parse_mode="Markdown")
-
-        # Advance to next sentence
-        user_state[chat_id]["shadow_idx"] = idx + 1
-        _send_shadow_sentence(chat_id)
+        bot.send_message(chat_id, f"_📝 Du hast gesagt: {user_text}_", parse_mode="Markdown")
+        bot.send_message(chat_id, "👍 Gut! Noch einmal? Oder /menu für mehr Optionen.")
         return
 
     # ── ONBOARDING — covers ALL steps so nothing falls through to chat ───────
