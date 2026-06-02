@@ -3846,141 +3846,25 @@ def explain_grammar(chat_id):
         reply_markup=markup,
     )
 
-SHADOWING_SETS = {
-    "A1": [
-        ["Hallo! Ich heiße Maria und ich komme aus Spanien.",
-         "Ich wohne jetzt in Berlin und lerne Deutsch.",
-         "Das ist manchmal schwer, aber ich übe jeden Tag."],
-        ["Guten Morgen! Wie geht es dir heute?",
-         "Mir geht es gut, danke. Ich bin ein bisschen müde.",
-         "Ich trinke jetzt einen Kaffee. Das hilft immer!"],
-        ["Entschuldigung, wo ist der Supermarkt?",
-         "Gehen Sie geradeaus und dann links.",
-         "Vielen Dank! Das ist sehr nett von Ihnen."],
-    ],
-    "A2": [
-        ["Hey, ich hab gestern einen neuen Job angefangen.",
-         "Das Büro ist super, aber die Kollegen kenne ich noch nicht so gut.",
-         "Ich hoffe, es wird besser wenn ich mehr Deutsch spreche."],
-        ["Ich hab heute Morgen den Bus verpasst — natürlich wieder.",
-         "Zum Glück kommt in fünf Minuten der nächste.",
-         "Ich ruf kurz meinen Chef an und sag ihm Bescheid."],
-        ["Kannst du mir empfehlen, was ich hier essen soll?",
-         "Das Schnitzel hier ist wirklich gut — das nehme ich immer.",
-         "Ich probier das mal. Und ein Wasser bitte dazu."],
-    ],
-    "B1": [
-        ["Ich hab letzte Woche endlich meine Wohnung gefunden — nach zwei Monaten Suche!",
-         "Die Miete ist okay, aber die Kaution war echt heftig.",
-         "Jetzt muss ich noch zur Meldebehörde, das wird bestimmt lustig."],
-        ["Mein Chef hat mich heute um ein Feedbackgespräch gebeten.",
-         "Ich war ein bisschen nervös, aber eigentlich war es ganz konstruktiv.",
-         "Er meinte, ich soll öfter meine Meinung sagen — das versuche ich jetzt."],
-        ["Ich wollte dich fragen, ob du am Wochenende Zeit hast.",
-         "Ein paar Leute aus der Arbeit treffen sich samstags — du kannst gerne mitkommen.",
-         "Wir gehen erstmal was essen und danach vielleicht in eine Bar."],
-    ],
-    "B2": [
-        ["Ich finde es schwierig, auf Deutsch wirklich authentisch zu klingen.",
-         "Man merkt immer noch, dass man übersetzt statt wirklich zu denken.",
-         "Aber je mehr ich spreche, desto natürlicher wird es — das merke ich schon."],
-        ["Das Meeting heute war ehrlich gesagt ziemlich zäh.",
-         "Alle haben geredet, aber kaum jemand hat wirklich zugehört.",
-         "Am Ende haben wir trotzdem eine Entscheidung getroffen — irgendwie."],
-        ["Ich hab das Gefühl, dass ich in letzter Zeit viel mehr verstehe.",
-         "Früher hab ich bei Podcasts fast nichts mitbekommen.",
-         "Jetzt folge ich den Gesprächen, auch wenn sie schnell sind — das ist ein echtes Erfolgsgefühl."],
-    ],
-    "C1": [
-        ["Was mich an dieser Debatte stört ist die fehlende Differenzierung.",
-         "Es wird so getan als ob es nur schwarz und weiß gibt — das ist natürlich Unsinn.",
-         "Die Realität ist komplexer und das sollte man auch in der Sprache abbilden."],
-        ["Ich hab das Buch eigentlich nur angefangen weil es mir jemand empfohlen hat.",
-         "Aber jetzt bin ich vollkommen drin — es zieht einen wirklich rein.",
-         "Was mich fasziniert ist wie der Autor Alltagssprache und Literatursprache mischt."],
-        ["Ehrlich gesagt war ich skeptisch als man mir diesen Ansatz vorgestellt hat.",
-         "Aber nach ein paar Wochen muss ich zugeben — es funktioniert besser als erwartet.",
-         "Manchmal braucht man eben einen externen Blick um die eigenen blinden Flecken zu sehen."],
-    ],
-    "C2": [
-        ["Was oft unterschätzt wird ist die Funktion von Pausen im gesprochenen Deutsch.",
-         "Eine gut gesetzte Pause kann mehr ausdrücken als drei Sätze.",
-         "Das ist kein Schweigen — das ist Rhetorik."],
-        ["Die Ironie liegt darin dass gerade die vermeintlich einfache Sprache am schwierigsten zu meistern ist.",
-         "Umgangssprache hat ihre eigene Logik — eine die man nicht ableiten sondern nur verinnerlichen kann.",
-         "Wer das versteht hat Deutsch nicht nur gelernt sondern wirklich erworben."],
-        ["Ich würde sagen dass sprachliche Präzision und Wärme sich nicht ausschließen.",
-         "Man kann klar und direkt sein ohne kalt zu klingen — das ist eine Frage der Haltung.",
-         "Die besten Gespräche die ich auf Deutsch hatte waren genau das: präzise und menschlich zugleich."],
-    ],
+SHADOWING_SENTENCES = {
+    "A1": ["Ich heiße Maria.", "Guten Morgen! Wie geht es dir?", "Ich komme aus Spanien."],
+    "A2": ["Ich hätte gern einen Kaffee.", "Können Sie mir helfen, bitte?", "Wo ist der Bahnhof?"],
+    "B1": ["Ich würde gern einen Termin vereinbaren.", "Das ist eine interessante Frage.", "Wie lange bist du schon hier?"],
+    "B2": ["Ich bin der Meinung, dass wir das überdenken sollten.", "Obwohl es schwierig ist, versuche ich es täglich.", "Das hätte ich nicht gedacht."],
+    "C1": ["Angesichts der Umstände wäre ein anderer Ansatz sinnvoller.", "Er hat sich hervorragend geschlagen, trotz aller Widrigkeiten.", "Das lässt sich nicht so einfach auf einen Nenner bringen."],
 }
-SHADOWING_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
 
 def start_shadowing(chat_id):
-    """Show level selection."""
     user_state[chat_id] = user_state.get(chat_id, {})
-    user_state[chat_id]["mode"] = "shadowing_level_select"
-    markup = InlineKeyboardMarkup(row_width=3)
-    markup.add(*[InlineKeyboardButton(lvl, callback_data=f"shadow_level:{lvl}") for lvl in SHADOWING_LEVELS])
-    bot.send_message(chat_id,
-        "🎧 Shadowing Mode\n\n"
-        "Wähle dein Niveau — ich spreche, du sprichst nach:\n"
-        "A1 = Basics  |  A2 = Alltag  |  B1 = Flüssig\n"
-        "B2 = Komplex  |  C1 = Profi  |  C2 = Muttersprachlich",
-        reply_markup=markup)
+    user_state[chat_id]["mode"] = "shadowing"
 
-def start_shadowing_set(chat_id, level):
-    """Pick a random 3-sentence set and start with sentence 1."""
-    uid  = str(chat_id)
-    sets = SHADOWING_SETS.get(level, SHADOWING_SETS["A2"])
-    gem  = get_todays_gem(uid)
-    gem_phrase = gem.get("gem", "")
-    last_set   = user_state[chat_id].get("shadow_last_set", -1)
-    candidates = [i for i in range(len(sets)) if i != last_set]
-    set_idx    = random.choice(candidates)
-    sentences  = list(sets[set_idx])
-    if gem_phrase:
-        sentences[1] = sentences[1] + " — " + gem_phrase + "!"
-    user_state[chat_id].update({
-        "mode": "shadowing", "shadow_level": level,
-        "shadow_set": sentences, "shadow_idx": 0, "shadow_last_set": set_idx,
-    })
-    _send_shadow_sentence(chat_id)
+    level     = user_data.get(str(chat_id), {}).get("level", "A2")
+    sentences = SHADOWING_SENTENCES.get(level, SHADOWING_SENTENCES["A2"])
+    text      = random.choice(sentences)
+    user_state[chat_id]["shadowing_text"] = text
 
-def _send_shadow_sentence(chat_id):
-    """Send current sentence as voice + prompt."""
-    state     = user_state.get(chat_id, {})
-    sentences = state.get("shadow_set", [])
-    idx       = state.get("shadow_idx", 0)
-    level     = state.get("shadow_level", "A2")
-    total     = len(sentences)
-    if idx >= total:
-        _finish_shadowing_set(chat_id)
-        return
-    text = sentences[idx]
-    user_state[chat_id]["shadow_current"] = text
     send_reply(chat_id, text, voice=True)
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🔁 Nochmal hören", callback_data="shadow_replay"))
-    bot.send_message(chat_id,
-        f"🎧 Satz {idx + 1} von {total} — hör zu und sprich nach!\n"
-        "👉 Schick eine Sprachnachricht.", reply_markup=markup)
-
-def _finish_shadowing_set(chat_id):
-    """Award XP and show continue button after all 3 sentences."""
-    level = user_state.get(chat_id, {}).get("shadow_level", "A2")
-    add_xp(chat_id, 15)
-    markup = InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        InlineKeyboardButton("▶️ Weiter machen",   callback_data=f"shadow_next_set:{level}"),
-        InlineKeyboardButton("🎚️ Level wechseln", callback_data="shadow_change_level"),
-    )
-    markup.add(InlineKeyboardButton("🏠 Menü", callback_data="go_menu"))
-    bot.send_message(chat_id,
-        "🏆 Set abgeschlossen! +15 XP\n\n"
-        "Alle 3 Sätze nachgesprochen — das war echtes Deutsch. 💪",
-        reply_markup=markup)
-    user_state[chat_id]["mode"] = "idle"
+    bot.send_message(chat_id, "🎧 Hör zu und sprich nach!\n\n👉 Schick eine Sprachnachricht.")
 
 def restart_chat(chat_id):
     """Show confirmation dialog before wiping data."""
@@ -4310,8 +4194,9 @@ def handle(message):
             show_menu(chat_id)
         return
 
-    if mode in ("shadowing", "shadowing_level_select"):
-        bot.send_message(chat_id, "🎧 Schick bitte eine Sprachnachricht zum Nachsprechen! 🎤")
+    if mode == "shadowing":
+        bot.send_message(chat_id, "🎧 Schick bitte eine *Sprachnachricht* zum Nachsprechen.",
+            parse_mode="Markdown")
         return
 
     if mode == "exercise":
@@ -4598,13 +4483,71 @@ def handle_voice(message):
         if not shadow_set:
             start_shadowing(chat_id)
             return
+
         original = user_state.get(chat_id, {}).get("shadow_current", "")
-        idx   = user_state.get(chat_id, {}).get("shadow_idx", 0)
-        total = len(shadow_set)
-        lines = [f"📝 _Du: {user_text}_"]
-        if original:
-            lines.append(f"✅ _Original: {original}_")
-        lines.append("\n👉 Weiter mit Satz " + str(idx + 2) + "!" if idx + 1 < total else "\n🏆 Letzter Satz — fast geschafft!")
+        idx      = user_state.get(chat_id, {}).get("shadow_idx", 0)
+        total    = len(shadow_set)
+        level    = user_state.get(chat_id, {}).get("shadow_level", "A2")
+
+        # ── Ask Claude to compare and give feedback ──────────────────────
+        try:
+            fb_resp = claude.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=300,
+                system=(
+                    f"Du bist ein freundlicher Deutschlehrer. Niveau: {level}.\n"
+                    "Vergleiche den Original-Satz mit dem was der User gesagt hat.\n"
+                    "Gib kurzes, konkretes Feedback in 1-3 Sätzen.\n"
+                    "Antworte NUR in diesem Format:\n"
+                    "FEEDBACK: <kurzes Feedback auf Deutsch>\n"
+                    "ERRORS: <JSON-Array mit Fehlern, oder []>\n"
+                    "Jeder Fehler: {\"type\": \"Kategorie\", \"wrong\": \"Fehler\", \"correct\": \"Korrektur\"}\n"
+                    "Kategorien: Aussprache, Wortstellung, Wortschatz, Grammatik, Auslassung.\n"
+                    "Wenn alles korrekt: FEEDBACK: Super! ERRORS: []\n"
+                    "Sei ermutigend, nicht streng."
+                ),
+                messages=[{"role": "user", "content":
+                    f"Original: {original}\nUser sagte: {user_text}"}]
+            )
+            raw      = fb_resp.content[0].text.strip()
+            feedback = "Gut gemacht!"
+            errors   = []
+            for line in raw.splitlines():
+                if line.startswith("FEEDBACK:"):
+                    feedback = line[9:].strip()
+                elif line.startswith("ERRORS:"):
+                    import json as _json
+                    try:
+                        errors = _json.loads(line[7:].strip())
+                        if not isinstance(errors, list):
+                            errors = []
+                    except Exception:
+                        errors = []
+        except Exception as e:
+            log.error(f"Shadowing feedback error: {e}")
+            feedback = "Gut gemacht! Weiter so."
+            errors   = []
+
+        # ── Save errors to weak_points pool ──────────────────────────────
+        if errors:
+            for err in errors:
+                err["source"] = "shadowing"
+            save_weak_points(chat_id, errors)
+
+        # ── Send feedback ─────────────────────────────────────────────────
+        emoji = "✅" if not errors else "💡"
+        lines = [
+            f"📝 _Du: {user_text}_",
+            f"🔊 _Original: {original}_",
+            f"\n{emoji} {feedback}",
+        ]
+        if errors:
+            lines.append("\n📌 _Fehler gespeichert — sieh sie mit /errors_")
+        if idx + 1 < total:
+            lines.append(f"\n👉 Weiter mit Satz {idx + 2}!")
+        else:
+            lines.append("\n🏆 Letzter Satz — fast geschafft!")
+
         bot.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
         user_state[chat_id]["shadow_idx"] = idx + 1
         _send_shadow_sentence(chat_id)
@@ -4799,42 +4742,6 @@ def master_callback_router(call):
             bot.send_message(chat_id, f"🌍 {lang}:\n\n{translation}", reply_markup=InlineKeyboardMarkup())
         except Exception:
             bot.send_message(chat_id, "Übersetzung fehlgeschlagen 😅 Versuch es nochmal.")
-        return
-
-    if data.startswith("shadow_level:"):
-        level = data.split(":", 1)[1]
-        bot.answer_callback_query(call.id, f"Level {level} ✓")
-        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
-        start_shadowing_set(chat_id, level)
-        return
-
-    if data == "shadow_replay":
-        bot.answer_callback_query(call.id)
-        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
-        text  = user_state.get(chat_id, {}).get("shadow_current", "")
-        level = user_state.get(chat_id, {}).get("shadow_level", "A2")
-        idx   = user_state.get(chat_id, {}).get("shadow_idx", 0)
-        total = len(user_state.get(chat_id, {}).get("shadow_set", []))
-        if text:
-            send_reply(chat_id, text, voice=True)
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🔁 Nochmal hören", callback_data="shadow_replay"))
-        bot.send_message(chat_id,
-            f"🎧 Satz {idx + 1} von {total} — hör zu und sprich nach!\n"
-            "👉 Schick eine Sprachnachricht.", reply_markup=markup)
-        return
-
-    if data.startswith("shadow_next_set:"):
-        level = data.split(":", 1)[1]
-        bot.answer_callback_query(call.id)
-        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
-        start_shadowing_set(chat_id, level)
-        return
-
-    if data == "shadow_change_level":
-        bot.answer_callback_query(call.id)
-        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
-        start_shadowing(chat_id)
         return
 
     if data == "start_chat":
