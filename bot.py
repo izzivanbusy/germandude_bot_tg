@@ -3939,11 +3939,17 @@ def do_full_reset(chat_id):
 @bot.message_handler(commands=['themen'])
 def themen_cmd(message):
     ensure_user(message.chat.id)
+    if not is_premium(message.chat.id):
+        send_paywall(message.chat.id)
+        return
     send_topic_buttons(message.chat.id)
 
 @bot.message_handler(commands=['menu'])
 def menu_cmd(message):
     ensure_user(message.chat.id)
+    if not is_premium(message.chat.id):
+        send_paywall(message.chat.id)
+        return
     show_menu(message.chat.id)
 
 @bot.message_handler(commands=['level'])
@@ -3957,11 +3963,17 @@ def errors_cmd(message):
 @bot.message_handler(commands=['practice'])
 def practice_cmd(message):
     ensure_user(message.chat.id)
+    if not is_premium(message.chat.id):
+        send_paywall(message.chat.id)
+        return
     start_exercise(message.chat.id)
 
 @bot.message_handler(commands=['shadowing'])
 def shadowing_cmd(message):
     ensure_user(message.chat.id)
+    if not is_premium(message.chat.id):
+        send_paywall(message.chat.id)
+        return
     start_shadowing(message.chat.id)
 
 @bot.message_handler(commands=['restart'])
@@ -3975,6 +3987,9 @@ def handle_gem_command(message):
     """Send today's German Gem and start the practice exercise."""
     chat_id = message.chat.id
     ensure_user(chat_id)
+    if not is_premium(chat_id):
+        send_paywall(chat_id)
+        return
     send_daily_gem(chat_id)
 
 
@@ -4478,79 +4493,9 @@ def handle_voice(message):
 
     # ── SHADOWING MODE ────────────────────────────────────────────────────────
     if mode == "shadowing":
-        user_text  = _transcribe_voice(message)
-        shadow_set = user_state.get(chat_id, {}).get("shadow_set", [])
-        if not shadow_set:
-            start_shadowing(chat_id)
-            return
-
-        original = user_state.get(chat_id, {}).get("shadow_current", "")
-        idx      = user_state.get(chat_id, {}).get("shadow_idx", 0)
-        total    = len(shadow_set)
-        level    = user_state.get(chat_id, {}).get("shadow_level", "A2")
-
-        # ── Ask Claude to compare and give feedback ──────────────────────
-        try:
-            fb_resp = claude.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=300,
-                system=(
-                    f"Du bist ein freundlicher Deutschlehrer. Niveau: {level}.\n"
-                    "Vergleiche den Original-Satz mit dem was der User gesagt hat.\n"
-                    "Gib kurzes, konkretes Feedback in 1-3 Sätzen.\n"
-                    "Antworte NUR in diesem Format:\n"
-                    "FEEDBACK: <kurzes Feedback auf Deutsch>\n"
-                    "ERRORS: <JSON-Array mit Fehlern, oder []>\n"
-                    "Jeder Fehler: {\"type\": \"Kategorie\", \"wrong\": \"Fehler\", \"correct\": \"Korrektur\"}\n"
-                    "Kategorien: Aussprache, Wortstellung, Wortschatz, Grammatik, Auslassung.\n"
-                    "Wenn alles korrekt: FEEDBACK: Super! ERRORS: []\n"
-                    "Sei ermutigend, nicht streng."
-                ),
-                messages=[{"role": "user", "content":
-                    f"Original: {original}\nUser sagte: {user_text}"}]
-            )
-            raw      = fb_resp.content[0].text.strip()
-            feedback = "Gut gemacht!"
-            errors   = []
-            for line in raw.splitlines():
-                if line.startswith("FEEDBACK:"):
-                    feedback = line[9:].strip()
-                elif line.startswith("ERRORS:"):
-                    import json as _json
-                    try:
-                        errors = _json.loads(line[7:].strip())
-                        if not isinstance(errors, list):
-                            errors = []
-                    except Exception:
-                        errors = []
-        except Exception as e:
-            log.error(f"Shadowing feedback error: {e}")
-            feedback = "Gut gemacht! Weiter so."
-            errors   = []
-
-        # ── Save errors to weak_points pool ──────────────────────────────
-        if errors:
-            for err in errors:
-                err["source"] = "shadowing"
-            save_weak_points(chat_id, errors)
-
-        # ── Send feedback ─────────────────────────────────────────────────
-        emoji = "✅" if not errors else "💡"
-        lines = [
-            f"📝 _Du: {user_text}_",
-            f"🔊 _Original: {original}_",
-            f"\n{emoji} {feedback}",
-        ]
-        if errors:
-            lines.append("\n📌 _Fehler gespeichert — sieh sie mit /errors_")
-        if idx + 1 < total:
-            lines.append(f"\n👉 Weiter mit Satz {idx + 2}!")
-        else:
-            lines.append("\n🏆 Letzter Satz — fast geschafft!")
-
-        bot.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
-        user_state[chat_id]["shadow_idx"] = idx + 1
-        _send_shadow_sentence(chat_id)
+        user_text = _transcribe_voice(message)
+        bot.send_message(chat_id, f"_📝 Du hast gesagt: {user_text}_", parse_mode="Markdown")
+        bot.send_message(chat_id, "👍 Gut! Noch einmal? Oder /menu für mehr Optionen.")
         return
 
     # ── ONBOARDING — covers ALL steps so nothing falls through to chat ───────
