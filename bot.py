@@ -2003,11 +2003,27 @@ if STRIPE_SECRET_KEY:
     stripe.api_key = STRIPE_SECRET_KEY
 
 def is_premium(chat_id):
-    """True if user has active paid premium OR a valid trial code is active."""
+    """True if user has active paid premium OR a valid trial code is active.
+    Syncs from disk on every call so webhook-activated premium is instant."""
     uid  = str(chat_id)
+    # Always sync this user from disk — catches webhook payments immediately
+    try:
+        fresh = load_users()
+        if uid in fresh:
+            user_data[uid] = fresh[uid]
+    except Exception:
+        pass
     user = user_data.get(uid, {})
-    # Paid subscriber — always in
+    # Paid subscriber — check expiry if one-time payment
     if user.get("premium"):
+        premium_until = user.get("premium_until")
+        if premium_until:
+            if datetime.fromisoformat(premium_until) > datetime.now():
+                return True
+            else:
+                user_data[uid]["premium"] = False
+                save_users(user_data)
+                return False
         return True
     # No trial activated yet — locked
     trial_start = user.get("trial_start")
@@ -4760,18 +4776,6 @@ def broadcast_daily_gem():
 CRON_SECRET = os.getenv("CRON_SECRET", "geheim123")
 
 flask_app = Flask(__name__)
-
-@flask_app.route("/reload_users", methods=["POST"])
-def reload_users_endpoint():
-    """Reload user_data from disk into memory. Call after manual edits."""
-    secret = request.json.get("secret", "") if request.is_json else ""
-    if secret != os.getenv("CRON_SECRET", ""):
-        return jsonify({"error": "unauthorized"}), 401
-    global user_data
-    user_data = load_users()
-    log.info("✅ user_data reloaded from disk")
-    return jsonify({"ok": True, "users": len(user_data)})
-
 
 @flask_app.route("/health")
 def health():
