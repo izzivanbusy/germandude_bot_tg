@@ -2006,16 +2006,8 @@ def is_premium(chat_id):
     """True if user has active paid premium OR a valid trial code is active."""
     uid  = str(chat_id)
     user = user_data.get(uid, {})
-    # Paid subscriber — check expiry if one-time payment
+    # Paid subscriber — always in
     if user.get("premium"):
-        premium_until = user.get("premium_until")
-        if premium_until:
-            if datetime.fromisoformat(premium_until) > datetime.now():
-                return True
-            else:
-                user_data[uid]["premium"] = False
-                save_users(user_data)
-                return False
         return True
     # No trial activated yet — locked
     trial_start = user.get("trial_start")
@@ -2064,11 +2056,24 @@ def redeem_trial_code(chat_id, code: str) -> tuple[bool, str]:
         f"Dein deutscher Freund wartet — leg los! 👇"
     )
 
-STRIPE_PAYMENT_LINK = os.getenv("STRIPE_PAYMENT_LINK", "https://buy.stripe.com/6oUbJ20822qNdTU1bU9fW00")
-
 def create_stripe_checkout(chat_id):
-    """Return personalised Stripe Payment Link with chat_id as client_reference_id."""
-    return f"{STRIPE_PAYMENT_LINK}?client_reference_id={chat_id}"
+    """Create Stripe Checkout session and return URL."""
+    if not STRIPE_SECRET_KEY or not STRIPE_PRICE_ID:
+        log.warning("Stripe not configured — keys missing")
+        return None
+    try:
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            mode="subscription",
+            line_items=[{"price": STRIPE_PRICE_ID, "quantity": 1}],
+            success_url=BOT_LINK + "?start=premium_ok",
+            cancel_url=BOT_LINK,
+            metadata={"telegram_id": str(chat_id)},
+        )
+        return session.url
+    except Exception as e:
+        log.error(f"Stripe checkout failed for {chat_id}: {e}")
+        return None
 
 def send_paywall(chat_id):
     """Send paywall message with Stripe checkout button."""
@@ -4720,7 +4725,7 @@ def master_callback_router(call):
 
 # Stripe/webhook disabled for stability — re-enable later
 
-ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))  # set your Telegram ID in Railway
+ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "8512035869"))  # izzi's Telegram ID
 
 @bot.message_handler(commands=["broadcastgems"])
 def handle_broadcast_gems(message):
@@ -4772,6 +4777,35 @@ def send_gems_endpoint():
         log.error(f"Gem broadcast error: {e}")
         return jsonify({"error": str(e)}), 500
 
+@bot.message_handler(commands=["setpremium"])
+def admin_set_premium(message):
+    """Admin command: /setpremium CHAT_ID [days]  — manually activate premium."""
+    if message.chat.id != ADMIN_CHAT_ID:
+        return
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        bot.send_message(message.chat.id, "Usage: /setpremium CHAT_ID [days=30]")
+        return
+    target_uid = parts[1].strip()
+    days       = int(parts[2]) if len(parts) > 2 else 30
+    if target_uid not in user_data:
+        bot.send_message(message.chat.id, f"❌ User {target_uid} not found in user_data.")
+        return
+    from datetime import timedelta
+    user_data[target_uid]["premium"]       = True
+    user_data[target_uid]["premium_until"] = (datetime.now() + timedelta(days=days)).isoformat()
+    save_users(user_data)
+    bot.send_message(message.chat.id, f"✅ Premium activated for {target_uid} — {days} days.")
+    try:
+        bot.send_message(int(target_uid),
+            f"🎉 *Willkommen im Premium-Club!*\n\n"
+            f"Du hast jetzt *{days} Tage* vollen Zugriff. 💪\n"
+            "Tippe /themen um weiterzumachen!",
+            parse_mode="Markdown")
+    except Exception as e:
+        log.warning(f"Could not notify {target_uid}: {e}")
+
+
 @flask_app.route("/stripe_webhook", methods=["POST"])
 def stripe_webhook():
     payload    = request.get_data()
@@ -4785,23 +4819,20 @@ def stripe_webhook():
 
     if event["type"] == "checkout.session.completed":
         session     = event["data"]["object"]
-        telegram_id = (
-            session.get("client_reference_id")
-            or session.get("metadata", {}).get("telegram_id")
-        )
+        telegram_id = session.get("metadata", {}).get("telegram_id")
         customer_id = session.get("customer")
+        sub_id      = session.get("subscription")
         if telegram_id and str(telegram_id) in user_data:
             uid = str(telegram_id)
-            from datetime import timedelta
-            user_data[uid]["premium"]            = True
-            user_data[uid]["stripe_customer_id"] = customer_id
-            user_data[uid]["premium_until"]      = (datetime.now() + timedelta(days=30)).isoformat()
+            user_data[uid]["premium"]                = True
+            user_data[uid]["stripe_customer_id"]     = customer_id
+            user_data[uid]["stripe_subscription_id"] = sub_id
             save_users(user_data)
             log.info(f"✅ Premium activated: {telegram_id}")
             try:
                 bot.send_message(int(telegram_id),
                     "🎉 *Willkommen im Premium-Club!*\n\n"
-                    "Du hast jetzt *30 Tage* vollen Zugriff. 💪\n"
+                    "Du hast jetzt vollen Zugriff auf alles. 💪\n"
                     "Dein Streak und deine XP sind natürlich noch da.\n\n"
                     "Tippe /themen um weiterzumachen!",
                     parse_mode="Markdown")
