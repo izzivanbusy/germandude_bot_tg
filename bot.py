@@ -3553,42 +3553,38 @@ def finish_test(chat_id):
     scores   = state["score"]    # {level: correct_count}
     attempts = state["attempts"] # {level: attempt_count}
 
-    # ── Hierarchical level assignment ───────────────────────────────────────
-    # Walk A1 → A2 → B1 → B2 → C1 in order.
-    # A level is "passed" only if ALL of:
-    #   1. at least 1 attempt (A1/A2) or 2 attempts (B1/B2/C1) — prevents 1-question fluke
-    #   2. accuracy ≥ 60 %  (well above random 33 % for 3-choice questions)
-    #   3. previous level was already passed (hierarchical — can't skip)
-    # Exception: if only 1 attempt on B1+, require 100 % (the one question must be correct).
-    # This stops a lucky single correct on C1 from overriding a weak overall performance.
+    # ── Gradient level assignment ────────────────────────────────────────────
+    # Philosophy: the test is adaptive — the quiz jumps levels based on answers.
+    # This means some levels may have 0 attempts (skipped). We NEVER break on
+    # att==0 — we skip those levels and keep looking.
+    #
+    # "Working level" principle (CEFR-aligned):
+    #   Walk A1 → C1 in order, skipping untested levels.
+    #   - If a level is PASSED (accuracy ≥ 50%): advance final_level.
+    #   - If a level is FAILED (accuracy < 50%): this is the working level — set
+    #     it as final_level and stop. "You're working on B2" beats "you passed B1."
+    #   - If all attempted levels pass: final_level = highest attempted level.
+    #
+    # Example: A1 ✓, A2 (skipped), B1 ✓, B2 ✗, C1 ✓  →  B2
+    # (B2 is where errors start — that's the working level regardless of C1 fluke)
 
-    MIN_ATTEMPTS = {"A1": 1, "A2": 1, "B1": 2, "B2": 2, "C1": 2}
-    THRESHOLD    = 0.60   # 60 % accuracy required
+    THRESHOLD = 0.50   # 50 % accuracy — one wrong out of two is a real struggle
 
-    final_level = "A1"   # floor — everyone gets at least A1
-    for lvl in QUIZ_LEVEL_ORDER:       # ["A1","A2","B1","B2","C1"]
+    final_level = "A1"
+    for lvl in QUIZ_LEVEL_ORDER:
         att  = attempts.get(lvl, 0)
         corr = scores.get(lvl, 0)
 
         if att == 0:
-            # Never tested at this level — cannot claim it or anything above
-            break
+            continue   # adaptive test skipped this level — don't penalise
 
         acc = corr / att
 
-        # Relaxed single-attempt rule: if user only saw 1 question at B1+ and
-        # got it right then continued climbing (proving competence), allow it.
-        # But if they had ≥ min attempts and still failed, stop.
-        if att < MIN_ATTEMPTS[lvl]:
-            # Only 1 attempt (for B1/B2/C1 where min=2): must be 100 % correct
-            if acc < 1.0:
-                break   # got it wrong — doesn't pass
-            # 1/1 correct on B1+ — tentative pass, but final_level update below
+        if acc >= THRESHOLD:
+            final_level = lvl   # solid here — keep climbing
         else:
-            if acc < THRESHOLD:
-                break   # failed this level — stop here
-
-        final_level = lvl   # passed → advance
+            final_level = lvl   # first real struggle = working level
+            break               # stop — everything above is out of reach for now
 
     user_level[chat_id] = final_level
     user_data[str(chat_id)]["level"] = final_level
@@ -3939,17 +3935,11 @@ def do_full_reset(chat_id):
 @bot.message_handler(commands=['themen'])
 def themen_cmd(message):
     ensure_user(message.chat.id)
-    if not is_premium(message.chat.id):
-        send_paywall(message.chat.id)
-        return
     send_topic_buttons(message.chat.id)
 
 @bot.message_handler(commands=['menu'])
 def menu_cmd(message):
     ensure_user(message.chat.id)
-    if not is_premium(message.chat.id):
-        send_paywall(message.chat.id)
-        return
     show_menu(message.chat.id)
 
 @bot.message_handler(commands=['level'])
@@ -3963,17 +3953,11 @@ def errors_cmd(message):
 @bot.message_handler(commands=['practice'])
 def practice_cmd(message):
     ensure_user(message.chat.id)
-    if not is_premium(message.chat.id):
-        send_paywall(message.chat.id)
-        return
     start_exercise(message.chat.id)
 
 @bot.message_handler(commands=['shadowing'])
 def shadowing_cmd(message):
     ensure_user(message.chat.id)
-    if not is_premium(message.chat.id):
-        send_paywall(message.chat.id)
-        return
     start_shadowing(message.chat.id)
 
 @bot.message_handler(commands=['restart'])
@@ -3987,9 +3971,6 @@ def handle_gem_command(message):
     """Send today's German Gem and start the practice exercise."""
     chat_id = message.chat.id
     ensure_user(chat_id)
-    if not is_premium(chat_id):
-        send_paywall(chat_id)
-        return
     send_daily_gem(chat_id)
 
 
