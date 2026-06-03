@@ -4725,7 +4725,7 @@ def master_callback_router(call):
 
 # Stripe/webhook disabled for stability — re-enable later
 
-ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "8512035869"))  # izzi's Telegram ID
+ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))  # set your Telegram ID in Railway
 
 @bot.message_handler(commands=["broadcastgems"])
 def handle_broadcast_gems(message):
@@ -4761,6 +4761,18 @@ CRON_SECRET = os.getenv("CRON_SECRET", "geheim123")
 
 flask_app = Flask(__name__)
 
+@flask_app.route("/reload_users", methods=["POST"])
+def reload_users_endpoint():
+    """Reload user_data from disk into memory. Call after manual edits."""
+    secret = request.json.get("secret", "") if request.is_json else ""
+    if secret != os.getenv("CRON_SECRET", ""):
+        return jsonify({"error": "unauthorized"}), 401
+    global user_data
+    user_data = load_users()
+    log.info("✅ user_data reloaded from disk")
+    return jsonify({"ok": True, "users": len(user_data)})
+
+
 @flask_app.route("/health")
 def health():
     return jsonify({"status": "ok"}), 200
@@ -4776,35 +4788,6 @@ def send_gems_endpoint():
     except Exception as e:
         log.error(f"Gem broadcast error: {e}")
         return jsonify({"error": str(e)}), 500
-
-@bot.message_handler(commands=["setpremium"])
-def admin_set_premium(message):
-    """Admin command: /setpremium CHAT_ID [days]  — manually activate premium."""
-    if message.chat.id != ADMIN_CHAT_ID:
-        return
-    parts = message.text.strip().split()
-    if len(parts) < 2:
-        bot.send_message(message.chat.id, "Usage: /setpremium CHAT_ID [days=30]")
-        return
-    target_uid = parts[1].strip()
-    days       = int(parts[2]) if len(parts) > 2 else 30
-    if target_uid not in user_data:
-        bot.send_message(message.chat.id, f"❌ User {target_uid} not found in user_data.")
-        return
-    from datetime import timedelta
-    user_data[target_uid]["premium"]       = True
-    user_data[target_uid]["premium_until"] = (datetime.now() + timedelta(days=days)).isoformat()
-    save_users(user_data)
-    bot.send_message(message.chat.id, f"✅ Premium activated for {target_uid} — {days} days.")
-    try:
-        bot.send_message(int(target_uid),
-            f"🎉 *Willkommen im Premium-Club!*\n\n"
-            f"Du hast jetzt *{days} Tage* vollen Zugriff. 💪\n"
-            "Tippe /themen um weiterzumachen!",
-            parse_mode="Markdown")
-    except Exception as e:
-        log.warning(f"Could not notify {target_uid}: {e}")
-
 
 @flask_app.route("/stripe_webhook", methods=["POST"])
 def stripe_webhook():
