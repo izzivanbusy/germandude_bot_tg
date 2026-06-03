@@ -1995,12 +1995,14 @@ TRIAL_CODES = {
 }
 
 # Stripe
-STRIPE_SECRET_KEY     = os.getenv("STRIPE_SECRET_KEY", "")
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
-STRIPE_PRICE_ID       = os.getenv("STRIPE_PRICE_ID", "")
-RAILWAY_DOMAIN        = os.getenv("RAILWAY_PUBLIC_DOMAIN", "germandudebottg-production.up.railway.app")
+STRIPE_SECRET_KEY          = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET      = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_PRICE_ID            = os.getenv("STRIPE_PRICE_ID", "")
+STRIPE_PRICE_ID_DISCOUNTED = os.getenv("STRIPE_PRICE_ID_DISCOUNTED", "")
+RAILWAY_DOMAIN             = os.getenv("RAILWAY_PUBLIC_DOMAIN", "germandudebottg-production.up.railway.app")
 if STRIPE_SECRET_KEY:
     stripe.api_key = STRIPE_SECRET_KEY
+    log.info(f"Stripe configured — price: {STRIPE_PRICE_ID[:12]}...")
 
 def is_premium(chat_id):
     """True if user has active paid premium OR a valid trial code is active."""
@@ -2057,19 +2059,26 @@ def redeem_trial_code(chat_id, code: str) -> tuple[bool, str]:
     )
 
 def create_stripe_checkout(chat_id):
-    """Create Stripe Checkout session and return URL."""
+    """Create Stripe Checkout session. Uses discounted price if user has a discount code."""
     if not STRIPE_SECRET_KEY or not STRIPE_PRICE_ID:
-        log.warning("Stripe not configured — keys missing")
+        log.warning(f"Stripe not configured — SK={bool(STRIPE_SECRET_KEY)} PID={bool(STRIPE_PRICE_ID)}")
         return None
+    uid           = str(chat_id)
+    discount_code = user_data.get(uid, {}).get("discount_code")
+    price_id      = STRIPE_PRICE_ID
+    if discount_code and discount_code in DISCOUNT_CODES and STRIPE_PRICE_ID_DISCOUNTED:
+        price_id = STRIPE_PRICE_ID_DISCOUNTED
+        log.info(f"Using discounted price for {chat_id}")
     try:
         session = stripe.checkout.Session.create(
             payment_method_types=["card"],
             mode="subscription",
-            line_items=[{"price": STRIPE_PRICE_ID, "quantity": 1}],
+            line_items=[{"price": price_id, "quantity": 1}],
             success_url=BOT_LINK + "?start=premium_ok",
             cancel_url=BOT_LINK,
-            metadata={"telegram_id": str(chat_id)},
+            metadata={"telegram_id": str(chat_id), "discount_code": discount_code or ""},
         )
+        log.info(f"Stripe checkout created for {chat_id}")
         return session.url
     except Exception as e:
         log.error(f"Stripe checkout failed for {chat_id}: {e}")
