@@ -2003,27 +2003,11 @@ if STRIPE_SECRET_KEY:
     stripe.api_key = STRIPE_SECRET_KEY
 
 def is_premium(chat_id):
-    """True if user has active paid premium OR a valid trial code is active.
-    Syncs from disk on every call so webhook-activated premium is instant."""
+    """True if user has active paid premium OR a valid trial code is active."""
     uid  = str(chat_id)
-    # Always sync this user from disk — catches webhook payments immediately
-    try:
-        fresh = load_users()
-        if uid in fresh:
-            user_data[uid] = fresh[uid]
-    except Exception:
-        pass
     user = user_data.get(uid, {})
-    # Paid subscriber — check expiry if one-time payment
+    # Paid subscriber — always in
     if user.get("premium"):
-        premium_until = user.get("premium_until")
-        if premium_until:
-            if datetime.fromisoformat(premium_until) > datetime.now():
-                return True
-            else:
-                user_data[uid]["premium"] = False
-                save_users(user_data)
-                return False
         return True
     # No trial activated yet — locked
     trial_start = user.get("trial_start")
@@ -3985,8 +3969,7 @@ def practice_cmd(message):
 
 @bot.message_handler(commands=['shadowing'])
 def shadowing_cmd(message):
-    ensure_user(message.chat.id)
-    start_shadowing(message.chat.id)
+    bot.send_message(message.chat.id, "🎧 Shadowing Mode kommt bald zurück! Bleib dran. 👀")
 
 @bot.message_handler(commands=['restart'])
 def restart_cmd(message):
