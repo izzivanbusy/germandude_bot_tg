@@ -1113,7 +1113,7 @@ GERMAN_GEMS = [
         "meaning": "Ich muss unbedingt etwas erzählen / ich kann nichts für mich behalten.",
         "examples": [
             "Warte, ich hab ein starkes Mitteilungsbedürfnis — du glaubst nicht, was heute passiert ist!",
-            "Er hat ein extremes Mitteilungsbedürfnis, der postet 20 Mal am Tag.",
+            "Du hast ein extremes Mitteilungsbedürfnis — du postest 20 Mal am Tag.",
             "Ich weiß, ich hab ein Mitteilungsbedürfnis — aber hör kurz zu!",
         ],
     },
@@ -1180,7 +1180,7 @@ GERMAN_GEMS = [
         "examples": [
             "Du willst im Winter barfuß rausgehen? Hast du sie noch alle?",
             "Fünf Energydrinks am Tag? Hast du sie noch alle?",
-            "Er hat gekündigt ohne neuen Job. Hast du sie noch alle?",
+            "Du hast gekündigt ohne neuen Job? Hast du sie noch alle?",
         ],
     },
     {
@@ -1190,7 +1190,7 @@ GERMAN_GEMS = [
         "meaning": "Das eigentliche Thema vermeiden / nicht direkt sagen was man meint.",
         "examples": [
             "Sag's einfach direkt — hör auf, um den heißen Brei herumzureden.",
-            "Er redet seit 10 Minuten um den heißen Brei herum.",
+            "Sag es einfach direkt — jetzt red nicht um den heißen Brei herum!",
             "Ich rede nicht gerne um den heißen Brei — also: ich bin nicht happy damit.",
         ],
     },
@@ -3969,7 +3969,8 @@ def practice_cmd(message):
 
 @bot.message_handler(commands=['shadowing'])
 def shadowing_cmd(message):
-    bot.send_message(message.chat.id, "🎧 Shadowing Mode kommt bald zurück! Bleib dran. 👀")
+    ensure_user(message.chat.id)
+    start_shadowing(message.chat.id)
 
 @bot.message_handler(commands=['restart'])
 def restart_cmd(message):
