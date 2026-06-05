@@ -1113,7 +1113,7 @@ GERMAN_GEMS = [
         "meaning": "Ich muss unbedingt etwas erzählen / ich kann nichts für mich behalten.",
         "examples": [
             "Warte, ich hab ein starkes Mitteilungsbedürfnis — du glaubst nicht, was heute passiert ist!",
-            "Du hast ein extremes Mitteilungsbedürfnis — du postest 20 Mal am Tag.",
+            "Er hat ein extremes Mitteilungsbedürfnis, der postet 20 Mal am Tag.",
             "Ich weiß, ich hab ein Mitteilungsbedürfnis — aber hör kurz zu!",
         ],
     },
@@ -1180,7 +1180,7 @@ GERMAN_GEMS = [
         "examples": [
             "Du willst im Winter barfuß rausgehen? Hast du sie noch alle?",
             "Fünf Energydrinks am Tag? Hast du sie noch alle?",
-            "Du hast gekündigt ohne neuen Job? Hast du sie noch alle?",
+            "Er hat gekündigt ohne neuen Job. Hast du sie noch alle?",
         ],
     },
     {
@@ -1190,7 +1190,7 @@ GERMAN_GEMS = [
         "meaning": "Das eigentliche Thema vermeiden / nicht direkt sagen was man meint.",
         "examples": [
             "Sag's einfach direkt — hör auf, um den heißen Brei herumzureden.",
-            "Sag es einfach direkt — jetzt red nicht um den heißen Brei herum!",
+            "Er redet seit 10 Minuten um den heißen Brei herum.",
             "Ich rede nicht gerne um den heißen Brei — also: ich bin nicht happy damit.",
         ],
     },
@@ -2619,7 +2619,7 @@ def handle_code(message):
     markup = InlineKeyboardMarkup()
     if success:
         markup.add(InlineKeyboardButton("🎯 Jetzt loslegen!", callback_data="menu_themen"))
-    bot.send_message(chat_id, msg, parse_mode="Markdown", reply_markup=markup)
+    bot.send_message(chat_id, msg, reply_markup=markup)
 
 
 def _grant_referral_days(referrer_id: int, new_user_id: int):
@@ -4006,23 +4006,26 @@ def send_daily_gem(chat_id):
     except Exception:
         meaning_translated = gem["meaning"]
 
+    # Escape special chars for Markdown safety
+    def _esc(t): return str(t).replace("*","").replace("_","").replace("`","").replace("[","")
+
     lines = [
-        f"💎 *German Gem des Tages*",
+        f"💎 German Gem des Tages",
         f"",
-        f"*{gem['gem']}*",
-        f"_{gem['type']}_",
+        f"🗣 {gem['gem']}",
+        f"{gem['type']}",
         f"",
-        f"📖 Bedeutung: {gem['meaning']}",
-        f"🌍 {native_lang}: _{meaning_translated}_",
+        f"📖 Bedeutung: {_esc(gem['meaning'])}",
+        f"🌍 {native_lang}: {_esc(meaning_translated)}",
         f"",
-        f"*Beispiele aus dem echten Leben:*",
+        f"Beispiele aus dem echten Leben:",
     ]
     for ex in gem["examples"]:
-        lines.append(f"• {ex}")
+        lines.append(f"• {_esc(ex)}")
 
     lines += [
         f"",
-        f"✏️ *Deine Aufgabe:* Schreib einen eigenen Satz mit *{gem['gem']}*!",
+        f"✏️ Deine Aufgabe: Schreib einen eigenen Satz mit {gem['gem']}!",
         f"Ich überprüfe ihn und gebe dir Feedback. 🙂",
     ]
 
