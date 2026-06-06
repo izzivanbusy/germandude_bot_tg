@@ -1083,350 +1083,521 @@ REGELN:
 # ═══════════════════════════════════════════════════════════════════════════
 
 GERMAN_GEMS = [
-    {
-        "id": "gem_01",
-        "gem": "Ich steh auf dem Schlauch.",
-        "type": "Redewendung",
-        "meaning": "Ich verstehe es gerade nicht / ich komme nicht drauf.",
-        "examples": [
-            "Kannst du das nochmal erklären? Ich steh total auf dem Schlauch.",
-            "Sorry, ich steh auf dem Schlauch — was meinst du genau?",
-            "Bei Mathe steh ich immer auf dem Schlauch.",
-        ],
-    },
-    {
-        "id": "gem_02",
-        "gem": "Ich verstehe nur Bahnhof.",
-        "type": "Redewendung",
-        "meaning": "Ich verstehe gar nichts von dem, was gesagt wird.",
-        "examples": [
-            "Der Arzt hat so viel Fachjargon benutzt — ich hab nur Bahnhof verstanden.",
-            "Bei dem Meeting? Nur Bahnhof.",
-            "Wenn meine Oma über Politik redet, versteh ich nur Bahnhof.",
-        ],
-    },
-    {
-        "id": "gem_03",
-        "gem": "Ich hab ein starkes Mitteilungsbedürfnis.",
-        "type": "Ausdruck",
-        "meaning": "Ich muss unbedingt etwas erzählen / ich kann nichts für mich behalten.",
-        "examples": [
-            "Warte, ich hab ein starkes Mitteilungsbedürfnis — du glaubst nicht, was heute passiert ist!",
-            "Er hat ein extremes Mitteilungsbedürfnis, der postet 20 Mal am Tag.",
-            "Ich weiß, ich hab ein Mitteilungsbedürfnis — aber hör kurz zu!",
-        ],
-    },
-    {
-        "id": "gem_04",
-        "gem": "Einen Zahn zulegen.",
-        "type": "Redewendung",
-        "meaning": "Schneller werden / mehr Gas geben.",
-        "examples": [
-            "Wenn wir den Zug noch kriegen wollen, müssen wir einen Zahn zulegen.",
-            "Leg mal einen Zahn zu — wir sind schon spät dran!",
-            "Das Projekt läuft zu langsam, wir müssen einen Zahn zulegen.",
-        ],
-    },
-    {
-        "id": "gem_05",
-        "gem": "Boah!",
-        "type": "Ausruf",
-        "meaning": "Ausdruck von Staunen, Überraschung oder leichtem Genervtsein.",
-        "examples": [
-            "Boah, ist das heiß heute!",
-            "Boah ey, das hätte ich nicht erwartet.",
-            "Boah, der Stau auf der A9 — eine Stunde stehengeblieben.",
-        ],
-    },
-    {
-        "id": "gem_06",
-        "gem": "Krass.",
-        "type": "Slang",
-        "meaning": "Wow / unglaublich / beeindruckend (positiv oder negativ).",
-        "examples": [
-            "Krass, das hast du wirklich geschafft!",
-            "Das ist so krass — ich kann's kaum glauben.",
-            "Krass, wie teuer alles geworden ist.",
-        ],
-    },
-    {
-        "id": "gem_07",
-        "gem": "Bescheuert.",
-        "type": "Slang",
-        "meaning": "Blöd / dumm / nicht in Ordnung.",
-        "examples": [
-            "Das ist doch bescheuert — warum machen die das so?",
-            "Ich hab mein Handy vergessen. Wie bescheuert.",
-            "Die Regel ist echt bescheuert, das versteht kein Mensch.",
-        ],
-    },
-    {
-        "id": "gem_08",
-        "gem": "Ist das dein Ernst?",
-        "type": "Ausdruck",
-        "meaning": "Meinst du das wirklich? / Das kann nicht sein.",
-        "examples": [
-            "Ist das dein Ernst? Der Film kostet 20 Euro?",
-            "Sie haben das Meeting auf 7 Uhr morgens verlegt. Ist das dein Ernst?",
-            "Ist das dein Ernst — du hast das Passwort vergessen?",
-        ],
-    },
-    {
-        "id": "gem_09",
-        "gem": "Hast du sie noch alle?",
-        "type": "Redewendung",
-        "meaning": "Bist du verrückt? / Das ist doch nicht normal!",
-        "examples": [
-            "Du willst im Winter barfuß rausgehen? Hast du sie noch alle?",
-            "Fünf Energydrinks am Tag? Hast du sie noch alle?",
-            "Er hat gekündigt ohne neuen Job. Hast du sie noch alle?",
-        ],
-    },
-    {
-        "id": "gem_10",
-        "gem": "Um den heißen Brei herumreden.",
-        "type": "Redewendung",
-        "meaning": "Das eigentliche Thema vermeiden / nicht direkt sagen was man meint.",
-        "examples": [
-            "Sag's einfach direkt — hör auf, um den heißen Brei herumzureden.",
-            "Er redet seit 10 Minuten um den heißen Brei herum.",
-            "Ich rede nicht gerne um den heißen Brei — also: ich bin nicht happy damit.",
-        ],
-    },
-    {
-        "id": "gem_11",
-        "gem": "Sich etwas gönnen.",
-        "type": "Ausdruck",
-        "meaning": "Sich selbst etwas Schönes/Teures erlauben ohne schlechtes Gewissen.",
-        "examples": [
-            "Einmal im Jahr gönn ich mir ein richtig gutes Restaurant.",
-            "Du arbeitest so viel — gönn dir mal einen freien Tag!",
-            "Ich hab mir ein neues Fahrrad gegönnt. Ich bin so froh.",
-        ],
-    },
-    {
-        "id": "gem_12",
-        "gem": "Sich den Brückentag freinehmen.",
-        "type": "Alltagsausdruck",
-        "meaning": "Den Tag zwischen einem Feiertag und dem Wochenende als Urlaub nehmen.",
-        "examples": [
-            "Donnerstag ist Feiertag — ich nehm mir den Brückentag frei, dann hab ich 4 Tage.",
-            "Hast du dir den Brückentag genommen?",
-            "Brückentage sind Gold wert für lange Wochenenden.",
-        ],
-    },
-    {
-        "id": "gem_13",
-        "gem": "Backpfeifengesicht.",
-        "type": "Wort",
-        "meaning": "Ein Gesicht, das nach einer Ohrfeige aussieht / jemand der einen nervt.",
-        "examples": [
-            "Der Typ mit dem Backpfeifengesicht hat sich schon wieder beschwert.",
-            "Mein Chef manchmal... totales Backpfeifengesicht.",
-            "So ein Backpfeifengesicht — immer dieser selbstgefällige Blick.",
-        ],
-    },
-    {
-        "id": "gem_14",
-        "gem": "Arschgeige.",
-        "type": "Schimpfwort (mild)",
-        "meaning": "Jemand der sich unfair oder blöd verhält (mild, unter Freunden ok).",
-        "examples": [
-            "Der hat mir die Parklücke weggeschnappt — so eine Arschgeige!",
-            "Diese Arschgeige hat meinen Kaffee getrunken!",
-            "Komm, nicht ärgern — der ist einfach eine Arschgeige.",
-        ],
-    },
-    {
-        "id": "gem_15",
-        "gem": "Am Arsch der Welt.",
-        "type": "Redewendung",
-        "meaning": "An einem sehr abgelegenen, schwer erreichbaren Ort.",
-        "examples": [
-            "Das Büro ist am Arsch der Welt — eine Stunde mit dem Bus.",
-            "Wir haben das Airbnb gebucht, das war wirklich am Arsch der Welt.",
-            "Warum liegt das Finanzamt immer am Arsch der Welt?",
-        ],
-    },
-    {
-        "id": "gem_16",
-        "gem": "Du siehst heute umwerfend aus!",
-        "type": "Kompliment",
-        "meaning": "Du siehst fantastisch aus (stark positiv).",
-        "examples": [
-            "Wow, du siehst heute umwerfend aus — neues Outfit?",
-            "Ich muss sagen, du siehst umwerfend aus heute Abend.",
-            "Hast du was verändert? Du siehst umwerfend aus!",
-        ],
-    },
-    {
-        "id": "gem_17",
-        "gem": "Leute, ihr seid ja der Hammer!",
-        "type": "Ausdruck",
-        "meaning": "Ihr seid unglaublich gut / toll / ihr habt mich beeindruckt.",
-        "examples": [
-            "Das habt ihr in einer Stunde fertig? Leute, ihr seid der Hammer!",
-            "Ihr seid ja der Hammer — danke für eure Hilfe!",
-            "Was ein Abend, ihr seid der Hammer!",
-        ],
-    },
-    {
-        "id": "gem_18",
-        "gem": "Stabil! / Gute Leistung.",
-        "type": "Lob",
-        "meaning": "Sehr gut gemacht / das war solide und beeindruckend.",
-        "examples": [
-            "Du hast die ganze Nacht durchgearbeitet? Stabil!",
-            "10km gelaufen? Gute Leistung!",
-            "Stabil — das hätte ich nicht besser machen können.",
-        ],
-    },
-    {
-        "id": "gem_19",
-        "gem": "Wer A sagt, muss auch B sagen.",
-        "type": "Sprichwort",
-        "meaning": "Wer etwas anfängt, muss es auch zu Ende führen.",
-        "examples": [
-            "Du hast das Projekt gestartet — wer A sagt, muss auch B sagen.",
-            "Ich weiß, es ist schwer, aber wer A sagt muss B sagen.",
-            "Jetzt aufhören? Wer A sagt, muss auch B sagen!",
-        ],
-    },
-    {
-        "id": "gem_20",
-        "gem": "Das A und O.",
-        "type": "Redewendung",
-        "meaning": "Das Wichtigste / das Grundlegende / das Entscheidende.",
-        "examples": [
-            "Kommunikation ist das A und O in einer Beziehung.",
-            "Pünktlichkeit ist das A und O in Deutschland.",
-            "Guter Schlaf ist das A und O für die Gesundheit.",
-        ],
-    },
-    {
-        "id": "gem_21",
-        "gem": "Alles klar.",
-        "type": "Alltagsausdruck",
-        "meaning": "Verstanden / OK / alles gut (sehr vielseitig).",
-        "examples": [
-            "Treffen wir uns um 6? — Alles klar!",
-            "Alles klar bei dir?",
-            "Alles klar, ich kümmere mich darum.",
-        ],
-    },
-    {
-        "id": "gem_22",
-        "gem": "Pass auf dich auf.",
-        "type": "Abschiedsformel",
-        "meaning": "Cuidate / Take care — herzliche Verabschiedung.",
-        "examples": [
-            "Schön, dich gesehen zu haben — pass auf dich auf!",
-            "Gute Reise und pass auf dich auf.",
-            "Bis nächste Woche — pass auf dich auf!",
-        ],
-    },
-    {
-        "id": "gem_23",
-        "gem": "Ich freue mich auf dich / euch / Sie.",
-        "type": "Ausdruck",
-        "meaning": "Ich bin gespannt / vorfreudig auf das Treffen mit dir/euch.",
-        "examples": [
-            "Bis Samstag — ich freue mich schon auf dich!",
-            "Wir kommen um 7. — Super, ich freue mich auf euch!",
-            "Herzlich willkommen — wir freuen uns sehr auf Sie.",
-        ],
-    },
-    {
-        "id": "gem_24",
-        "gem": "Haben Sie gut hergefunden?",
-        "type": "Höflichkeitsformel",
-        "meaning": "Sind Sie gut angekommen? / War es leicht, hierher zu kommen?",
-        "examples": [
-            "Guten Tag! Haben Sie gut hergefunden?",
-            "Schön, dass Sie da sind — haben Sie gut hergefunden?",
-            "Herzlich willkommen. Haben Sie gut hergefunden?",
-        ],
-    },
-    {
-        "id": "gem_25",
-        "gem": "Ist das von Ikea / Bauhaus / Zalando?",
-        "type": "Alltagsfrage",
-        "meaning": "Fragen nach der Herkunft von Möbeln / Heimwerkerprodukten / Kleidung.",
-        "examples": [
-            "Das Regal sieht super aus — ist das von Ikea?",
-            "Schöne Jacke! Die ist von Zalando, oder?",
-            "Dieses Werkzeug ist von Bauhaus, stimmt's?",
-        ],
-    },
-    {
-        "id": "gem_26",
-        "gem": "Eine Aufenthaltsgenehmigung beantragen.",
-        "type": "Behördendeutsch",
-        "meaning": "Offiziell eine Erlaubnis zum Aufenthalt in Deutschland beantragen.",
-        "examples": [
-            "Ich muss nächste Woche meine Aufenthaltsgenehmigung beantragen.",
-            "Ohne Aufenthaltsgenehmigung darf man nicht arbeiten.",
-            "Wo beantragt man die Aufenthaltsgenehmigung in Berlin?",
-        ],
-    },
-    {
-        "id": "gem_27",
-        "gem": "Einen Termin vorziehen / verschieben.",
-        "type": "Alltagsausdruck",
-        "meaning": "Termin früher legen (vorziehen) oder auf später verlegen (verschieben).",
-        "examples": [
-            "Können wir den Termin auf Dienstag vorziehen?",
-            "Ich muss den Zahnarzttermin leider verschieben.",
-            "Der Meeting-Termin wurde auf 14 Uhr vorgezogen.",
-        ],
-    },
-    {
-        "id": "gem_28",
-        "gem": "Abstruser Unfug.",
-        "type": "Ausdruck",
-        "meaning": "Kompletter Unsinn / völlig absurdes Zeug.",
-        "examples": [
-            "Was du da redest ist abstruser Unfug!",
-            "Diese Verschwörungstheorie ist abstruser Unfug.",
-            "Ich höre mir diesen abstrusen Unfug nicht länger an.",
-        ],
-    },
-    {
-        "id": "gem_29",
-        "gem": "Ich freue mich wie ein Schnitzel.",
-        "type": "Redewendung",
-        "meaning": "Ich freue mich riesig (humorvoll-übertrieben).",
-        "examples": [
-            "Urlaub nächste Woche — ich freue mich wie ein Schnitzel!",
-            "Das Konzert ist ausverkauft und wir haben Karten — ich freu mich wie ein Schnitzel.",
-            "Neue Folge heute Abend? Ich freu mich wie ein Schnitzel!",
-        ],
-    },
-    {
-        "id": "gem_30",
-        "gem": "Na ja.",
-        "type": "Füllwort",
-        "meaning": "Ausdruck von Zweifel, Zögerlichkeit oder milder Ablehnung.",
-        "examples": [
-            "War der Film gut? — Na ja, es ging so.",
-            "Na ja, ich bin nicht so begeistert davon.",
-            "Na ja, wenn du meinst...",
-        ],
-    },
+    "Ich steh auf dem Schlauch",
+    "Ich verstehe nur Bahnhof",
+    "Ich hab ein starkes Mitteilungsbedürfnis",
+    "Einen Zahn zulegen",
+    "Boah!",
+    "Krass",
+    "Bescheuert",
+    "Ist das dein Ernst?",
+    "Hast du sie noch alle?",
+    "Um den heißen Brei herumreden",
+    "Sich etwas gönnen",
+    "Backpfeifengesicht",
+    "Arschgeige",
+    "Am Arsch der Welt",
+    "Stabil! / Gute Leistung",
+    "Abstruser Unfug",
+    "Ich freue mich wie ein Schnitzel",
+    "Na ja",
+    "(Das ist) mir Wurst / Wurscht",
+    "Den Nagel auf den Kopf treffen",
+    "Die Nase voll haben",
+    "Fix und fertig sein, k.o [ka o:] sein",
+    "Total",
+    "ich drück dir die Daumen!",
+    "Laber nicht!",
+    "Was du nicht sagst...",
+    "Spinnst du?",
+    "Veräppelst du mich?",
+    "Nicht alle Tassen im Schrank haben",
+    "einen Dachschaden haben",
+    "skuril",
+    "einen Katzensprung entfernt sein",
+    "am Arsch der Welt",
+    "sich abgeben mit (+Dativ)",
+    "ich bin ganz Ohr",
+    "das A und O",
+    "wo sich Fuchs und Hase gute Nacht sagen",
+    "Adjö mit Ö",
+    "eine Arschkarte bekommen",
+    "apropos [aprop'o:]",
+    "In den sauren Apfel beißen",
+    "sich (+Dativ) etwas in die Haare schmieren",
+    "Wissen, wie der Hase läuft",
+    "Auf der Leitung stehen",
+    "Da haben wir den Salat",
+    "darauf kannst du Gift nehmen",
+    "Hand ins Feuer legen",
+    "zwei Fliegen mit einer Klappe schlagen",
+    "Das Zünglein an der Waage sein",
+    "mit allen Wassern gewaschen sein",
+    "Arschgeige",
+    "Trittrettfahrer",
+    "Schaumschläger",
+    "Mauerblümchen",
+    "Vollpfosten",
+    "Dumm wie Bohnenstroh",
+    "wie bei Hempels unterm Sofa",
+    "eine beleidigte Tomate spielen",
+    "Tomaten auf den Augen haben",
+    "Gönnjamin",
+    "trau dich!",
+    "so spielt das Leben",
+    "im Leben nicht!",
+    "Einen Kater haben",
+    "ein Konterbierchen",
+    "Etwas wie seine Westentasche kennen",
+    "pleite gehen / pleite sein",
+    "Krokodilstränen weinen",
+    "so ein Mist!",
+    "meine Güte....",
+    "Seinen Senf dazugeben",
+    "Sich zum Affen machen",
+    "deppert",
+    "Unter einer Decke stecken",
+    "Du gehst mir auf den Keks",
+    "Du gehst mir auf den Sack",
+    "jemanden auf die Palme bringen",
+    "spielst du etwa mit deiner Gesundheit?",
+    "Das Leben ist kein Ponyhof",
+    "Organspender",
+    "Kummerspeck",
+    "Liebeskummer",
+    "Kabelsalat",
+    "leg dich bloß nicht mit mir ein!",
+    "sich mit jemandem",
+    "sich mit jemandem einlassen",
+    "wir werden uns dann kurzschließen",
+    "ich geb' dir später Bescheid",
+    "sag Bescheid...",
+    "ist das von Ikea?",
+    "sind wir alle drauf?",
+    "wollen wir uns anstellen?",
+    "was ist los?",
+    "wenn ich das gewusst hätte!..",
+    "auf dich stehe ich!",
+    "ich hab' dich lieb! / hdl",
+    "so sicher wie das Amen in der Kirche",
+    "da drüben",
+    "hier um die Ecke",
+    "sei still!",
+    "geil, man!",
+    "Die Kirche im Dorf lassen",
+    "Da fällt mir ein Stein vom Herzen",
+    "auffallen + Dativ ( es ist mir (nicht) aufgefallen)",
+    "mir fällt grad nichts ein",
+    "so. Schluss mit dem Unfug!",
+    "abstruser Unfug!",
+    "Schluss damit!",
+    "verschlimmbessern",
+    "schmusen",
+    "Schmusekatze",
+    "fühl dich fest gedrückt",
+    "lange nicht gesehen",
+    "du hast hie nichts verloren!",
+    "Ende gut, alles gut.",
+    "Aller guten Dinge sind drei",
+    "Jetzt mal doch nicht den Teufel an die Wand",
+    "ich ruf' dich gleich zurück",
+    "ach, wär das schön!",
+    "hätte hätte Fahrradkette",
+    "wo bleibt da die Gerechtigkeit?",
+    "das lob ich mir",
+    "du geile Sau",
+    "von wegen",
+    "von mir aus",
+    "warte mal ab!",
+    "halt die Ohren steif",
+    "völlig aus dem Häuschen sein",
+    "Da kann man nicht meckern",
+    "du bist ja hart im Nehmen",
+    "Das macht nichts",
+    "heia machen",
+    "huhu",
+    "Dafür bin ich nicht zuständig",
+    "Ansprechpartner",
+    "Sachbearbeiter",
+    "Steuern absetzen",
+    "Steuerberater:in",
+    "Kontaktperson",
+    "Ernährungsberater:in",
+    "Da fehlen mir noch Unterlagen",
+    "Puh, ich krieg beim Lesen schon Puls",
+    "So nen Schrott hab ich ja noch nie gesehen",
+    "schieb es zu mir rüber",
+    "rutsch mal ein Stück",
+    "wo du gerade da stehst, bring mir...",
+    "hast du zufällig...?",
+    "Wo kommen wir da denn hin?",
+    "ich bin vom Glauben abgefallen",
+    "das ist ja nicht zu Glauben!",
+    "Diggi",
+    "Lehrjahre sind keine Herrenjahre",
+    "Solang das deutsche Reich besteht, wird die Schraube rechts gedreht",
+    "Rechts ist da wo der Daumen links ist",
+    "Spinnst du?",
+    "ich glaube, ich spinne",
+    "ich glaube, mein Schwein pfeifft",
+    "wem gehört das hier?",
+    "Morgenstunde hat Gold im Munde",
+    "die ganze Welt dreht um...",
+    "es geht um...",
+    "es handelt sich um",
+    "worum geht's?",
+    "na, was geht ab?",
+    "wie läuft's?",
+    "es endet, wie es endet",
+    "abgesehen davon",
+    "darüber hinaus",
+    "nur zu!",
+    "weh, du....",
+    "Los! Abmarsch!",
+    "Hereinmarschieren!..",
+    "Papperlapapp",
+    "die Nummer ansagen",
+    "Man hat‘s nicht leicht, aber leicht hat‘s einen",
+    "so ein Käse",
+    "Komm schon!",
+    "ich freu' mich schon auf dich / euch!",
+    "Aufwiederhören",
+    "einen Filmriss haben",
+    "Kopfkino",
+    "den Faden verlieren",
+    "Niemals!",
+    "Rambazamba",
+    "mach kein Drama daraus",
+    "chill mal!",
+    "jemanden ferndrücken",
+    "Fernbeziehung",
+    "Heimweh haben",
+    "die Kuh vom Eis holen",
+    "die halbe miete sein",
+    "das ist ja kein Allheilmittel",
+    "Etwas an den Nagel hängen",
+    "das liegt mir am Herzen",
+    "verarschst du mich?",
+    "das ist eine Abzocke!",
+    "Hand aufs Herz!",
+    "unter den Fingernägeln brennen",
+    "sich etwas abschminken",
+    "Schwein gehabt!",
+    "Pech gehabt!",
+    "hinter dem Mond leben",
+    "sozialtot",
+    "Da ist der Wurm drin",
+    "einen Ohrwurm haben",
+    "zum Hier Essen oder zum Mitnehmen?",
+    "Lass es!",
+    "Lass mich in Frieden",
+    "Schnulze",
+    "Finger weg von...",
+    "keine Ahnung von etwas haben",
+    "sich auskennen mit",
+    "kommst du voran?",
+    "wer A sagt, muss auch B sagen",
+    "wer so sagt ist noch lange nicht fertig",
+    "wen interessiert das schon?",
+    "stell dich nicht so an!",
+    "picco bello",
+    "einen guten Draht haben",
+    "sein Händchen im Spiel haben",
+    "ale Hände voll zu tun haben",
+    "zwei linke Hände haben",
+    "Wer zum Henker ist das?",
+    "wohl",
+    "bloß",
+    "erzähl mal!",
+    "den Müll rausbringen / wegbringen",
+    "ich komme gleich runter",
+    "noch eine Stunde dranhängen",
+    "jein/jain",
+    "hast du dir schon was ausgesucht?",
+    "das habe ich mir nicht ausgesucht",
+    "hakt's Maul! / halt die Klappe",
+    "was zum Teufel ist das denn bitte?",
+    "und? bist du soweit?",
+    "mein Hasi, mein Schatzi",
+    "komm endlich zur Sache / auf den Punkt",
+    "lass uns...",
+    "wollen wir...?",
+    "na dann. tschüss!",
+    "Abzocke",
+    "reinfallen",
+    "das ist ja gruselig!",
+    "ich sterbe vor Hunger",
+    "gut so / stimmt so",
+    "Todeshunger haben",
+    "Schlaufuchs!",
+    "sich reinfuchsen",
+    "Krieg ich auch einen Schluck / ein Stückchen",
+    "ekelhaft / eklig",
+    "Bestandsaufnahme machen",
+    "auf Bedarf kaufen / auf Vorrat kaufen",
+    "jaja...schon klar!",
+    "im Angebot",
+    "ich habe mich verlaufen",
+    "bloss nicht anfassen!",
+    "verdammt noch mal!",
+    "Schnapsidee",
+    "Absacker / Verdauungsschnaps",
+    "die Runde geht auf mich!",
+    "aufs Haus",
+    "minderbemittelt",
+    "auf den Deckel bekommen",
+    "das gilt für alle",
+    "Hanswurst",
+    "im Schlaf reden",
+    "pennen, verpennen, einpennen",
+    "du bist ein Naturtalent!",
+    "das kannst du dir an den Hut stecken",
+    "alter Hut",
+    "jetzt werde nicht makaber",
+    "sei nicht so unverschämt",
+    "das ist ja hanebüchen",
+    "Jetzt mal ganz im Ernst",
+    "jemandem etwas beibringen",
+    "hau ab",
+    "ich mach mich auf die Socken",
+    "sich etwas ausdenken",
+    "abgefahren!",
+    "sieh dir das nur an!",
+    "Blödmann",
+    "Scher dich weg",
+    "wir sind auf der Durchreise",
+    "einen Abstecher machen",
+    "es wird schon alles gut sein",
+    "letzte Chance",
+    "schieß los, worum geht's?",
+    "das ist keine Lösung",
+    "Früher war das Gras grüner",
+    "sich einschleimen bei",
+    "beweg dich nicht!",
+    "Kacki/Pipi machen",
+    "die Pulle Wein etc",
+    "gibt's mehr davon?",
+    "nach wem ist das Kind gegangen?",
+    "der Apfel fällt nicht weit vom Stamm",
+    "Kommen Sie mit",
+    "Wie war es noch mal?",
+    "Pantoffelheld",
+    "doch!..",
+    "bin unterwegs",
+    "wir sind auf dem Weg",
+    "bin gleich da",
+    "zugleich",
+    "zumal",
+    "sich im Rahmen halten",
+    "abfeiern",
+    "sich amüsieren",
+    "ich fand es geil!",
+    "du machst mich fertig",
+    "schlechter Ruf",
+    "gute Bewertungen",
+    "alleine schon...",
+    "ach was?!",
+    "Kaffeekränzchen",
+    "wer hat dich darauf gebracht?",
+    "pass auf dich auf! / passt auf euch auf",
+    "das Sagen haben",
+    "etwas anschaffen",
+    "sich etwas zulegen",
+    "wie geil ist das denn bitte?!",
+    "nicht übel",
+    "schlimmer geht nicht",
+    "kommst du zurecht?",
+    "ich schau' mich nur um",
+    "eiskalt",
+    "doppelt so...",
+    "dagegen",
+    "nichts zu danken",
+    "Ich hab' zu danken / Der dank ist (ganz) meinerseits",
+    "Kröten, Mäuse, Kohle",
+    "jede Menge",
+    "verschiedenste",
+    "nebenbei bemerkt",
+    "ich bitte dich!",
+    "meinetwegen",
+    "ist es Ihnen recht, wenn...",
+    "das ist mir bewusst",
+    "das geht dich / euch nichts an!",
+    "Glückspilz & Pechvogel",
+    "wenn du wüsstest...",
+    "lebst du noch?",
+    "einen Besuch abstatten",
+    "wir werden sehen",
+    "es wird sich finden",
+    "ich sehe da kein Problem",
+    "uns steht nichts im Wege",
+    "Klamauk",
+    "selber schuld!",
+    "verpetzen",
+    "Jacke wie Hose",
+    "sag schon!",
+    "beweg dich!",
+    "dramatisieren",
+    "sich überlegen",
+    "Scheiß drauf!",
+    "jemandem etwas vormachen",
+    "Auf Nimmerwiedersehen!",
+    "Probier es an",
+    "sich etwas leisten",
+    "Wilkommensgeschenk",
+    "die Spitzen schneiden",
+    "Abteilungsleiter",
+    "Spaß/Scherz beiseite",
+    "(ist) schon gut...",
+    "überanstrenge dich nicht",
+    "nimm dir nicht zu viel vor",
+    "schlau!",
+    "du hättest einen guten / eine gute.... abgegeben",
+    "Schnapp es dir!",
+    "reinschnuppern",
+    "ok, weiß ich Bescheid",
+    "das hättest du vorhin sagen sollen",
+    "ich bewundere....",
+    "Vorliebe",
+    "man hat mir gesagt, dass...",
+    "erspare dir...",
+    "ich hätte das vorhin nicht sagen sollen",
+    "das war ein Blödsinn",
+    "kommst du damit klar?",
+    "ich glaube dir/euch/ihnen kein Wort",
+    "Schwamm drüber!",
+    "das ist ewig / Jahre / Monate her",
+    "von Anfang an",
+    "schief gegangen",
+    "aufpassen auf",
+    "was hätte ich tun sollen?",
+    "das hat mich erledigt",
+    "zusehen / zuhören",
+    "was hätte ich tun / sagen sollen?",
+    "das war kein Vorwurf",
+    "vorwerfen",
+    "erinnerst du dich an..?",
+    "ich hab' es total verloren?",
+    "unentwegt",
+    "reicht das?",
+    "ich schwöre es!",
+    "ich melde mich später bei dir",
+    "sich melden bei",
+    "wohnhaft in",
+    "Ansage im Flugzeug / im Verkehr",
+    "Kontrolletti machen",
+    "ich erkenne mich selbst nicht mehr",
+    "was ist in dich/sie/ihn gefahren?",
+    "ich habe mich erschrocken <-> hab ich dich erschreckt?",
+    "ich muss weg von hier",
+    "ich hab mich anders entchieden",
+    "wovor hast du denn Angst?",
+    "den Abflug machen",
+    "den Abwasch machen",
+    "den Einkauf machen",
+    "du hast Recht <-> Unrecht",
+    "getrennte Wege gehen",
+    "mucksmäuschenstill",
+    "kein Mucks!",
+    "Muskeln / Muckis aufbauen",
+    "Dauerbrenner",
+    "Augenweide",
+    "ist es besetzt?",
+    "wo wollen wir uns hinsetzen?",
+    "kommt noch etwas dazu?",
+    "kapieren, schnallen",
+    "sich verabschieden",
+    "eine Abfuhr erteilen",
+    "ich schätze",
+    "sich anders entscheiden",
+    "Kalte Schulter zeigen",
+    "jemandem den Rücken frei halten",
+    "unter die Arme greifen",
+    "etwas vorzeigen",
+    "ich nehme dich beim Wort",
+    "kann ich mir das leihen?",
+    "Ein Kuddelmuddel / ein Durcheinander",
+    "Auseinandersetzung",
+    "ins schwarze treffen",
+    "voll daneben!",
+    "gib mal her...",
+    "was hast du schönes vor?",
+    "schön langsam!",
+    "immer mit der Ruhe!",
+    "nenn mir einen Grund...",
+    "irre vs Ire",
+    "sich dumm stllen",
+    "ekelhaft / widerlich / garstig",
+    "auf dich/auf uns (beim Trinken)",
+    "großartig",
+    "gib her",
+    "Knarre / Waffe",
+    "aus einer Hand",
+    "Auf eigene Faust (handeln)",
+    "wie ist es abgelaufen?",
+    "ernstahft",
+    "gesperrt",
+    "was hältst du davon?",
+    "ich hab' kein Bargeld dabei",
+    "hast du es dabei?",
+    "ich bin dabei!",
+    "wem sagst du das?",
+    "störe ich?",
+    "nicht schlimm",
+    "es kitzelt",
+    "in die Luft jagen",
+    "wir streiten nie",
+    "abgeriegelt / versiegelt",
+    "verboten / untersagt",
+    "das juckt mich nicht",
+    "arschkalt",
+    "Morgenmuffel",
+    "Stromschlag",
+    "hitzeschlag und sonnenstich",
+    "wetterfühlig",
+    "wie findest du's?",
+    "von draußen aus",
+    "von …her",
+    "ich hab' keinen Plan",
+    "nach dir/Ihnen",
+    "das gibt's nicht!",
+    "pappsatt",
+    "bin gestolpert",
+    "zackzack",
+    "die Zeit/das Geld ist knapp",
+    "ich bin gleich da",
+    "noch ein Stück",
+    "einschenken",
+    "Augen zu / Augen auf",
+    "Licht aus",
+    "Nachti Nacht",
+    "blau sein",
+    "ich verstehe die Welt nicht mehr",
+    "guck mal ! / schau mal!",
+    "echt jetzt?",
+    "warte kurz",
+    "tue nicht so, als…",
+    "ich krieg das schon hin",
+    "keine Panik auf Titanic",
+    "abgemacht",
+    "Teinen Termin vorziehen <-> verschieben",
+    "etwas unter die Lupe nehmen",
+    "du Dummerchen",
+    "ach du Scheiße!",
 ]
 
 # Utility functions for German Gems
-def get_todays_gem(user_id: str) -> dict:
-    """Return the gem for today based on date + user rotation."""
-    today = datetime.now()
+def get_todays_gem(user_id: str) -> str:
+    """Return today's gem expression (rotates daily, unique per user)."""
+    today     = datetime.now()
     day_index = (today.timetuple().tm_yday + hash(str(user_id))) % len(GERMAN_GEMS)
     return GERMAN_GEMS[day_index]
 
-def get_gem_system_prompt_hint(gem: dict) -> str:
-    """Short hint injected into NPC system prompt for spaced repetition."""
+def get_gem_system_prompt_hint(gem) -> str:
+    expression = gem if isinstance(gem, str) else (gem.get("gem", "") if gem else "")
+    if not expression: return ""
     return (
         f"\n\nSPACED REPETITION GEM: Wenn es natürlich passt, "
-        f"benutze heute gelegentlich den Ausdruck '{gem['gem']}' in deinen Antworten. "
+        f"benutze heute gelegentlich den Ausdruck '{expression}' in deinen Antworten. "
         f"Nicht erzwungen — nur wenn es sich organisch ergibt."
     )
 
@@ -1994,28 +2165,37 @@ TRIAL_CODES = {
 }
 
 # Stripe
-STRIPE_SECRET_KEY     = os.getenv("STRIPE_SECRET_KEY", "")
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
-STRIPE_PRICE_ID       = os.getenv("STRIPE_PRICE_ID", "")
-RAILWAY_DOMAIN        = os.getenv("RAILWAY_PUBLIC_DOMAIN", "germandudebottg-production.up.railway.app")
+STRIPE_SECRET_KEY          = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET      = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_PRICE_ID            = os.getenv("STRIPE_PRICE_ID", "")
+STRIPE_PRICE_ID_DISCOUNTED = os.getenv("STRIPE_PRICE_ID_DISCOUNTED", "")
+STRIPE_PAYMENT_LINK        = os.getenv("STRIPE_PAYMENT_LINK", "https://buy.stripe.com/6oUbJ20822qNdTU1bU9fW00")
+RAILWAY_DOMAIN             = os.getenv("RAILWAY_PUBLIC_DOMAIN", "germandudebottg-production.up.railway.app")
 if STRIPE_SECRET_KEY:
     stripe.api_key = STRIPE_SECRET_KEY
 
+DISCOUNT_CODES = {
+    "RABATT50": {"percent": 50, "price_eur": 10, "label": "€10/Monat (50% Rabatt)", "used_by": None},
+}
+
 def is_premium(chat_id):
-    """True if user has active paid premium OR a valid trial code is active."""
-    uid  = str(chat_id)
+    """True if user has active paid premium OR valid trial. Always syncs from disk."""
+    uid = str(chat_id)
+    try:
+        fresh = load_users()
+        if uid in fresh: user_data[uid] = fresh[uid]
+    except Exception: pass
     user = user_data.get(uid, {})
-    # Paid subscriber — always in
     if user.get("premium"):
+        premium_until = user.get("premium_until")
+        if premium_until:
+            if datetime.fromisoformat(premium_until) > datetime.now(): return True
+            user_data[uid]["premium"] = False; save_users(user_data); return False
         return True
-    # No trial activated yet — locked
     trial_start = user.get("trial_start")
-    if not trial_start:
-        return False
-    # Trial activated — check if still valid
+    if not trial_start: return False
     trial_days = TRIAL_CODES.get(user.get("trial_code_used", ""), 3)
-    start      = datetime.fromisoformat(trial_start)
-    days_used  = (datetime.now() - start).days
+    days_used  = (datetime.now() - datetime.fromisoformat(trial_start)).days
     return days_used < trial_days
 
 def days_left_in_trial(chat_id):
@@ -2030,49 +2210,35 @@ def days_left_in_trial(chat_id):
     return max(0, trial_days - used)
 
 def redeem_trial_code(chat_id, code: str) -> tuple[bool, str]:
-    """Try to redeem a trial code. Returns (success, message)."""
+    """Try to redeem a trial or discount code."""
     uid  = str(chat_id)
     user = user_data.get(uid, {})
     code = code.strip().upper()
-
     if user.get("premium"):
         return False, "Du hast bereits Premium — kein Code nötig! 🎉"
-
+    if code in DISCOUNT_CODES:
+        entry = DISCOUNT_CODES[code]
+        if entry.get("used_by") and entry["used_by"] != uid:
+            return False, "❌ Ungültiger oder bereits verwendeter Code."
+        DISCOUNT_CODES[code]["used_by"] = uid
+        user_data[uid]["discount_code"] = code
+        save_users(user_data)
+        return True, f"🎉 Rabatt-Code eingelöst! Du bekommst *{entry['label']}*!\n\nKlick auf den Bezahl-Button. 💳"
     if user.get("trial_start") and user.get("trial_code_used"):
         days_left = days_left_in_trial(chat_id)
         if days_left > 0:
             return False, f"Du hast bereits einen aktiven Trial — noch *{days_left} Tage* übrig! ⏳"
-
     if code not in TRIAL_CODES:
-        return False, "❌ Ungültiger Code. Überprüf die Schreibweise oder hol dir einen neuen Code!"
-
+        return False, "❌ Ungültiger Code. Überprüf die Schreibweise!"
     days = TRIAL_CODES[code]
-    user_data[uid]["trial_start"]    = datetime.now().isoformat()
+    user_data[uid]["trial_start"]     = datetime.now().isoformat()
     user_data[uid]["trial_code_used"] = code
     save_users(user_data)
-    return True, (
-        f"🎉 *Code eingelöst!* Du hast *{days} Tage* kostenlose Trial freigeschaltet.\n\n"
-        f"Dein deutscher Freund wartet — leg los! 👇"
-    )
+    return True, f"🎉 *Code eingelöst!* Du hast *{days} Tage* Trial freigeschaltet.\n\nLeg los! 👇"
 
 def create_stripe_checkout(chat_id):
-    """Create Stripe Checkout session and return URL."""
-    if not STRIPE_SECRET_KEY or not STRIPE_PRICE_ID:
-        log.warning("Stripe not configured — keys missing")
-        return None
-    try:
-        session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            mode="subscription",
-            line_items=[{"price": STRIPE_PRICE_ID, "quantity": 1}],
-            success_url=BOT_LINK + "?start=premium_ok",
-            cancel_url=BOT_LINK,
-            metadata={"telegram_id": str(chat_id)},
-        )
-        return session.url
-    except Exception as e:
-        log.error(f"Stripe checkout failed for {chat_id}: {e}")
-        return None
+    """Return personalised Stripe Payment Link with chat_id as client_reference_id."""
+    return f"{STRIPE_PAYMENT_LINK}?client_reference_id={chat_id}"
 
 def send_paywall(chat_id):
     """Send paywall message with Stripe checkout button."""
@@ -3674,24 +3840,13 @@ def finish_test(chat_id):
         corr = scores.get(lvl, 0)
 
         if att == 0:
-            # Never tested at this level — cannot claim it or anything above
-            break
-
+            continue   # adaptive test skipped this level — don't penalise
         acc = corr / att
-
-        # Relaxed single-attempt rule: if user only saw 1 question at B1+ and
-        # got it right then continued climbing (proving competence), allow it.
-        # But if they had ≥ min attempts and still failed, stop.
-        if att < MIN_ATTEMPTS[lvl]:
-            # Only 1 attempt (for B1/B2/C1 where min=2): must be 100 % correct
-            if acc < 1.0:
-                break   # got it wrong — doesn't pass
-            # 1/1 correct on B1+ — tentative pass, but final_level update below
+        if acc >= THRESHOLD:
+            final_level = lvl
         else:
-            if acc < THRESHOLD:
-                break   # failed this level — stop here
-
-        final_level = lvl   # passed → advance
+            final_level = lvl   # first real struggle = working level
+            break
 
     user_level[chat_id] = final_level
     uid = str(chat_id)
@@ -3735,6 +3890,7 @@ def feedback(message):
 # FORTSCHRITT COMMAND
 @bot.message_handler(commands=['progress'])
 def progress_cmd(message):
+    ensure_user(message.chat.id)
     send_progress(message.chat.id)
 
 @bot.message_handler(commands=['fortschritt'])
@@ -4135,25 +4291,57 @@ def do_full_reset(chat_id):
 @bot.message_handler(commands=['themen'])
 def themen_cmd(message):
     ensure_user(message.chat.id)
+    if not is_premium(message.chat.id): send_paywall(message.chat.id); return
     send_topic_buttons(message.chat.id)
 
 @bot.message_handler(commands=['menu'])
 def menu_cmd(message):
     ensure_user(message.chat.id)
+    if not is_premium(message.chat.id): send_paywall(message.chat.id); return
     show_menu(message.chat.id)
 
 @bot.message_handler(commands=['level'])
 def level_cmd(message):
+    ensure_user(message.chat.id)
     show_level(message.chat.id)
 
 @bot.message_handler(commands=['errors'])
 def errors_cmd(message):
+    ensure_user(message.chat.id)
     show_errors(message.chat.id)
 
 @bot.message_handler(commands=['practice'])
 def practice_cmd(message):
     ensure_user(message.chat.id)
+    if not is_premium(message.chat.id): send_paywall(message.chat.id); return
     start_exercise(message.chat.id)
+
+@bot.message_handler(commands=['info'])
+def info_cmd(message):
+    chat_id = message.chat.id
+    ensure_user(chat_id)
+    bot.send_message(chat_id,
+        "ℹ️ Dein Deutscher Kumpel — so funktioniert's:\n\n"
+        "🎯 /themen — Wähle ein Gesprächsthema\n"
+        "🎤 Sprich oder schreib auf Deutsch — dein Kumpel antwortet\n"
+        "❌ Fehler werden erklärt und gespeichert\n"
+        "💪 /practice — 3 Übungen zu deinen Schwächen\n"
+        "🃏 /flashcards — Vokabelkarten auf Quizlet\n"
+        "💎 /gem — Ausdruck des Tages\n"
+        "📊 /progress — dein Fortschritt\n"
+        "🔁 /restart — neues Thema starten\n\n"
+        "Fragen? /support"
+    )
+
+@bot.message_handler(commands=['share'])
+def share_cmd(message):
+    chat_id  = message.chat.id
+    ref_link = f"https://t.me/germandude_bot?start=ref_{chat_id}"
+    bot.send_message(chat_id,
+        f"🤝 Teile den German Dude Bot mit deinen Freunden!\n\n"
+        f"Dein persönlicher Einladungslink:\n{ref_link}\n\n"
+        f"Für jeden Freund der sich anmeldet bekommst du 3 Tage gratis! 🎁"
+    )
 
 @bot.message_handler(commands=['shadowing'])
 def shadowing_cmd(message):
@@ -4174,61 +4362,55 @@ def handle_gem_command(message):
 
 
 def send_daily_gem(chat_id):
-    """Send today's gem with examples and invite user to write their own sentence."""
-    uid  = str(chat_id)
-    gem  = get_todays_gem(uid)
-    user = user_data.get(uid, {})
+    """Send today's gem — Claude generates everything live in user's native language."""
+    uid         = str(chat_id)
+    expression  = get_todays_gem(uid)
+    user        = user_data.get(uid, {})
     native_lang = user.get("native_language", "Englisch")
-
-    # Translate meaning into native language
+    level       = user.get("level", "A2")
     try:
-        tr = claude.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=80,
-            messages=[{"role": "user", "content":
-                f"Translate into {native_lang}. Only the translation: {gem['meaning']}"
-            }]
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001", max_tokens=400,
+            system=(
+                f"Du bist ein freundlicher Deutschlehrer. User spricht {native_lang} (Niveau: {level}).\n"
+                "Erstelle einen Gem-des-Tages Eintrag in GENAU diesem Format:\n"
+                "TYP: <Redewendung / Slang / Alltagsausdruck / Idiom / Umgangssprache>\n"
+                "BEDEUTUNG: <1 Satz auf Deutsch, einfach erklärt>\n"
+                f"UEBERSETZUNG: <Bedeutung auf {native_lang}, natürlich formuliert>\n"
+                "BEISPIEL1: <alltagsnaher Satz, du- oder ich-Form>\n"
+                "BEISPIEL2: <alltagsnaher Satz, du- oder ich-Form>\n"
+                "BEISPIEL3: <alltagsnaher Satz, du- oder ich-Form>\n"
+                "Kein er/sie in Beispielen. Kein Schulbuch-Deutsch. Nur die Zeilen."
+            ),
+            messages=[{"role": "user", "content": f"Ausdruck: {expression}"}]
         )
-        meaning_translated = tr.content[0].text.strip()
-    except Exception:
-        meaning_translated = gem["meaning"]
+        raw  = resp.content[0].text.strip()
+        data = {}
+        for line in raw.splitlines():
+            if ":" in line:
+                key, _, val = line.partition(":")
+                data[key.strip().upper()] = val.strip()
+        typ          = data.get("TYP", "Ausdruck")
+        bedeutung    = data.get("BEDEUTUNG", "")
+        uebersetzung = data.get("UEBERSETZUNG", "")
+        beispiele    = [data.get(f"BEISPIEL{i}", "") for i in range(1,4) if data.get(f"BEISPIEL{i}")]
+    except Exception as e:
+        log.error(f"Gem generation failed: {e}")
+        typ = "Ausdruck"; bedeutung = ""; uebersetzung = ""; beispiele = []
 
-    # Escape special chars for Markdown safety
-    def _esc(t): return str(t).replace("*","").replace("_","").replace("`","").replace("[","")
-
-    lines = [
-        f"💎 German Gem des Tages",
-        f"",
-        f"🗣 {gem['gem']}",
-        f"{gem['type']}",
-        f"",
-        f"📖 Bedeutung: {_esc(gem['meaning'])}",
-        f"🌍 {native_lang}: {_esc(meaning_translated)}",
-        f"",
-        f"Beispiele aus dem echten Leben:",
-    ]
-    for ex in gem["examples"]:
-        lines.append(f"• {_esc(ex)}")
-
-    lines += [
-        f"",
-        f"✏️ Deine Aufgabe: Schreib einen eigenen Satz mit {gem['gem']}!",
-        f"Ich überprüfe ihn und gebe dir Feedback. 🙂",
-    ]
-
+    lines = ["💎 German Gem des Tages", "", f"🗣 {expression}", typ, ""]
+    if bedeutung:    lines += [f"📖 Bedeutung: {bedeutung}", ""]
+    if uebersetzung: lines += [f"🌍 {native_lang}: {uebersetzung}", ""]
+    if beispiele:
+        lines.append("Beispiele aus dem echten Leben:")
+        for ex in beispiele: lines.append(f"• {ex}")
+    lines += ["", f"✏️ Deine Aufgabe: Schreib einen eigenen Satz mit: {expression}", "Ich überprüfe ihn und gebe dir Feedback. 🙂"]
     msg = "\n".join(lines)
     last_bot_text[chat_id] = msg
-
-    # Save gem state so next message triggers exercise check
-    user_state[chat_id] = {
-        "mode": user_state.get(chat_id, {}).get("mode", "idle"),
-        "gem_exercise": gem["id"],
-        "gem_text": gem["gem"],
-    }
-
+    user_state[chat_id] = {"mode": user_state.get(chat_id, {}).get("mode", "idle"), "gem_exercise": expression, "gem_text": expression}
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data=f"translate_last"))
-    bot.send_message(chat_id, msg, parse_mode="Markdown", reply_markup=markup)
+    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+    bot.send_message(chat_id, msg, reply_markup=markup)
 
 
 def check_gem_exercise(chat_id, user_sentence, gem_text):
@@ -4845,7 +5027,7 @@ def master_callback_router(call):
         return
     elif data == "menu_shadowing":
         bot.answer_callback_query(call.id)
-        start_shadowing(chat_id)
+        bot.send_message(chat_id, "🎧 Shadowing Mode kommt bald zurück! Bleib dran. 👀")
         return
     elif data == "menu_restart":
         bot.answer_callback_query(call.id)
@@ -4966,7 +5148,7 @@ def master_callback_router(call):
 
 # Stripe/webhook disabled for stability — re-enable later
 
-ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))  # set your Telegram ID in Railway
+ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "673270002"))  # Izzi's Telegram ID
 
 @bot.message_handler(commands=["broadcastgems"])
 def handle_broadcast_gems(message):
@@ -5001,6 +5183,37 @@ def broadcast_daily_gem():
 CRON_SECRET = os.getenv("CRON_SECRET", "geheim123")
 
 flask_app = Flask(__name__)
+
+@bot.message_handler(commands=["setpremium"])
+def admin_set_premium(message):
+    """Admin: /setpremium CHAT_ID [days]"""
+    if message.chat.id != ADMIN_CHAT_ID: return
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        bot.send_message(message.chat.id, "Usage: /setpremium CHAT_ID [days=30]"); return
+    target = parts[1].strip()
+    days   = int(parts[2]) if len(parts) > 2 else 30
+    if target not in user_data:
+        bot.send_message(message.chat.id, f"❌ User {target} not found."); return
+    from datetime import timedelta
+    user_data[target]["premium"]       = True
+    user_data[target]["premium_until"] = (datetime.now() + timedelta(days=days)).isoformat()
+    save_users(user_data)
+    bot.send_message(message.chat.id, f"✅ Premium activated for {target} — {days} days.")
+    try: bot.send_message(int(target), f"🎉 *Willkommen im Premium-Club!*\n\n{days} Tage Zugriff. Tippe /themen!", parse_mode="Markdown")
+    except: pass
+
+
+@flask_app.route("/reload_users", methods=["POST"])
+def reload_users_endpoint():
+    secret = request.json.get("secret", "") if request.is_json else ""
+    if secret != os.getenv("CRON_SECRET", ""):
+        return jsonify({"error": "unauthorized"}), 401
+    global user_data
+    user_data = load_users()
+    log.info("✅ user_data reloaded from disk")
+    return jsonify({"ok": True, "users": len(user_data)})
+
 
 @flask_app.route("/health")
 def health():
