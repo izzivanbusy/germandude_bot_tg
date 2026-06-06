@@ -3805,16 +3805,11 @@ GRAMMAR_TOPICS = {
 }
 
 def start_exercise(chat_id):
-    """Generate 10 level-appropriate exercises including today's gem, then offer grammar explanation."""
-    user_state[chat_id] = user_state.get(chat_id, {})
-    user_state[chat_id]["mode"] = "exercise"
-
+    """Generate 5 exercises with answer checking."""
     uid         = str(chat_id)
     level       = user_data.get(uid, {}).get("level", "A2")
     weak_points = user_data.get(uid, {}).get("weak_points", [])
-    todays_gem  = get_todays_gem(uid)
 
-    # Pick grammar topic — weak point takes priority
     if weak_points:
         wp    = random.choice(weak_points[:5])
         topic = wp.get("type", "allgemeine Grammatik")
@@ -3822,69 +3817,69 @@ def start_exercise(chat_id):
         topics = GRAMMAR_TOPICS.get(level, GRAMMAR_TOPICS["A2"])
         topic  = random.choice(topics)
 
-    # Store topic for grammar explanation button
+    user_state[chat_id] = user_state.get(chat_id, {})
+    user_state[chat_id]["mode"]           = "exercise"
     user_state[chat_id]["exercise_topic"] = topic
     user_state[chat_id]["exercise_level"] = level
 
-    gem_phrase  = todays_gem.get("gem", "")
-    gem_meaning = todays_gem.get("meaning", "")
+    bot.send_message(chat_id, "💪 Übungen werden erstellt...")
 
-    bot.send_message(chat_id, "💪 *Übungen werden erstellt...*", parse_mode="Markdown")
+    system_prompt = f"""Du bist ein freundlicher Deutschlehrer. Niveau: {level}.
+Thema: {topic}
 
-    system_prompt = (
-        f"Du bist ein moderner, freundlicher Deutschlehrer. Niveau: {level}.\n"
-        f"Grammatikthema heute: {topic}\n"
-        f"Heutiger German Gem (Ausdruck des Tages): \"{gem_phrase}\" — Bedeutung: {gem_meaning}\n\n"
-        f"Erstelle GENAU 10 Übungen in einer einzigen Nachricht.\n"
-        f"Mische: Lückensatz-Aufgaben UND Multiple-Choice-Aufgaben.\n"
-        f"Baue mindestens EINE Aufgabe ein, in der der Gem-Ausdruck vorkommt oder geübt wird.\n"
-        f"Format für jede Aufgabe:\n"
-        f"**N.** Aufgabentext\n"
-        f"a) Option 1   b) Option 2   c) Option 3\n\n"
-        f"Für Lückensätze: Satz mit _____ als Lücke, dann 3 Optionen.\n"
-        f"Niveau: angemessen für {level} — weder zu leicht noch zu schwer.\n"
-        f"Schreibe NUR die 10 Aufgaben, kein Kommentar davor oder danach.\n"
-        f"Keine Lösungen angeben.\n\n"
-        f"WICHTIG — ALLTAGSRELEVANZ:\n"
-        f"Alle Sätze müssen in echten, alltäglichen Situationen vorkommen können: "
-        f"Gespräche mit Freunden, Kollegen, im Café, beim Einkaufen, am Telefon, auf der Arbeit usw.\n"
-        f"NIEMALS grammatikalisch korrekte aber alltagsfremde Sätze — z.B. Präteritum für mündliche "
-        f"Alltagserzählungen ist FALSCH, weil Muttersprachler dort Perfekt benutzen. "
-        f"Beispiel VERBOTEN: \'Gestern ging ich ins Kino\' → RICHTIG: \'Gestern bin ich ins Kino gegangen\'.\n"
-        f"Präteritum NUR bei: sein/haben/Modalverben ODER schriftlichen/formellen Kontexten.\n"
-        f"Faustregel: Würde ein Berliner das so sagen? Wenn nein — umformulieren.\n"
-        f"Erlaubte Kontexte: WhatsApp, Smalltalk, Bürogespräche, Restaurant, Arzt, spontane Kommentare.\n"
-        f"Verbotene Kontexte: Literatur, Märchen, Zeitungsartikel, Schulbuch-Deutsch."
-    )
+Erstelle GENAU 5 Multiple-Choice-Aufgaben in diesem Format — nichts anderes:
 
-    response = claude.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=1200,
-        system=system_prompt,
-        messages=[{"role": "user", "content": "Erstelle die 10 Übungen jetzt."}]
-    )
+1. Aufgabentext mit _____ oder Frage
+a) Option   b) Option   c) Option
+ANTWORT: a
 
+Regeln:
+- Alltagssprache: WhatsApp, Büro, Café, spontane Gespräche
+- Kein Schulbuch-Deutsch, kein literarisches Präteritum
+- Berliner-Test: Würde ein Muttersprachler das so sagen?
+- Niveau {level} angemessen"""
+
+    try:
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=700,
+            system=system_prompt,
+            messages=[{"role": "user", "content": "Erstelle 5 Übungen."}]
+        )
+        raw = resp.content[0].text.strip()
+    except Exception as e:
+        log.error(f"Exercise generation failed: {e}")
+        bot.send_message(chat_id, "⚠️ Übungen konnten nicht erstellt werden. Versuch nochmal mit /practice.")
+        return
+
+    # Parse blocks
     import re as _re
-    exercises_text = response.content[0].text.strip()
-    # Convert **bold** → *bold* (Telegram Markdown), strip leftover **
-    exercises_text = _re.sub(r"\*\*(.+?)\*\*", r"**", exercises_text)
-    exercises_text = exercises_text.replace("**", "")
+    questions, answers = [], []
+    blocks = _re.split(r"\n(?=\d+\.)", raw)
+    for block in blocks:
+        lines = [l.strip() for l in block.strip().splitlines() if l.strip()]
+        ans_line = next((l for l in lines if l.upper().startswith("ANTWORT:")), None)
+        if ans_line:
+            ans = ans_line.split(":")[-1].strip().lower()
+            answers.append(ans)
+            q_lines = [l for l in lines if not l.upper().startswith("ANTWORT:")]
+            questions.append("\n".join(q_lines))
 
-    header = (
-        f"💪 Übungsset — Niveau {level}\n"
-        f"📌 Thema: {topic}\n"
-        f"💎 Gem: {gem_phrase}\n"
-        f"{'─' * 28}\n\n"
-    )
+    if not questions:
+        bot.send_message(chat_id, f"💪 Übungsset — Niveau {level}\n📌 {topic}\n\n{raw}")
+        return
+
+    user_state[chat_id]["exercise_questions"] = questions
+    user_state[chat_id]["exercise_answers"]   = answers
+
+    display = f"💪 Übungsset — Niveau {level}\n📌 Thema: {topic}\n{'─'*24}\n\n"
+    for q in questions:
+        display += f"{q}\n\n"
+    display += "✏️ Schreib deine Antworten in den Chat!\nBeispiel: 1a 2b 3c 4a 5b"
 
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("📖 Grammatik erklären", callback_data="explain_grammar"))
-
-    bot.send_message(
-        chat_id,
-        header + exercises_text,
-        reply_markup=markup,
-    )
+    bot.send_message(chat_id, display, reply_markup=markup)
 
 
 def explain_grammar(chat_id):
@@ -4266,9 +4261,61 @@ def handle(message):
         return
 
     if mode == "exercise":
-        # Pass the text answer to GPT for light evaluation, then return to menu
-        bot.send_message(chat_id, "✅ Notiert! Weiter üben? /practice — oder /menu")
+        answers_given = text.strip().lower().replace(",", " ").replace(".", " ").split()
+        # Extract patterns like "1a", "2b" or just "a b c d e"
+        import re as _re
+        parsed = []
+        for tok in answers_given:
+            m = _re.match(r"^\d*([abc])$", tok)
+            if m:
+                parsed.append(m.group(1))
+        if not parsed:
+            bot.send_message(chat_id, "👀 Schreib deine Antworten so: 1a 2b 3c 4a 5b")
+            return
+
+        questions = user_state[chat_id].get("exercise_questions", [])
+        correct   = user_state[chat_id].get("exercise_answers", [])
+        topic     = user_state[chat_id].get("exercise_topic", "Grammatik")
+        level     = user_state[chat_id].get("exercise_level", "A2")
+
+        # Build feedback
+        lines      = ["📊 Auswertung:\n"]
+        errors     = []
+        score      = 0
+        for i, (q, c) in enumerate(zip(questions, correct)):
+            given = parsed[i] if i < len(parsed) else "?"
+            if given == c:
+                lines.append(f"✅ {i+1}. Richtig! ({given.upper()})")
+                score += 1
+            else:
+                lines.append(f"❌ {i+1}. Falsch — du: {given.upper()}, richtig: {c.upper()}")
+                errors.append({"q": q, "given": given, "correct": c})
+
+        lines.append(f"\n🎯 {score}/{len(correct)} richtig")
+
+        # Explain errors via Claude
+        if errors:
+            lines.append("\n📖 Erklärungen:")
+            for err in errors:
+                try:
+                    expl = claude.messages.create(
+                        model="claude-haiku-4-5-20251001",
+                        max_tokens=120,
+                        messages=[{"role": "user", "content":
+                            f"Erkläre kurz auf Deutsch (2 Sätze max), warum bei dieser Aufgabe Antwort {err['correct'].upper()} richtig ist und {err['given'].upper()} falsch:\n{err['q']}"
+                        }]
+                    )
+                    lines.append(f"• {expl.content[0].text.strip()}")
+                except Exception:
+                    pass
+
         user_state[chat_id]["mode"] = "idle"
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            InlineKeyboardButton("💪 Nochmal üben", callback_data="new_exercises"),
+            InlineKeyboardButton("🏠 Menü",         callback_data="go_menu"),
+        )
+        bot.send_message(chat_id, "\n".join(lines), reply_markup=markup)
         return
 
     # Voice selection
