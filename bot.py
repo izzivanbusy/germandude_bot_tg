@@ -3864,12 +3864,16 @@ def start_exercise(chat_id):
         messages=[{"role": "user", "content": "Erstelle die 10 Übungen jetzt."}]
     )
 
+    import re as _re
     exercises_text = response.content[0].text.strip()
+    # Convert **bold** → *bold* (Telegram Markdown), strip leftover **
+    exercises_text = _re.sub(r"\*\*(.+?)\*\*", r"**", exercises_text)
+    exercises_text = exercises_text.replace("**", "")
 
     header = (
-        f"💪 *Übungsset — Niveau {level}*\n"
-        f"📌 Thema: _{topic}_\n"
-        f"💎 Gem des Tages: _{gem_phrase}_\n"
+        f"💪 Übungsset — Niveau {level}\n"
+        f"📌 Thema: {topic}\n"
+        f"💎 Gem: {gem_phrase}\n"
         f"{'─' * 28}\n\n"
     )
 
@@ -3879,7 +3883,6 @@ def start_exercise(chat_id):
     bot.send_message(
         chat_id,
         header + exercises_text,
-        parse_mode="Markdown",
         reply_markup=markup,
     )
 
