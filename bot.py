@@ -2646,6 +2646,8 @@ def handle_flashcards(message):
         ("Gegenstände", "https://quizlet.com/de/1053692838/gegenstande-objects-flash-cards/"),
         ("Berufswelt", "https://quizlet.com/de/1054530776/berufswelt-professional-world-flash-cards/"),
         ("Vorstellungsgespräch", "https://quizlet.com/de/1084319816/vorstellungsgesprach-lexikon-flash-cards/"),
+        ("Wortschatz A1-A2 nach Goethe (Quizlet)", "https://quizlet.com/class/29868891/materials"),
+        ("Wortschatz A1-A2 nach Goethe (PDF)", "https://www.goethe.de/pro/relaunch/prf/de/Goethe-Zertifikat_A1_Fit1_Wortliste.pdf"),
     ]
 
     bot.send_message(chat_id, "🃏 Vokabelkarten werden geladen...")
