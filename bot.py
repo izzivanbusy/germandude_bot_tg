@@ -58,20 +58,18 @@ def _send_message_with_translate(chat_id, text, **kwargs):
 bot.send_message = _send_message_with_translate
 
 bot.set_my_commands([
-    BotCommand("info",      "So funktioniert der Bot ℹ️"),
-    BotCommand("code",      "Trial-Code einlösen 🎁"),
-    BotCommand("start",     "Start"),
-    BotCommand("themen",    "Themen wählen 🎯"),
-    BotCommand("level",     "Mein Niveau"),
-    BotCommand("levelup",      "Nächstes Niveau"),
+    BotCommand("info",         "So funktioniert der Bot ℹ️"),
+    BotCommand("start",        "Start"),
+    BotCommand("themen",       "Themen wählen 🎯"),
+    BotCommand("level",        "Mein Niveau"),
     BotCommand("achievements", "Meine Erfolge 🏅"),
-    BotCommand("progress",  "Mein Fortschritt"),
-    BotCommand("errors",    "Meine Fehler"),
-    BotCommand("practice",  "Übungen"),
-    BotCommand("shadowing", "Shadowing Mode"),
-    BotCommand("restart",   "Chat neu starten"),
-    BotCommand("gem",       "German Gem 💎"),
-    BotCommand("support",   "Support 🆘"),
+    BotCommand("progress",     "Mein Fortschritt"),
+    BotCommand("errors",       "Meine Fehler"),
+    BotCommand("practice",     "Übungen"),
+    BotCommand("gem",          "German Gem 💎"),
+    BotCommand("share",        "Bot teilen 🤝"),
+    BotCommand("restart",      "Chat neu starten"),
+    BotCommand("support",      "Support 🆘"),
 ])
 
 # PERSISTENT STORAGE
@@ -3751,7 +3749,6 @@ def show_menu(chat_id):
         InlineKeyboardButton("🧠 Meine Fehler",      callback_data="menu_errors"),
         InlineKeyboardButton("📈 Mein Niveau",       callback_data="menu_level"),
         InlineKeyboardButton("🏋️ Übungen",           callback_data="menu_practice"),
-        InlineKeyboardButton("🎧 Shadowing Mode",    callback_data="menu_shadowing"),
         InlineKeyboardButton("🔄 Chat neu starten",  callback_data="menu_restart"),
     )
     bot.send_message(chat_id, "😄 Was willst du machen?", reply_markup=markup)
@@ -4044,8 +4041,7 @@ def practice_cmd(message):
 
 @bot.message_handler(commands=['shadowing'])
 def shadowing_cmd(message):
-    ensure_user(message.chat.id)
-    start_shadowing(message.chat.id)
+    bot.send_message(message.chat.id, "🎧 Shadowing Mode kommt bald zurück! Bleib dran. 👀")
 
 @bot.message_handler(commands=['restart'])
 def restart_cmd(message):
@@ -4186,28 +4182,9 @@ def handle_achievements(message):
 
 @bot.message_handler(commands=["levelup", "level_up", "nächstesniveau"])
 def handle_level_up(message):
-    """Manually advance the user to the next level."""
-    chat_id = message.chat.id
-    uid = str(chat_id)
-    if uid not in user_data:
-        bot.send_message(chat_id, "Bitte starte zuerst mit /start.")
-        return
-    current = user_data[uid].get("level", "A2")
-    idx = LEVEL_ORDER.index(current) if current in LEVEL_ORDER else 2
-    if idx >= len(LEVEL_ORDER) - 1:
-        bot.send_message(chat_id,
-            f"Du bist bereits auf dem höchsten Niveau: *{current}* 🏆\n"
-            "Muttersprachlerniveau — es geht nicht höher! 😄",
-            parse_mode="Markdown")
-        return
-    new_level = LEVEL_ORDER[idx + 1]
-    user_data[uid]["level"] = new_level
-    save_users(user_data)
-    bot.send_message(chat_id,
-        f"🎯 Niveau aktualisiert: *{current}* → *{new_level}*\n\n"
-        f"Die Gespräche werden ab jetzt auf {new_level}-Niveau geführt. "
-        f"Du kannst das Niveau jederzeit wieder mit /level checken oder mit /levelup weiterwechseln.",
-        parse_mode="Markdown")
+    bot.send_message(message.chat.id,
+        "Das Niveau wird automatisch angepasst — einfach weiter üben! 💪\n"
+        "Dein aktuelles Niveau: /level", parse_mode="Markdown")
 
 
 @bot.message_handler(commands=["uebersetzen", "übersetzen", "translate"])
