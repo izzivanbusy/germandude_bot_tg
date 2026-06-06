@@ -3804,82 +3804,141 @@ GRAMMAR_TOPICS = {
            "subtile Bedeutungsunterschiede", "elliptische Strukturen", "Präzision im Ausdruck"],
 }
 
-def start_exercise(chat_id):
-    """Generate 5 exercises with answer checking."""
-    uid         = str(chat_id)
-    level       = user_data.get(uid, {}).get("level", "A2")
-    weak_points = user_data.get(uid, {}).get("weak_points", [])
+def _get_exercise_topic(chat_id):
+    """Pick topic from user errors — test errors first, then voice errors."""
+    uid        = str(chat_id)
+    user       = user_data.get(uid, {})
+    level      = user.get("level", "A2")
+    test_errs  = user.get("test_errors", [])
+    weak_points= [wp for wp in user.get("weak_points", []) if isinstance(wp, dict)]
 
+    if test_errs:
+        # Derive topic from most recent test error level
+        lvl = test_errs[-1].get("level", level)
+        topics = GRAMMAR_TOPICS.get(lvl, GRAMMAR_TOPICS.get(level, GRAMMAR_TOPICS["A2"]))
+        return random.choice(topics), level
     if weak_points:
-        wp    = random.choice(weak_points[:5])
-        topic = wp.get("type", "allgemeine Grammatik")
-    else:
-        topics = GRAMMAR_TOPICS.get(level, GRAMMAR_TOPICS["A2"])
-        topic  = random.choice(topics)
+        wp = random.choice(weak_points[:5])
+        return wp.get("type", random.choice(GRAMMAR_TOPICS.get(level, GRAMMAR_TOPICS["A2"]))), level
+    return random.choice(GRAMMAR_TOPICS.get(level, GRAMMAR_TOPICS["A2"])), level
+
+
+def _generate_single_question(topic, level, used_questions):
+    """Ask Claude for one fresh question on this topic."""
+    used_hint = f"Bereits gestellt (nicht wiederholen): {used_questions}" if used_questions else ""
+    resp = claude.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=200,
+        system=f"""Du bist ein Deutschlehrer. Niveau: {level}. Thema: {topic}.
+Erstelle GENAU EINE Multiple-Choice-Aufgabe in diesem Format:
+FRAGE: <Satz mit _____ oder direkte Frage>
+A: <Option>
+B: <Option>
+C: <Option>
+ANTWORT: <A/B/C>
+ERKLAERUNG: <1 Satz warum diese Antwort richtig ist>
+
+Alltagssprache! Kein Schulbuch-Deutsch. Berliner-Test.
+{used_hint}""",
+        messages=[{"role": "user", "content": "Erstelle die Aufgabe."}]
+    )
+    raw   = resp.content[0].text.strip()
+    lines = {}
+    for line in raw.splitlines():
+        if ":" in line:
+            key, _, val = line.partition(":")
+            lines[key.strip().upper()] = val.strip()
+    return {
+        "question":    lines.get("FRAGE", ""),
+        "a":           lines.get("A", ""),
+        "b":           lines.get("B", ""),
+        "c":           lines.get("C", ""),
+        "correct":     lines.get("ANTWORT", "A").upper()[0],
+        "explanation": lines.get("ERKLAERUNG", ""),
+    }
+
+
+def start_exercise(chat_id):
+    """Start 3-question exercise session, one question at a time."""
+    uid   = str(chat_id)
+    topic, level = _get_exercise_topic(chat_id)
 
     user_state[chat_id] = user_state.get(chat_id, {})
-    user_state[chat_id]["mode"]           = "exercise"
-    user_state[chat_id]["exercise_topic"] = topic
-    user_state[chat_id]["exercise_level"] = level
+    user_state[chat_id].update({
+        "mode":             "exercise",
+        "exercise_topic":   topic,
+        "exercise_level":   level,
+        "exercise_idx":     0,
+        "exercise_score":   0,
+        "exercise_used":    [],
+        "exercise_total":   3,
+    })
 
-    bot.send_message(chat_id, "💪 Übungen werden erstellt...")
+    bot.send_message(chat_id, f"💪 3 Fragen zum Thema: {topic}\n\nLos geht's!")
+    _send_next_exercise_question(chat_id)
 
-    system_prompt = f"""Du bist ein freundlicher Deutschlehrer. Niveau: {level}.
-Thema: {topic}
 
-Erstelle GENAU 5 Multiple-Choice-Aufgaben in diesem Format — nichts anderes:
+def _send_next_exercise_question(chat_id):
+    """Generate and send the next question with a/b/c buttons."""
+    state = user_state.get(chat_id, {})
+    idx   = state.get("exercise_idx", 0)
+    total = state.get("exercise_total", 3)
 
-1. Aufgabentext mit _____ oder Frage
-a) Option   b) Option   c) Option
-ANTWORT: a
+    if idx >= total:
+        _finish_exercise_session(chat_id)
+        return
 
-Regeln:
-- Alltagssprache: WhatsApp, Büro, Café, spontane Gespräche
-- Kein Schulbuch-Deutsch, kein literarisches Präteritum
-- Berliner-Test: Würde ein Muttersprachler das so sagen?
-- Niveau {level} angemessen"""
+    topic = state.get("exercise_topic", "Grammatik")
+    level = state.get("exercise_level", "A2")
+    used  = state.get("exercise_used", [])
 
     try:
-        resp = claude.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=700,
-            system=system_prompt,
-            messages=[{"role": "user", "content": "Erstelle 5 Übungen."}]
-        )
-        raw = resp.content[0].text.strip()
+        q = _generate_single_question(topic, level, used)
     except Exception as e:
-        log.error(f"Exercise generation failed: {e}")
-        bot.send_message(chat_id, "⚠️ Übungen konnten nicht erstellt werden. Versuch nochmal mit /practice.")
+        log.error(f"Question generation failed: {e}")
+        bot.send_message(chat_id, "⚠️ Frage konnte nicht generiert werden. Versuch /practice nochmal.")
+        user_state[chat_id]["mode"] = "idle"
         return
 
-    # Parse blocks
-    import re as _re
-    questions, answers = [], []
-    blocks = _re.split(r"\n(?=\d+\.)", raw)
-    for block in blocks:
-        lines = [l.strip() for l in block.strip().splitlines() if l.strip()]
-        ans_line = next((l for l in lines if l.upper().startswith("ANTWORT:")), None)
-        if ans_line:
-            ans = ans_line.split(":")[-1].strip().lower()
-            answers.append(ans)
-            q_lines = [l for l in lines if not l.upper().startswith("ANTWORT:")]
-            questions.append("\n".join(q_lines))
+    # Store current question for answer checking
+    user_state[chat_id]["exercise_current_q"] = q
+    user_state[chat_id]["exercise_used"].append(q["question"])
 
-    if not questions:
-        bot.send_message(chat_id, f"💪 Übungsset — Niveau {level}\n📌 {topic}\n\n{raw}")
-        return
+    text = (
+        f"❓ Frage {idx + 1} von {total}\n\n"
+        f"{q['question']}\n\n"
+        f"A) {q['a']}\n"
+        f"B) {q['b']}\n"
+        f"C) {q['c']}"
+    )
+    markup = InlineKeyboardMarkup(row_width=3)
+    markup.add(
+        InlineKeyboardButton("A", callback_data="ex_ans:A"),
+        InlineKeyboardButton("B", callback_data="ex_ans:B"),
+        InlineKeyboardButton("C", callback_data="ex_ans:C"),
+    )
+    bot.send_message(chat_id, text, reply_markup=markup)
 
-    user_state[chat_id]["exercise_questions"] = questions
-    user_state[chat_id]["exercise_answers"]   = answers
 
-    display = f"💪 Übungsset — Niveau {level}\n📌 Thema: {topic}\n{'─'*24}\n\n"
-    for q in questions:
-        display += f"{q}\n\n"
-    display += "✏️ Schreib deine Antworten in den Chat!\nBeispiel: 1a 2b 3c 4a 5b"
+def _finish_exercise_session(chat_id):
+    """Show final score and offer next steps."""
+    state = user_state.get(chat_id, {})
+    score = state.get("exercise_score", 0)
+    total = state.get("exercise_total", 3)
+    topic = state.get("exercise_topic", "")
 
-    markup = InlineKeyboardMarkup()
+    emoji = "🏆" if score == total else "💪" if score >= total // 2 else "📖"
+    text  = f"{emoji} Fertig! {score}/{total} richtig — Thema: {topic}"
+
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("🔁 Nochmal", callback_data="new_exercises"),
+        InlineKeyboardButton("🏠 Menü",    callback_data="go_menu"),
+    )
     markup.add(InlineKeyboardButton("📖 Grammatik erklären", callback_data="explain_grammar"))
-    bot.send_message(chat_id, display, reply_markup=markup)
+
+    user_state[chat_id]["mode"] = "idle"
+    bot.send_message(chat_id, text, reply_markup=markup)
 
 
 def explain_grammar(chat_id):
@@ -4785,6 +4844,24 @@ def master_callback_router(call):
             bot.send_message(chat_id, f"🌍 {lang}:\n\n{translation}", reply_markup=InlineKeyboardMarkup())
         except Exception:
             bot.send_message(chat_id, "Übersetzung fehlgeschlagen 😅 Versuch es nochmal.")
+        return
+
+    if data.startswith("ex_ans:"):
+        given = data.split(":")[1].upper()
+        bot.answer_callback_query(call.id)
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        state   = user_state.get(chat_id, {})
+        q       = state.get("exercise_current_q", {})
+        correct = q.get("correct", "").upper()
+        expl    = q.get("explanation", "")
+        if given == correct:
+            user_state[chat_id]["exercise_score"] = state.get("exercise_score", 0) + 1
+            feedback = f"✅ Richtig! ({given})"
+        else:
+            feedback = f"❌ Falsch — du: {given}, richtig: {correct}\n📖 {expl}"
+        user_state[chat_id]["exercise_idx"] = state.get("exercise_idx", 0) + 1
+        bot.send_message(chat_id, feedback)
+        _send_next_exercise_question(chat_id)
         return
 
     if data == "start_chat":
