@@ -66,6 +66,7 @@ bot.set_my_commands([
     BotCommand("progress",     "Mein Fortschritt"),
     BotCommand("errors",       "Meine Fehler"),
     BotCommand("practice",     "Übungen"),
+    BotCommand("flashcards",   "Vokabelkarten 🃏"),
     BotCommand("gem",          "German Gem 💎"),
     BotCommand("share",        "Bot teilen 🤝"),
     BotCommand("restart",      "Chat neu starten"),
@@ -2619,6 +2620,62 @@ WICHTIG:
 
 
 # START
+
+@bot.message_handler(commands=["flashcards", "vokabeln", "karten"])
+def handle_flashcards(message):
+    """Send Quizlet flashcard sets with translated names in user's language."""
+    chat_id     = message.chat.id
+    ensure_user(chat_id)
+    uid         = str(chat_id)
+    native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
+
+    FLASHCARD_SETS = [
+        ("Zeitangaben", "https://quizlet.com/de/929150830/zeitangaben-german-time-phrases-flash-cards/"),
+        ("Moderne Geräte", "https://quizlet.com/de/929521554/moderne-gerate-modern-devices-flash-cards/"),
+        ("Kleidung", "https://quizlet.com/de/930143723/kleidung-clothes-flash-cards/"),
+        ("Basics auf Deutsch", "https://quizlet.com/de/929610703/die-basics-auf-deutsch-flash-cards/"),
+        ("Orte in der Stadt", "https://quizlet.com/de/934379270/orte-in-der-stadt-places-in-the-city-flash-cards/"),
+        ("Die Unterhaltung", "https://quizlet.com/de/937497240/die-unterhaltung-entertainment-flash-cards/"),
+        ("Duale Präpositionen (Dativ & Akkusativ)", "https://quizlet.com/de/941754326/duale-prapositionen-dual-prepositions-dativ-und-akkusativ-flash-cards/"),
+        ("Wegbeschreibung", "https://quizlet.com/de/957134810/wegbeschreibung-giving-directions-flash-cards/"),
+        ("Übliche Verben mit Dativ", "https://quizlet.com/de/940867259/ubliche-verben-mit-dativ-common-verbs-with-dativ-flash-cards/"),
+        ("Trennbare Verben + Imperativ", "https://quizlet.com/de/980847549/trennbare-verben-ohne-vokalwechsel-imperativ-separable-verbs-imperativ-flash-cards/"),
+        ("35 starke Verben mit Partizip II", "https://quizlet.com/de/1036890371/35-top-starke-verben-mit-partizip-ii-und-beispielen-flash-cards/"),
+        ("Lebensmittel", "https://quizlet.com/de/931071983/lebensmittel-groceries-flash-cards/"),
+        ("Möbel und Zuhause", "https://quizlet.com/de/943962880/mobel-und-zuhause-furniture-home-flash-cards/"),
+        ("Gegenstände", "https://quizlet.com/de/1053692838/gegenstande-objects-flash-cards/"),
+        ("Berufswelt", "https://quizlet.com/de/1054530776/berufswelt-professional-world-flash-cards/"),
+        ("Vorstellungsgespräch", "https://quizlet.com/de/1084319816/vorstellungsgesprach-lexikon-flash-cards/"),
+    ]
+
+    bot.send_message(chat_id, "🃏 Vokabelkarten werden geladen...")
+
+    # Translate all names in one Claude call
+    names_de = [name for name, _ in FLASHCARD_SETS]
+    try:
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=400,
+            system=f"Translate each line into {native_lang}. Return ONLY the translated lines, one per line, same order, no numbers or extra text.",
+            messages=[{"role": "user", "content": chr(10).join(names_de)}]
+        )
+        translated = resp.content[0].text.strip().splitlines()
+        if len(translated) != len(FLASHCARD_SETS):
+            translated = names_de  # fallback
+    except Exception:
+        translated = names_de
+
+    markup = InlineKeyboardMarkup(row_width=1)
+    for (name_de, url), name_tr in zip(FLASHCARD_SETS, translated):
+        label = f"{name_tr}" if name_tr != name_de else name_de
+        markup.add(InlineKeyboardButton(f"🃏 {label}", url=url))
+
+    bot.send_message(
+        chat_id,
+        "🃏 Vokabelkarten auf Quizlet\n\nWähle ein Set und übe direkt im Browser:",
+        reply_markup=markup,
+    )
+
 @bot.message_handler(commands=["code", "freischalten", "redeem"])
 def handle_code(message):
     """Redeem a trial access code."""
