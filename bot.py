@@ -94,55 +94,56 @@ ALL_GOALS = [
     "Sport & Hobbys", "Am Telefon", "Job"
 ]
 
+def _track_feature(chat_id, feature: str):
+    uid = str(chat_id)
+    if uid not in user_data: return
+    user_data[uid].setdefault("features_used", {})
+    user_data[uid]["features_used"][feature] = user_data[uid]["features_used"].get(feature, 0) + 1
+
+
 def ensure_user(chat_id):
     uid = str(chat_id)
+    now = datetime.now().isoformat()
     if uid not in user_data:
         user_data[uid] = {
-            "name": None,
-            "gender": None,
-            "native_language": None,
-            "goal": None,
-            "level": "A2",
-            "scenario_streak": 0,
-            "weak_points": [],
-            "errors": [],
+            "name": None, "gender": None, "native_language": None,
+            "goal": None, "level": "A2", "scenario_streak": 0,
+            "weak_points": [], "errors": [], "test_errors": [],
             "user_progress": {g: [] for g in ALL_GOALS},
-            "user_stats": {"xp": 0, "level": 1, "streak": 0, "last_active": None},
-            "trial_start": None,
-            "premium": False,
-            "trial_code_used": None,
-            "stripe_customer_id": None,
-            "stripe_subscription_id": None,
+            "user_stats": {"xp": 0, "level": 1, "streak": 0, "last_active": now, "total_scenarios": 0},
+            "trial_start": None, "premium": False, "trial_code_used": None,
+            "stripe_customer_id": None, "stripe_subscription_id": None,
+            # Tracking fields
+            "joined": now, "message_count": 0, "paywall_hits": 0,
+            "features_used": {}, "conversations_started": 0, "test_completed": False,
         }
     else:
-        if "user_progress" not in user_data[uid]:
-            user_data[uid]["user_progress"] = {g: [] for g in ALL_GOALS}
-        if "scenario_streak" not in user_data[uid]:
-            user_data[uid]["scenario_streak"] = 0
-        if "weak_points" not in user_data[uid]:
-            user_data[uid]["weak_points"] = []
-        if "errors" not in user_data[uid]:
-            user_data[uid]["errors"] = []
-        if "user_stats" not in user_data[uid]:
-            user_data[uid]["user_stats"] = {"xp": 0, "level": 1, "streak": 0, "last_active": None}
-        if "gender" not in user_data[uid]:
-            user_data[uid]["gender"] = None
-        if "native_language" not in user_data[uid]:
-            user_data[uid]["native_language"] = None
-        if "achievements" not in user_data[uid]:
-            user_data[uid]["achievements"] = []
-        if "trial_start" not in user_data[uid]:
-            user_data[uid]["trial_start"] = None
-        if "trial_code_used" not in user_data[uid]:
-            user_data[uid]["trial_code_used"] = None
-        if "premium" not in user_data[uid]:
-            user_data[uid]["premium"] = False
-        if "stripe_customer_id" not in user_data[uid]:
-            user_data[uid]["stripe_customer_id"] = None
-        if "stripe_subscription_id" not in user_data[uid]:
-            user_data[uid]["stripe_subscription_id"] = None
-        if "total_scenarios" not in user_data[uid].get("user_stats", {}):
-            user_data[uid].setdefault("user_stats", {})["total_scenarios"] = 0
+        # Backfill missing fields
+        user_data[uid].setdefault("user_progress", {g: [] for g in ALL_GOALS})
+        user_data[uid].setdefault("scenario_streak", 0)
+        user_data[uid].setdefault("weak_points", [])
+        user_data[uid].setdefault("errors", [])
+        user_data[uid].setdefault("test_errors", [])
+        user_data[uid].setdefault("achievements", [])
+        user_data[uid].setdefault("gender", None)
+        user_data[uid].setdefault("native_language", None)
+        user_data[uid].setdefault("trial_start", None)
+        user_data[uid].setdefault("trial_code_used", None)
+        user_data[uid].setdefault("premium", False)
+        user_data[uid].setdefault("stripe_customer_id", None)
+        user_data[uid].setdefault("stripe_subscription_id", None)
+        user_data[uid].setdefault("user_stats", {"xp": 0, "level": 1, "streak": 0, "last_active": now, "total_scenarios": 0})
+        user_data[uid]["user_stats"].setdefault("total_scenarios", 0)
+        # Tracking backfill
+        user_data[uid].setdefault("joined", now)
+        user_data[uid].setdefault("message_count", 0)
+        user_data[uid].setdefault("paywall_hits", 0)
+        user_data[uid].setdefault("features_used", {})
+        user_data[uid].setdefault("conversations_started", 0)
+        user_data[uid].setdefault("test_completed", False)
+    # Update activity on every interaction
+    user_data[uid]["last_active"] = now
+    user_data[uid]["message_count"] = user_data[uid].get("message_count", 0) + 1
     save_users(user_data)
 
 def save_name(chat_id, name):
@@ -2241,6 +2242,10 @@ def create_stripe_checkout(chat_id):
     return f"{STRIPE_PAYMENT_LINK}?client_reference_id={chat_id}"
 
 def send_paywall(chat_id):
+    uid = str(chat_id)
+    if uid in user_data:
+        user_data[uid]["paywall_hits"] = user_data[uid].get("paywall_hits", 0) + 1
+        save_users(user_data)
     """Send paywall message with Stripe checkout button."""
     uid  = str(chat_id)
     user = user_data.get(uid, {})
@@ -3851,6 +3856,7 @@ def finish_test(chat_id):
     user_level[chat_id] = final_level
     uid = str(chat_id)
     user_data[uid]["level"] = final_level
+    user_data[uid]["test_completed"] = True
 
     # Save test wrong answers separately — shown first in /errors
     wrong_answers = state.get("wrong_answers", [])
@@ -4291,6 +4297,7 @@ def do_full_reset(chat_id):
 @bot.message_handler(commands=['themen'])
 def themen_cmd(message):
     ensure_user(message.chat.id)
+    _track_feature(message.chat.id, 'themen')
     if not is_premium(message.chat.id): send_paywall(message.chat.id); return
     send_topic_buttons(message.chat.id)
 
@@ -4313,6 +4320,7 @@ def errors_cmd(message):
 @bot.message_handler(commands=['practice'])
 def practice_cmd(message):
     ensure_user(message.chat.id)
+    _track_feature(message.chat.id, 'practice')
     if not is_premium(message.chat.id): send_paywall(message.chat.id); return
     start_exercise(message.chat.id)
 
@@ -4351,6 +4359,106 @@ def shadowing_cmd(message):
 def restart_cmd(message):
     restart_chat(message.chat.id)
 
+
+@bot.message_handler(commands=["adminstats"])
+def handle_adminstats(message):
+    """Admin-only: show bot statistics."""
+    if message.chat.id != ADMIN_CHAT_ID:
+        return  # silent ignore
+
+    from datetime import timedelta
+    now   = datetime.now()
+    users = load_users()
+
+    total        = len(users)
+    premium      = sum(1 for u in users.values() if u.get("premium"))
+    trial_active = 0
+    for uid, u in users.items():
+        if not u.get("premium") and u.get("trial_start") and u.get("trial_code_used"):
+            ts   = u["trial_start"]
+            days = TRIAL_CODES.get(u["trial_code_used"], 3) if isinstance(TRIAL_CODES.get(u.get("trial_code_used","")), int) else 3
+            if (now - datetime.fromisoformat(ts)).days < days:
+                trial_active += 1
+    free = total - premium - trial_active
+
+    # Activity
+    active_7d  = sum(1 for u in users.values()
+                     if u.get("last_active") and
+                     (now - datetime.fromisoformat(u["last_active"])).days <= 7)
+    active_30d = sum(1 for u in users.values()
+                     if u.get("last_active") and
+                     (now - datetime.fromisoformat(u["last_active"])).days <= 30)
+    inactive   = sum(1 for u in users.values()
+                     if not u.get("last_active") or
+                     (now - datetime.fromisoformat(u["last_active"])).days > 30)
+
+    # Funnel
+    paywall_seen = sum(1 for u in users.values() if u.get("paywall_hits", 0) > 0)
+    conversion   = f"{premium/paywall_seen*100:.0f}%" if paywall_seen else "n/a"
+
+    # Languages
+    langs = {}
+    for u in users.values():
+        lang = u.get("native_language") or "Unbekannt"
+        langs[lang] = langs.get(lang, 0) + 1
+    top_langs = sorted(langs.items(), key=lambda x: -x[1])[:5]
+
+    # Levels
+    levels = {}
+    for u in users.values():
+        lvl = u.get("level", "A2")
+        levels[lvl] = levels.get(lvl, 0) + 1
+
+    # Features
+    features = {}
+    for u in users.values():
+        for feat, cnt in u.get("features_used", {}).items():
+            features[feat] = features.get(feat, 0) + cnt
+    top_features = sorted(features.items(), key=lambda x: -x[1])[:6]
+
+    # Test completion
+    test_done = sum(1 for u in users.values() if u.get("test_completed"))
+    test_not  = total - test_done
+
+    lines = [
+        "📊 German Dude Bot — Stats",
+        "",
+        f"👥 User gesamt: {total}",
+        f"✅ Premium: {premium}",
+        f"⏳ Trial aktiv: {trial_active}",
+        f"🔒 Free: {free}",
+        "",
+        f"📈 Aktiv letzte 7 Tage: {active_7d}",
+        f"📅 Aktiv letzte 30 Tage: {active_30d}",
+        f"😴 Inaktiv (30+ Tage): {inactive}",
+        "",
+        f"💳 Paywall-Funnel:",
+        f"   Paywall gesehen: {paywall_seen}",
+        f"   Davon Premium: {premium} ({conversion})",
+        "",
+        "🌍 Top Sprachen:",
+    ]
+    for lang, cnt in top_langs:
+        lines.append(f"   {lang}: {cnt}")
+
+    lines += ["", "🎯 Level-Verteilung:"]
+    for lvl in ["A1","A2","B1","B2","C1","C2"]:
+        cnt = levels.get(lvl, 0)
+        if cnt: lines.append(f"   {lvl}: {cnt}")
+
+    if top_features:
+        lines += ["", "🔥 Top Features:"]
+        for feat, cnt in top_features:
+            lines.append(f"   /{feat}: {cnt}x")
+
+    lines += [
+        "",
+        f"📝 Test abgeschlossen: {test_done}",
+        f"⚠️  Test nie gemacht: {test_not}",
+    ]
+
+    bot.send_message(message.chat.id, "\n".join(lines))
+
 # ─────────────────────────────────────────────
 # MAIN LOOP
 @bot.message_handler(commands=["gem", "gems", "wortschatz"])
@@ -4358,6 +4466,7 @@ def handle_gem_command(message):
     """Send today's German Gem and start the practice exercise."""
     chat_id = message.chat.id
     ensure_user(chat_id)
+    _track_feature(chat_id, 'gem')
     send_daily_gem(chat_id)
 
 
