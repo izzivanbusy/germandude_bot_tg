@@ -27,6 +27,7 @@ from telebot.types import (InlineKeyboardMarkup, InlineKeyboardButton,
 
 # KEYS
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+ADMIN_CHAT_ID  = int(os.getenv("ADMIN_CHAT_ID", "673270002"))  # Izzi's Telegram ID
 OPENAI_KEY      = os.getenv("OPENAI_API_KEY")
 ANTHROPIC_KEY   = os.getenv("ANTHROPIC_API_KEY")
 
