@@ -4944,6 +4944,11 @@ def handle(message):
 
     # Integration modes — text input handlers
     if mode == "intg_brief_erklaeren":
+        if not text or not text.strip():
+            bot.send_message(chat_id,
+                "📄 Bitte schick mir den Text des Briefes als Textnachricht\n"
+                "(kopieren & einfügen) — oder ein Foto des Briefes! 📸")
+            return
         uid         = str(chat_id)
         native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
         bot.send_message(chat_id, "🔍 Analysiere den Brief...")
@@ -5315,6 +5320,142 @@ def _transcribe_voice(message) -> str:
             os.remove(tmp_path)
         except Exception as e:
             log.debug(f"Could not remove temp file {tmp_path}: {e}")
+
+@bot.message_handler(content_types=['photo', 'document'])
+def handle_file_message(message):
+    """Handle photos and PDF documents — mainly for brief_erklaeren mode."""
+    chat_id = message.chat.id
+    ensure_user(chat_id)
+    mode = user_state.get(chat_id, {}).get("mode", "idle")
+    uid  = str(chat_id)
+    native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
+
+    # Only process in integration brief mode
+    if mode not in ("intg_brief_erklaeren", "intg_brief_antworten", "intg_steuerbescheid"):
+        bot.send_message(chat_id,
+            "📎 Dateien und Fotos nehme ich gerne für Briefe und Dokumente entgegen!\n"
+            "Nutze /integration → Brief erklären um einen Brief zu analysieren. 📄")
+        return
+
+    # ── PHOTO: send to Claude Vision ──────────────────────────────────────
+    if message.content_type == "photo":
+        bot.send_message(chat_id, "📸 Foto empfangen — lese den Brief...")
+        try:
+            # Get highest resolution photo
+            photo    = message.photo[-1]
+            file_info = bot.get_file(photo.file_id)
+            file_url  = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_info.file_path}"
+            import urllib.request
+            img_data = urllib.request.urlopen(file_url).read()
+            import base64
+            img_b64  = base64.b64encode(img_data).decode()
+            # Detect format
+            ext = file_info.file_path.split(".")[-1].lower()
+            media_type = "image/jpeg" if ext in ("jpg","jpeg") else "image/png"
+
+            action_prompts = {
+                "intg_brief_erklaeren": (
+                    f"Du bist ein hilfreicher Assistent. Lies den deutschen Brief im Bild und erkläre ihn:\n"
+                    f"1. EINFACHES DEUTSCH: Was bedeutet der Brief? (A2/B1 Niveau)\n"
+                    f"2. {native_lang.upper()}: Kurze Zusammenfassung auf {native_lang}\n"
+                    f"3. WAS TUN: Konkrete nächste Schritte\n"
+                    f"4. FRIST: Gibt es eine Frist? Wenn ja, wann?\n"
+                    f"Sei beruhigend."
+                ),
+                "intg_steuerbescheid": (
+                    f"Lies den Steuerbescheid im Bild und erkläre:\n"
+                    f"1. ERGEBNIS: Rückerstattung oder Nachzahlung? Wie viel?\n"
+                    f"2. EINFACHE ERKLÄRUNG auf Deutsch\n"
+                    f"3. {native_lang.upper()}: Kurze Zusammenfassung\n"
+                    f"4. WAS TUN: Nächste Schritte, Einspruch möglich?"
+                ),
+                "intg_brief_antworten": (
+                    f"Lies den Brief im Bild und schreibe eine formelle deutsche Antwort darauf.\n"
+                    f"Danach kurze Erklärung auf {native_lang}."
+                ),
+            }
+            system_p = action_prompts.get(mode, action_prompts["intg_brief_erklaeren"])
+
+            resp = claude.messages.create(
+                model="claude-haiku-4-5-20251001", max_tokens=700,
+                system=system_p,
+                messages=[{"role": "user", "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": img_b64}},
+                    {"type": "text",  "text": "Bitte analysiere dieses Dokument."}
+                ]}]
+            )
+            result = _strip_md(resp.content[0].text.strip())
+        except Exception as e:
+            result = f"⚠️ Foto konnte nicht gelesen werden: {e}"
+
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            InlineKeyboardButton("✍️ Antwort schreiben", callback_data="intg:brief_antworten"),
+            InlineKeyboardButton("🏛️ Menü", callback_data="intg:back"),
+        )
+        user_state[chat_id]["mode"] = "idle"
+        bot.send_message(chat_id, result, reply_markup=markup)
+        return
+
+    # ── DOCUMENT (PDF) ────────────────────────────────────────────────────
+    if message.content_type == "document":
+        doc = message.document
+        if not doc.file_name or not doc.file_name.lower().endswith(".pdf"):
+            bot.send_message(chat_id, "📎 Bitte schick ein Foto des Briefes oder kopiere den Text rein. PDF-Unterstützung kommt bald!")
+            return
+        bot.send_message(chat_id, "📄 PDF empfangen — lese den Text...")
+        try:
+            file_info = bot.get_file(doc.file_id)
+            file_url  = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_info.file_path}"
+            import urllib.request, io
+            pdf_data  = urllib.request.urlopen(file_url).read()
+            # Extract text with pdfminer
+            from pdfminer.high_level import extract_text
+            pdf_text = extract_text(io.BytesIO(pdf_data))
+            if not pdf_text or len(pdf_text.strip()) < 50:
+                raise ValueError("Text zu kurz oder leer")
+        except ImportError:
+            bot.send_message(chat_id,
+                "⚠️ PDF-Support ist noch nicht installiert.\n"
+                "Mach einfach ein Foto des Briefes — das funktioniert genauso gut! 📸")
+            user_state[chat_id]["mode"] = "idle"
+            return
+        except Exception as e:
+            bot.send_message(chat_id,
+                f"⚠️ PDF konnte nicht gelesen werden.\n"
+                "Versuch es als Foto oder kopiere den Text rein. 📸")
+            user_state[chat_id]["mode"] = "idle"
+            return
+
+        # Now process like text
+        user_state[chat_id]["mode"] = "intg_brief_erklaeren"
+        # Reuse text handler by injecting into a fake text call
+        uid  = str(chat_id)
+        native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
+        try:
+            resp = claude.messages.create(
+                model="claude-haiku-4-5-20251001", max_tokens=700,
+                system=(
+                    f"Du bist ein hilfreicher Assistent.\n"
+                    f"1. EINFACHES DEUTSCH: Was bedeutet der Text? (A2/B1 Niveau)\n"
+                    f"2. {native_lang.upper()}: Kurze Zusammenfassung\n"
+                    f"3. WAS TUN: Konkrete Schritte\n"
+                    f"4. FRIST: Gibt es eine Frist?"
+                ),
+                messages=[{"role": "user", "content": f"Dokument:\n{pdf_text[:3000]}"}]
+            )
+            result = _strip_md(resp.content[0].text.strip())
+        except Exception as e:
+            result = f"⚠️ Fehler: {e}"
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            InlineKeyboardButton("✍️ Antwort schreiben", callback_data="intg:brief_antworten"),
+            InlineKeyboardButton("🏛️ Menü", callback_data="intg:back"),
+        )
+        user_state[chat_id]["mode"] = "idle"
+        bot.send_message(chat_id, result, reply_markup=markup)
+        return
+
 
 @bot.message_handler(content_types=['voice'])
 def handle_voice(message):
