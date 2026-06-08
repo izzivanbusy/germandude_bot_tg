@@ -4583,35 +4583,6 @@ def _show_steuern_menu(chat_id):
         reply_markup=markup)
 
 
-KULTUR_TOPICS = [
-    ("🎉 Feste, Feiertage & Brückentage",       "feste_feiertage"),
-    ("⏰ Deutsche Pünktlichkeit",                "puenktlichkeit"),
-    ("🚔 Ordnungsamt, Polizei, Feuerwehr",       "behoerden_ordnung"),
-    ("🎁 Geschenke: Was schenkt man?",           "geschenke"),
-    ("🤝 Freundschaft: Dos and Don'ts",          "freundschaft"),
-    ("😴 Sonntag: Hier wird nichts gemacht!",    "sonntag"),
-    ("🍞🍺 Brot & Bier: Deutsche Klassiker",     "brot_bier"),
-    ("📖 Mini-Geschichte: Modernes Deutschland", "moderne_geschichte"),
-    ("😂 Humor & politische Satire",             "humor_satire"),
-    ("💬 Top 20 Füllwörter",                     "fuellwoerter"),
-    ("💑 German Romance: Beziehungen",           "romance"),
-    ("💍 Hochzeit & Scheidung",                  "hochzeit_scheidung"),
-    ("♻️ Mülltrennung: Der Guide",               "muelltrennung"),
-    ("🚇 BVG, ICE, RE... Verkehrsabkürzungen",  "verkehr_abkuerzungen"),
-    ("🚗 Verkehr in Deutschland",                "verkehr_allgemein"),
-    ("😄 Top 15 Deutsche Memes",                 "memes"),
-    ("🏢 Behördendeutsch: 20 Sätze",             "behoerdendeutsch"),
-]
-
-
-def _show_kultur_menu(chat_id):
-    markup = InlineKeyboardMarkup(row_width=1)
-    for label, key in KULTUR_TOPICS:
-        markup.add(InlineKeyboardButton(label, callback_data=f"kultur:{key}"))
-    markup.add(InlineKeyboardButton("◀️ Zurück", callback_data="intg:back"))
-    bot.send_message(chat_id,
-        "🇩🇪 Deutsche Kultur\n\nWähle ein Thema — du bekommst einen kurzen Text und danach 3 Fragen:",
-        reply_markup=markup)
 
 
 def _generate_kultur_content(topic_key: str, topic_label: str, native_lang: str, level: str) -> dict:
