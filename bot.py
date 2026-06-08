@@ -4544,6 +4544,16 @@ def handle_integration(message):
     _show_integration_menu(chat_id)
 
 
+def _strip_md(text: str) -> str:
+    """Remove markdown formatting that breaks Telegram plain text."""
+    import re as _re
+    text = _re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = _re.sub(r"\*(.+?)\*", r"\1", text)
+    text = _re.sub(r"#{1,3} ", "", text)
+    text = text.replace("**", "").replace("__", "")
+    return text.strip()
+
+
 def _show_integration_menu(chat_id):
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
@@ -4960,7 +4970,7 @@ def handle(message):
             InlineKeyboardButton("🏛️ Menü", callback_data="intg:back"),
         )
         user_state[chat_id]["mode"] = "idle"
-        bot.send_message(chat_id, result, reply_markup=markup)
+        bot.send_message(chat_id, _strip_md(result), reply_markup=markup)
         return
 
     if mode == "intg_brief_antworten":
@@ -4985,7 +4995,7 @@ def handle(message):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("🏛️ Menü", callback_data="intg:back"))
         user_state[chat_id]["mode"] = "idle"
-        bot.send_message(chat_id, result, reply_markup=markup)
+        bot.send_message(chat_id, _strip_md(result), reply_markup=markup)
         return
 
     if mode == "intg_steuerbescheid":
@@ -5613,24 +5623,37 @@ def master_callback_router(call):
 
         if action == "steuererklaerung_info":
             resp = claude.messages.create(
-                model="claude-haiku-4-5-20251001", max_tokens=400,
-                system=f"Du bist ein freundlicher Steuerberater-Assistent. Erkläre auf einfachem Deutsch und dann auf {native_lang}.",
-                messages=[{"role": "user", "content": "Was ist eine Steuererklärung in Deutschland? Wer muss sie machen? Wie macht man das? Kurz und verständlich, max 200 Wörter."}]
+                model="claude-haiku-4-5-20251001", max_tokens=500,
+                system=f"Du bist ein freundlicher Steuerberater-Assistent. Erkläre auf einfachem Deutsch, dann auf {native_lang}. Benutze KEINE Sternchen oder Markdown — nur Plaintext.",
+                messages=[{"role": "user", "content": (
+                    "Was ist eine Steuererklärung in Deutschland? Wer muss sie machen? Wie macht man das?\n\n"
+                    "WICHTIG: Erkläre auch, dass Angestellte (die keine Pflicht haben) sie TROTZDEM machen sollten — "
+                    "viele bekommen Geld zurück durch Werbungskosten, Homeoffice, Fortbildungen, Fahrtkosten, "
+                    "doppelte Haushaltsführung, Sonderausgaben usw. "
+                    "Durchschnittliche Rückerstattung: ca. 1.000€. Kurz, max 200 Wörter."
+                )}]
             )
+            import re as _re
+            result = resp.content[0].text.strip()
+            result = _re.sub(r"\*\*(.+?)\*\*", r"\1", result)
+            result = result.replace("**", "").replace("##", "").replace("# ", "")
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("◀️ Zurück", callback_data="intg:steuern"))
-            bot.send_message(chat_id, resp.content[0].text.strip(), reply_markup=markup)
+            bot.send_message(chat_id, result, reply_markup=markup)
             return
 
         if action == "steuerfristen":
             resp = claude.messages.create(
                 model="claude-haiku-4-5-20251001", max_tokens=300,
-                system=f"Du bist ein freundlicher Steuerberater-Assistent. Antworte auf Deutsch, dann kurze Zusammenfassung auf {native_lang}.",
+                system=f"Du bist ein freundlicher Steuerberater-Assistent. Antworte auf Deutsch, dann kurze Zusammenfassung auf {native_lang}. Kein Markdown, keine Sternchen.",
                 messages=[{"role": "user", "content": "Was sind die wichtigsten Steuerfristen in Deutschland? Wann muss man die Steuererklärung abgeben? Gibt es Verlängerungen? Kurz und klar."}]
             )
+            import re as _re
+            result = resp.content[0].text.strip()
+            result = _re.sub(r"\*\*(.+?)\*\*", r"\1", result).replace("**","").replace("##","").replace("# ","")
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("◀️ Zurück", callback_data="intg:steuern"))
-            bot.send_message(chat_id, resp.content[0].text.strip(), reply_markup=markup)
+            bot.send_message(chat_id, result, reply_markup=markup)
             return
 
         if action == "finanzamt":
@@ -5793,7 +5816,6 @@ Nur diese Zeilen, nichts sonst.""",
 
 # Stripe/webhook disabled for stability — re-enable later
 
-ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "673270002"))  # Izzi's Telegram ID
 
 @bot.message_handler(commands=["broadcastgems"])
 def handle_broadcast_gems(message):
