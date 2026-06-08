@@ -2238,6 +2238,23 @@ def redeem_trial_code(chat_id, code: str) -> tuple[bool, str]:
     save_users(user_data)
     return True, f"🎉 *Code eingelöst!* Du hast *{days} Tage* Trial freigeschaltet.\n\nLeg los! 👇"
 
+def send_stars_invoice(chat_id):
+    """Send a Telegram Stars payment invoice for Premium."""
+    try:
+        bot.send_invoice(
+            chat_id,
+            title="German Dude Premium — 1 Monat",
+            description="Unbegrenzte Gespräche, alle Niveaus A1-C2, Übungen, Gems & mehr. 30 Tage Zugang.",
+            payload=f"premium_{chat_id}",
+            provider_token="",          # empty = Telegram Stars
+            currency="XTR",             # Stars currency code
+            prices=[telebot.types.LabeledPrice("Premium 1 Monat", 1500)],
+        )
+    except Exception as e:
+        log.error(f"Stars invoice failed for {chat_id}: {e}")
+        bot.send_message(chat_id, "⚠️ Stars-Zahlung konnte nicht gestartet werden. Versuch es später nochmal.")
+
+
 def create_stripe_checkout(chat_id):
     """Return personalised Stripe Payment Link with chat_id as client_reference_id."""
     return f"{STRIPE_PAYMENT_LINK}?client_reference_id={chat_id}"
@@ -2273,6 +2290,10 @@ def send_paywall(chat_id):
             f"💳 Jetzt Premium — {price_label}",
             url=checkout_url
         ))
+    markup.add(InlineKeyboardButton(
+        "⭐ Mit Telegram Stars zahlen — 1500 Stars",
+        callback_data="pay_stars"
+    ))
     markup.add(InlineKeyboardButton(
         "🎁 Freunde einladen & 3 Tage gratis sichern",
         url=share_url
@@ -5292,6 +5313,31 @@ def _transcribe_voice(message) -> str:
         except Exception as e:
             log.debug(f"Could not remove temp file {tmp_path}: {e}")
 
+@bot.pre_checkout_query_handler(func=lambda q: True)
+def handle_pre_checkout(query):
+    """Telegram requires confirming every Stars payment before processing."""
+    bot.answer_pre_checkout_query(query.id, ok=True)
+
+
+@bot.message_handler(content_types=["successful_payment"])
+def handle_successful_payment(message):
+    """Activate Premium after successful Stars payment."""
+    chat_id = message.chat.id
+    uid     = str(chat_id)
+    ensure_user(chat_id)
+    from datetime import timedelta
+    user_data[uid]["premium"]       = True
+    user_data[uid]["premium_until"] = (datetime.now() + timedelta(days=30)).isoformat()
+    user_data[uid]["stars_payment"] = True
+    save_users(user_data)
+    log.info(f"✅ Stars Premium activated: {chat_id}")
+    bot.send_message(chat_id,
+        "⭐ Danke für deine Stars!\n\n"
+        "🎉 Du hast jetzt 30 Tage Premium-Zugang. 💪\n"
+        "Dein Streak und deine XP sind natürlich noch da.\n\n"
+        "Tippe /themen um weiterzumachen!")
+
+
 @bot.message_handler(content_types=['photo', 'document'])
 def handle_file_message(message):
     """Handle photos and PDF documents — mainly for brief_erklaeren mode."""
@@ -5883,6 +5929,11 @@ Nur diese Zeilen, nichts sonst.""",
             messages=[{"role": "user", "content": "[Begrüße den Kunden auf Deutsch]"}]
         )
         bot.send_message(chat_id, resp.content[0].text.strip())
+        return
+
+    if data == "pay_stars":
+        bot.answer_callback_query(call.id)
+        send_stars_invoice(chat_id)
         return
 
     if data == "start_chat":
