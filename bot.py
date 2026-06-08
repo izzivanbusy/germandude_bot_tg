@@ -4461,6 +4461,81 @@ def handle_adminstats(message):
     bot.send_message(message.chat.id, "\n".join(lines))
 
 
+KULTUR_TOPICS = [
+    ("🎉", "Feste, Feiertage & Brückentage",          "kultur:feiertage"),
+    ("⏰", "Deutsche Pünktlichkeit",                   "kultur:puenktlichkeit"),
+    ("🚔", "Ordnungsamt, Polizei, Feuerwehr",          "kultur:behoerden"),
+    ("🎁", "Geschenke: Was schenkt man?",              "kultur:geschenke"),
+    ("🤝", "Freundschaft: Dos and Don'ts",             "kultur:freundschaft"),
+    ("😴", "Sonntag: Hier wird nichts gemacht!",       "kultur:sonntag"),
+    ("🍞", "Brot & Bier: Deutsche Klassiker",          "kultur:brot_bier"),
+    ("🇩🇪", "Mini-Geschichte: Modernes Deutschland",  "kultur:geschichte"),
+    ("😂", "Humor & Politische Satire",               "kultur:humor"),
+    ("💬", "Top 20 Füllwörter",                       "kultur:fuellwoerter"),
+    ("💕", "German Romance: Beziehungen",             "kultur:romance"),
+    ("💍", "Hochzeit & Scheidung",                    "kultur:hochzeit"),
+    ("♻️", "Mülltrennung: Digest",                   "kultur:muell"),
+    ("🚆", "BVG, ICE, RE... Verkehrsabkürzungen",    "kultur:verkehr_abk"),
+    ("🚗", "Verkehr in Deutschland",                  "kultur:verkehr"),
+    ("😆", "Top 15 Deutsche Memes",                  "kultur:memes"),
+    ("🏛️", "Behördendeutsch: 20 Sätze",             "kultur:behoerdendeutsch"),
+]
+
+KULTUR_PROMPTS = {
+    "feiertage":       "Schreibe einen informativen Mini-Text (150 Wörter) auf einfachem Deutsch (A2/B1) über deutsche Feste, Feiertage und Brückentage. Was sind die wichtigsten? Was macht man da?",
+    "puenktlichkeit":  "Schreibe einen Mini-Text (150 Wörter) auf einfachem Deutsch über deutsche Pünktlichkeit. Warum ist sie so wichtig? Was passiert wenn man zu spät kommt? Mit Alltagsbeispielen.",
+    "behoerden":       "Schreibe einen Mini-Text (150 Wörter) auf einfachem Deutsch über Ordnungsamt, Polizei und Feuerwehr in Deutschland. Was ist der Unterschied? Wann ruft man wen an?",
+    "geschenke":       "Schreibe einen Mini-Text (150 Wörter) auf einfachem Deutsch über Geschenkkultur in Deutschland. Was schenkt man? Was schenkt man nicht? Was ist unhöflich?",
+    "freundschaft":    "Schreibe einen Mini-Text (150 Wörter) auf einfachem Deutsch über Freundschaft in Deutschland. Wie wird man Freunde? Was ist normales Verhalten? Du vs. Sie.",
+    "sonntag":         "Schreibe einen Mini-Text (150 Wörter) auf einfachem Deutsch über den deutschen Sonntag. Ruhezeit, Lärmschutz, geschlossene Geschäfte, was erlaubt ist und was nicht.",
+    "brot_bier":       "Schreibe einen Mini-Text (150 Wörter) auf einfachem Deutsch über Brot und Bier als deutsche Kulturklassiker. Typen, Traditionen, lustige Fakten.",
+    "geschichte":      "Schreibe eine kurze Geschichte (150 Wörter) auf einfachem Deutsch über das moderne Deutschland — Multikulturalismus, Mentalität, was sich verändert hat.",
+    "humor":           "Schreibe einen Mini-Text (150 Wörter) auf einfachem Deutsch über deutschen Humor und politische Satire. Was ist Kabarett? Erwähne Moritz Neumeier und Till Reiners mit konkreten Beispiel-Themen.",
+    "fuellwoerter":    "Schreibe einen Mini-Text (150 Wörter) auf einfachem Deutsch mit den Top 20 deutschen Füllwörtern: halt, doch, mal, eigentlich, ja, naja, eben, irgendwie usw. Je ein Beispielsatz.",
+    "romance":         "Schreibe einen Mini-Text (150 Wörter) auf einfachem Deutsch über Beziehungen und Dating in Deutschland. Wie flirtet man? Was ist typisch?",
+    "hochzeit":        "Schreibe einen Mini-Text (150 Wörter) auf einfachem Deutsch über Hochzeit und Scheidung in Deutschland. Warum heiraten viele spät oder gar nicht? Was ist eine Lebenspartnerschaft?",
+    "muell":           "Schreibe einen Mini-Text (150 Wörter) auf einfachem Deutsch über Mülltrennung. Welche Tonne ist was? Was ist Pfand? Was passiert bei falscher Trennung?",
+    "verkehr_abk":     "Schreibe einen Mini-Text (150 Wörter) auf einfachem Deutsch mit einer Liste der wichtigsten Verkehrsabkürzungen: BVG, ICE, RE, RB, S-Bahn, U-Bahn, DB, ÖPNV usw. Mit kurzer Erklärung.",
+    "verkehr":         "Schreibe einen Mini-Text (150 Wörter) auf einfachem Deutsch über Verkehr in Deutschland. Autobahn, Fahrrad, Vorfahrt, häufige Fehler von Ausländern.",
+    "memes":           "Schreibe einen Mini-Text (150 Wörter) auf einfachem Deutsch über bekannte deutsche Internet-Memes und Phänomene. Beschreibe 5-6 konkrete Beispiele mit kurzer Erklärung.",
+    "behoerdendeutsch":"Schreibe einen Mini-Text auf einfachem Deutsch mit 20 typischen Sätzen aus deutschen Ämtern. Format: 'Satz' — Bedeutung auf einfachem Deutsch.",
+}
+
+
+def _send_next_kultur_question(chat_id):
+    """Send next pre-generated kultur quiz question."""
+    state     = user_state.get(chat_id, {})
+    questions = state.get("kultur_quiz_questions", [])
+    answers   = state.get("kultur_quiz_answers", [])
+    idx       = state.get("exercise_idx", 0)
+    total     = state.get("exercise_total", 3)
+
+    if idx >= total:
+        _finish_exercise_session(chat_id); return
+
+    q = questions[idx]
+    user_state[chat_id]["exercise_current_q"] = {
+        "question": q, "correct": answers[idx], "explanation": "",
+        "a": "", "b": "", "c": "",
+    }
+    text = f"❓ Frage {idx + 1} von {total}\n\n{q}"
+    markup = InlineKeyboardMarkup(row_width=3)
+    markup.add(
+        InlineKeyboardButton("A", callback_data="ex_ans:A"),
+        InlineKeyboardButton("B", callback_data="ex_ans:B"),
+        InlineKeyboardButton("C", callback_data="ex_ans:C"),
+    )
+    bot.send_message(chat_id, text, reply_markup=markup)
+
+
+def _show_kultur_menu(chat_id):
+    markup = InlineKeyboardMarkup(row_width=1)
+    for emoji, name, cb in KULTUR_TOPICS:
+        markup.add(InlineKeyboardButton(f"{emoji} {name}", callback_data=cb))
+    markup.add(InlineKeyboardButton("◀️ Zurück", callback_data="intg:back"))
+    bot.send_message(chat_id, "🇩🇪 Deutsche Kultur\n\nWähle ein Thema:", reply_markup=markup)
+
+
 @bot.message_handler(commands=["integration", "bürokratie", "buerokratie", "leben"])
 def handle_integration(message):
     chat_id = message.chat.id
@@ -4477,6 +4552,7 @@ def _show_integration_menu(chat_id):
         InlineKeyboardButton("🎭 Termin vorbereiten",           callback_data="intg:termin"),
         InlineKeyboardButton("🗺️ Beratungsstellen finden",      callback_data="intg:beratung"),
         InlineKeyboardButton("💶 Steuern & Finanzamt",          callback_data="intg:steuern"),
+        InlineKeyboardButton("🇩🇪 Deutsche Kultur",             callback_data="intg:kultur"),
     )
     bot.send_message(chat_id,
         "🏛️ Leben in Deutschland\n\nWomit kann ich dir helfen?",
@@ -4495,6 +4571,98 @@ def _show_steuern_menu(chat_id):
     bot.send_message(chat_id,
         "💶 Steuern & Finanzamt\n\nWas brauchst du?",
         reply_markup=markup)
+
+
+KULTUR_TOPICS = [
+    ("🎉 Feste, Feiertage & Brückentage",       "feste_feiertage"),
+    ("⏰ Deutsche Pünktlichkeit",                "puenktlichkeit"),
+    ("🚔 Ordnungsamt, Polizei, Feuerwehr",       "behoerden_ordnung"),
+    ("🎁 Geschenke: Was schenkt man?",           "geschenke"),
+    ("🤝 Freundschaft: Dos and Don'ts",          "freundschaft"),
+    ("😴 Sonntag: Hier wird nichts gemacht!",    "sonntag"),
+    ("🍞🍺 Brot & Bier: Deutsche Klassiker",     "brot_bier"),
+    ("📖 Mini-Geschichte: Modernes Deutschland", "moderne_geschichte"),
+    ("😂 Humor & politische Satire",             "humor_satire"),
+    ("💬 Top 20 Füllwörter",                     "fuellwoerter"),
+    ("💑 German Romance: Beziehungen",           "romance"),
+    ("💍 Hochzeit & Scheidung",                  "hochzeit_scheidung"),
+    ("♻️ Mülltrennung: Der Guide",               "muelltrennung"),
+    ("🚇 BVG, ICE, RE... Verkehrsabkürzungen",  "verkehr_abkuerzungen"),
+    ("🚗 Verkehr in Deutschland",                "verkehr_allgemein"),
+    ("😄 Top 15 Deutsche Memes",                 "memes"),
+    ("🏢 Behördendeutsch: 20 Sätze",             "behoerdendeutsch"),
+]
+
+
+def _show_kultur_menu(chat_id):
+    markup = InlineKeyboardMarkup(row_width=1)
+    for label, key in KULTUR_TOPICS:
+        markup.add(InlineKeyboardButton(label, callback_data=f"kultur:{key}"))
+    markup.add(InlineKeyboardButton("◀️ Zurück", callback_data="intg:back"))
+    bot.send_message(chat_id,
+        "🇩🇪 Deutsche Kultur\n\nWähle ein Thema — du bekommst einen kurzen Text und danach 3 Fragen:",
+        reply_markup=markup)
+
+
+def _generate_kultur_content(topic_key: str, topic_label: str, native_lang: str, level: str) -> dict:
+    """Generate mini-text + 3 quiz questions for a culture topic."""
+    prompts = {
+        "feste_feiertage":    "Erkläre deutsche Feste, Feiertage und Brückentage. Was sind die wichtigsten? Was macht man? Was ist ein Brückentag?",
+        "puenktlichkeit":     "Erkläre die deutsche Pünktlichkeitskultur. Wie wichtig ist sie? Was passiert wenn man zu spät kommt? Gibt es Ausnahmen?",
+        "behoerden_ordnung":  "Erkläre die Rollen von Ordnungsamt, Polizei und Feuerwehr in Deutschland. Was sind die Unterschiede? Wann ruft man wen?",
+        "geschenke":          "Was schenkt man in Deutschland? Was sind typische Geschenke? Was gilt als unhöflich? Gibt es Regeln?",
+        "freundschaft":       "Wie funktioniert Freundschaft in Deutschland? Was sind die Dos and Don'ts? Warum sind Deutsche anfangs kühl?",
+        "sonntag":            "Was ist der deutsche Sonntag? Was ist erlaubt, was verboten? Warum ist das so? Was macht man am Sonntag?",
+        "brot_bier":          "Erkläre die Bedeutung von Brot und Bier in der deutschen Kultur. Fakten, Traditionen, Zahlen.",
+        "moderne_geschichte": "Mini-Geschichte: Deutschland heute. Von der Teilung zur Wiedervereinigung bis heute — die wichtigsten Punkte kompakt.",
+        "humor_satire":       "Was ist politische Satire in Deutschland? Nenne Beispiele: Moritz Neumeier, Till Reiners, Die Anstalt. Was darf man satirisieren?",
+        "fuellwoerter":       "Liste die Top 20 deutschen Füllwörter (halt, mal, doch, eigentlich, irgendwie...) mit Bedeutung und je einem Beispielsatz.",
+        "romance":            "Wie läuft Romantik in Deutschland ab? Wie lernt man jemanden kennen? Was sind typische Dates? Kulturelle Unterschiede?",
+        "hochzeit_scheidung": "Hochzeit und Scheidung in Deutschland — Fakten, Statistiken, warum Deutsche weniger heiraten, Lebenspartnerschaft.",
+        "muelltrennung":      "Der komplette Guide zur deutschen Mülltrennung: Gelbe Tonne, Blaue Tonne, Restmüll, Biomüll, Pfand. Regeln und Tipps.",
+        "verkehr_abkuerzungen": "Liste und erkläre: BVG, DB, ICE, IC, RE, RB, S-Bahn, U-Bahn, Tram, Bus, MVV usw. Mit Kontext wann man was benutzt.",
+        "verkehr_allgemein":  "Verkehr in Deutschland: Autobahn (kein Tempolimit!), Verkehrsregeln, Fahrrad-Kultur, ÖPNV, Führerschein.",
+        "memes":              "Top 15 deutsche Memes und Internet-Phänomene — erkläre den Witz/Kontext hinter jedem. Mit kurzer Beschreibung wo man sie findet.",
+        "behoerdendeutsch":   "Liste 20 typische Sätze die man in deutschen Ämtern hört, mit Erklärung was sie bedeuten und wie man antwortet.",
+    }
+
+    prompt_text = prompts.get(topic_key, f"Erkläre: {topic_label}")
+
+    resp = claude.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=800,
+        system=(
+            f"Du bist ein Kulturguide für Deutschland. Der User spricht {native_lang} und lernt Deutsch (Niveau {level}).\n"
+            f"Erstelle einen kompakten, unterhaltsamen Kulturtext auf Deutsch (max 200 Wörter, {level}-Niveau).\n"
+            f"Danach auf einer Leerzeile: eine kurze Zusammenfassung auf {native_lang} (2-3 Sätze).\n"
+            f"Dann GENAU 3 Multiple-Choice-Fragen zum Text in diesem Format:\n"
+            f"---FRAGEN---\n"
+            f"F1: Frage?\nA: Option  B: Option  C: Option\nANTWORT: A/B/C\n"
+            f"F2: Frage?\nA: Option  B: Option  C: Option\nANTWORT: A/B/C\n"
+            f"F3: Frage?\nA: Option  B: Option  C: Option\nANTWORT: A/B/C"
+        ),
+        messages=[{"role": "user", "content": prompt_text}]
+    )
+    raw = resp.content[0].text.strip()
+
+    # Split text from questions
+    if "---FRAGEN---" in raw:
+        text_part, _, q_part = raw.partition("---FRAGEN---")
+    else:
+        text_part = raw
+        q_part    = ""
+
+    # Parse questions
+    import re as _re
+    questions = []
+    for m in _re.finditer(r"F(\d): (.+?)\nA: (.+?)  B: (.+?)  C: (.+?)\nANTWORT: ([ABC])", q_part.strip(), _re.DOTALL):
+        questions.append({
+            "question": m.group(2).strip(),
+            "a": m.group(3).strip(), "b": m.group(4).strip(), "c": m.group(5).strip(),
+            "correct": m.group(6).strip(),
+        })
+
+    return {"text": text_part.strip(), "questions": questions}
 
 # ─────────────────────────────────────────────
 # MAIN LOOP
@@ -5342,6 +5510,30 @@ def master_callback_router(call):
             bot.send_message(chat_id, "Übersetzung fehlgeschlagen 😅 Versuch es nochmal.")
         return
 
+    if data == "kultur_quiz_start":
+        bot.answer_callback_query(call.id)
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        state     = user_state.get(chat_id, {})
+        questions = state.get("kultur_questions", [])
+        answers   = state.get("kultur_answers", [])
+        if not questions:
+            bot.send_message(chat_id, "⚠️ Keine Fragen verfügbar."); return
+        user_state[chat_id].update({
+            "mode":             "exercise",
+            "exercise_topic":   state.get("kultur_label", "Kultur"),
+            "exercise_level":   user_data.get(str(chat_id), {}).get("level", "A2"),
+            "exercise_idx":     0,
+            "exercise_score":   0,
+            "exercise_total":   len(questions),
+            "exercise_used":    [],
+            # Store pre-generated questions directly
+            "kultur_quiz_questions": questions,
+            "kultur_quiz_answers":   answers,
+            "is_kultur_quiz":        True,
+        })
+        _send_next_kultur_question(chat_id)
+        return
+
     if data.startswith("ex_ans:"):
         given = data.split(":")[1].upper()
         bot.answer_callback_query(call.id)
@@ -5357,7 +5549,10 @@ def master_callback_router(call):
             feedback = f"❌ Falsch — du: {given}, richtig: {correct}\n📖 {expl}"
         user_state[chat_id]["exercise_idx"] = state.get("exercise_idx", 0) + 1
         bot.send_message(chat_id, feedback)
-        _send_next_exercise_question(chat_id)
+        if user_state[chat_id].get("is_kultur_quiz"):
+            _send_next_kultur_question(chat_id)
+        else:
+            _send_next_exercise_question(chat_id)
         return
 
     if data.startswith("intg:"):
@@ -5445,6 +5640,78 @@ def master_callback_router(call):
                 "Ich finde dein zuständiges Finanzamt.")
             return
 
+        if action == "kultur":
+            _show_kultur_menu(chat_id); return
+
+        return
+
+    if data.startswith("kultur:"):
+        topic_key = data.split(":", 1)[1]
+        bot.answer_callback_query(call.id)
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        uid         = str(chat_id)
+        native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
+        level       = user_data.get(uid, {}).get("level", "A2")
+        prompt      = KULTUR_PROMPTS.get(topic_key, "Schreibe einen kurzen Text auf einfachem Deutsch.")
+        topic_label = next((name for _, name, cb in KULTUR_TOPICS if cb == f"kultur:{topic_key}"), topic_key)
+
+        bot.send_message(chat_id, f"📖 {topic_label}\n\nText wird erstellt...")
+        try:
+            resp = claude.messages.create(
+                model="claude-haiku-4-5-20251001", max_tokens=500,
+                system=f"Du schreibst für Deutschlernende auf Niveau {level}. Einfache, klare Sprache. Kein Schulbuch-Deutsch.",
+                messages=[{"role": "user", "content": prompt}]
+            )
+            text_content = resp.content[0].text.strip()
+        except Exception as e:
+            bot.send_message(chat_id, f"⚠️ Fehler: {e}"); return
+
+        # Store for translate button + quiz
+        last_bot_text[chat_id] = text_content
+        user_state[chat_id] = {
+            "mode":         "idle",
+            "kultur_topic": topic_key,
+            "kultur_text":  text_content,
+            "kultur_label": topic_label,
+        }
+
+        # Generate 3 quiz questions in parallel
+        try:
+            quiz_resp = claude.messages.create(
+                model="claude-haiku-4-5-20251001", max_tokens=400,
+                system="""Erstelle 3 Multiple-Choice-Fragen zu diesem Text. Format exakt:
+1. Frage?
+A: Option  B: Option  C: Option
+ANTWORT: A
+
+2. Frage?
+A: Option  B: Option  C: Option
+ANTWORT: B
+
+Nur diese Zeilen, nichts sonst.""",
+                messages=[{"role": "user", "content": f"Text:\n{text_content}"}]
+            )
+            import re as _re
+            quiz_raw = quiz_resp.content[0].text.strip()
+            questions, answers = [], []
+            for block in _re.split(r"\n(?=\d+\.)", quiz_raw):
+                lines = [l.strip() for l in block.strip().splitlines() if l.strip()]
+                ans_line = next((l for l in lines if l.upper().startswith("ANTWORT:")), None)
+                if ans_line:
+                    answers.append(ans_line.split(":")[-1].strip().upper()[0])
+                    questions.append("\n".join(l for l in lines if not l.upper().startswith("ANTWORT:")))
+            user_state[chat_id]["kultur_questions"] = questions
+            user_state[chat_id]["kultur_answers"]   = answers
+            has_quiz = bool(questions)
+        except Exception:
+            has_quiz = False
+
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+        if has_quiz:
+            markup.add(InlineKeyboardButton("✅ Quiz starten", callback_data="kultur_quiz_start"))
+        markup.add(InlineKeyboardButton("📚 Andere Themen", callback_data="intg:kultur"))
+        bot.send_message(chat_id, text_content, reply_markup=markup)
         return
 
     if data.startswith("termin:"):
