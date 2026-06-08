@@ -70,6 +70,7 @@ bot.set_my_commands([
     BotCommand("gem",          "German Gem 💎"),
     BotCommand("share",        "Bot teilen 🤝"),
     BotCommand("restart",      "Chat neu starten"),
+    BotCommand("integration",  "Leben in Deutschland 🏛️"),
     BotCommand("support",      "Support 🆘"),
 ])
 
@@ -4459,6 +4460,42 @@ def handle_adminstats(message):
 
     bot.send_message(message.chat.id, "\n".join(lines))
 
+
+@bot.message_handler(commands=["integration", "bürokratie", "buerokratie", "leben"])
+def handle_integration(message):
+    chat_id = message.chat.id
+    ensure_user(chat_id)
+    _track_feature(chat_id, "integration")
+    _show_integration_menu(chat_id)
+
+
+def _show_integration_menu(chat_id):
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("📄 Brief / Dokument erklären",    callback_data="intg:brief_erklaeren"),
+        InlineKeyboardButton("✍️ Antwort auf einen Brief",      callback_data="intg:brief_antworten"),
+        InlineKeyboardButton("🎭 Termin vorbereiten",           callback_data="intg:termin"),
+        InlineKeyboardButton("🗺️ Beratungsstellen finden",      callback_data="intg:beratung"),
+        InlineKeyboardButton("💶 Steuern & Finanzamt",          callback_data="intg:steuern"),
+    )
+    bot.send_message(chat_id,
+        "🏛️ Leben in Deutschland\n\nWomit kann ich dir helfen?",
+        reply_markup=markup)
+
+
+def _show_steuern_menu(chat_id):
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("📄 Steuerbescheid erklären",      callback_data="intg:steuerbescheid"),
+        InlineKeyboardButton("📋 Was ist eine Steuererklärung?", callback_data="intg:steuererklaerung_info"),
+        InlineKeyboardButton("🗓️ Fristen & Termine",            callback_data="intg:steuerfristen"),
+        InlineKeyboardButton("🏢 Mein Finanzamt finden",        callback_data="intg:finanzamt"),
+        InlineKeyboardButton("◀️ Zurück",                       callback_data="intg:back"),
+    )
+    bot.send_message(chat_id,
+        "💶 Steuern & Finanzamt\n\nWas brauchst du?",
+        reply_markup=markup)
+
 # ─────────────────────────────────────────────
 # MAIN LOOP
 @bot.message_handler(commands=["gem", "gems", "wortschatz"])
@@ -4725,6 +4762,115 @@ def handle(message):
             InlineKeyboardButton("🏠 Menü",         callback_data="go_menu"),
         )
         bot.send_message(chat_id, "\n".join(lines), reply_markup=markup)
+        return
+
+    # Integration modes — text input handlers
+    if mode == "intg_brief_erklaeren":
+        uid         = str(chat_id)
+        native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
+        bot.send_message(chat_id, "🔍 Analysiere den Brief...")
+        try:
+            resp = claude.messages.create(
+                model="claude-haiku-4-5-20251001", max_tokens=600,
+                system=(
+                    f"Du bist ein hilfreicher Assistent für Menschen die in Deutschland leben.\n"
+                    f"Erkläre den folgenden deutschen Brief in diesen Abschnitten:\n"
+                    f"1. EINFACHES DEUTSCH: Was bedeutet der Brief? (A2/B1 Niveau)\n"
+                    f"2. {native_lang.upper()}: Kurze Zusammenfassung auf {native_lang}\n"
+                    f"3. WAS TUN: Konkrete nächste Schritte\n"
+                    f"4. FRIST: Gibt es eine Frist? Wenn ja, wann?\n"
+                    f"Sei beruhigend — Behördenbriefe machen Angst."
+                ),
+                messages=[{"role": "user", "content": f"Brief:\n{text}"}]
+            )
+            result = resp.content[0].text.strip()
+        except Exception as e:
+            result = f"⚠️ Fehler beim Analysieren: {e}"
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            InlineKeyboardButton("✍️ Antwort schreiben", callback_data="intg:brief_antworten"),
+            InlineKeyboardButton("🏛️ Menü", callback_data="intg:back"),
+        )
+        user_state[chat_id]["mode"] = "idle"
+        bot.send_message(chat_id, result, reply_markup=markup)
+        return
+
+    if mode == "intg_brief_antworten":
+        uid         = str(chat_id)
+        native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
+        bot.send_message(chat_id, "✍️ Schreibe den Antwortbrief...")
+        try:
+            resp = claude.messages.create(
+                model="claude-haiku-4-5-20251001", max_tokens=600,
+                system=(
+                    f"Du schreibst formelle deutsche Briefe für Menschen die Deutsch lernen.\n"
+                    f"Schreibe einen vollständigen formellen Antwortbrief auf Deutsch.\n"
+                    f"Format: Datum [Datum eintragen], Absender [Name/Adresse eintragen], Empfänger, Betreff, Brief, Grußformel.\n"
+                    f"Danach eine kurze Erklärung des Briefes auf {native_lang}.\n"
+                    f"Hinweis am Ende: Name, Adresse und Aktenzeichen selbst eintragen."
+                ),
+                messages=[{"role": "user", "content": f"Situation: {text}"}]
+            )
+            result = resp.content[0].text.strip()
+        except Exception as e:
+            result = f"⚠️ Fehler: {e}"
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("🏛️ Menü", callback_data="intg:back"))
+        user_state[chat_id]["mode"] = "idle"
+        bot.send_message(chat_id, result, reply_markup=markup)
+        return
+
+    if mode == "intg_steuerbescheid":
+        uid         = str(chat_id)
+        native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
+        bot.send_message(chat_id, "💶 Analysiere den Steuerbescheid...")
+        try:
+            resp = claude.messages.create(
+                model="claude-haiku-4-5-20251001", max_tokens=500,
+                system=(
+                    f"Du bist ein freundlicher Steuerberater-Assistent.\n"
+                    f"Erkläre den Steuerbescheid:\n"
+                    f"1. ERGEBNIS: Bekommt die Person Geld zurück oder muss nachzahlen? Wie viel?\n"
+                    f"2. EINFACHE ERKLÄRUNG: Was bedeutet das auf einfachem Deutsch?\n"
+                    f"3. {native_lang.upper()}: Kurze Zusammenfassung auf {native_lang}\n"
+                    f"4. WAS TUN: Nächste Schritte — Einspruch möglich? Frist?\n"
+                    f"Weise darauf hin, dass du kein Steuerberater bist."
+                ),
+                messages=[{"role": "user", "content": f"Steuerbescheid:\n{text}"}]
+            )
+            result = resp.content[0].text.strip()
+        except Exception as e:
+            result = f"⚠️ Fehler: {e}"
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("◀️ Zurück", callback_data="intg:steuern"))
+        user_state[chat_id]["mode"] = "idle"
+        bot.send_message(chat_id, result, reply_markup=markup)
+        return
+
+    if mode in ("intg_beratung", "intg_finanzamt"):
+        uid         = str(chat_id)
+        native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
+        is_finanzamt = (mode == "intg_finanzamt")
+        prompt = (
+            f"Finde das zuständige Finanzamt für: {text}. "
+            f"Gib Adresse, Telefon und Website an. Dann kurz auf {native_lang}."
+            if is_finanzamt else
+            f"Finde Beratungsstellen für Migranten in: {text}. "
+            f"Nenne: Migrationsberatung, VHS Sprachkurse, Jobcenter, Sozialberatung. "
+            f"Mit Websites wenn möglich. Dann kurze Übersicht auf {native_lang}."
+        )
+        try:
+            resp = claude.messages.create(
+                model="claude-haiku-4-5-20251001", max_tokens=400,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            result = resp.content[0].text.strip()
+        except Exception as e:
+            result = f"⚠️ Fehler: {e}"
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("🏛️ Menü", callback_data="intg:back"))
+        user_state[chat_id]["mode"] = "idle"
+        bot.send_message(chat_id, result, reply_markup=markup)
         return
 
     # Voice selection
@@ -5212,6 +5358,129 @@ def master_callback_router(call):
         user_state[chat_id]["exercise_idx"] = state.get("exercise_idx", 0) + 1
         bot.send_message(chat_id, feedback)
         _send_next_exercise_question(chat_id)
+        return
+
+    if data.startswith("intg:"):
+        action = data.split(":", 1)[1]
+        bot.answer_callback_query(call.id)
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        uid         = str(chat_id)
+        native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
+
+        if action == "back":
+            _show_integration_menu(chat_id); return
+
+        if action == "steuern":
+            _show_steuern_menu(chat_id); return
+
+        if action == "brief_erklaeren":
+            user_state[chat_id] = {"mode": "intg_brief_erklaeren"}
+            bot.send_message(chat_id,
+                "📄 Schick mir den Text des Briefes (kopieren & einfügen reicht).\n"
+                "Ich erkläre dir was er bedeutet und was du tun musst. 🔍")
+            return
+
+        if action == "brief_antworten":
+            user_state[chat_id] = {"mode": "intg_brief_antworten"}
+            bot.send_message(chat_id,
+                "✍️ Beschreib mir kurz die Situation:\n\n"
+                "• Von wem ist der Brief? (z.B. Jobcenter, Vermieter, Finanzamt)\n"
+                "• Was wird verlangt oder gefragt?\n\n"
+                "Ich schreibe dir eine formelle Antwort auf Deutsch. 📝")
+            return
+
+        if action == "termin":
+            user_state[chat_id] = {"mode": "intg_termin"}
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(
+                InlineKeyboardButton("🏢 Amt / Jobcenter",    callback_data="termin:amt"),
+                InlineKeyboardButton("🏥 Arzt / Krankenhaus", callback_data="termin:arzt"),
+                InlineKeyboardButton("🏠 Wohnungsbesichtigung", callback_data="termin:wohnung"),
+                InlineKeyboardButton("💼 Vorstellungsgespräch", callback_data="termin:job"),
+                InlineKeyboardButton("🏦 Bank",               callback_data="termin:bank"),
+            )
+            bot.send_message(chat_id, "🎭 Welchen Termin möchtest du üben?", reply_markup=markup)
+            return
+
+        if action == "beratung":
+            user_state[chat_id] = {"mode": "intg_beratung"}
+            bot.send_message(chat_id,
+                "🗺️ In welcher Stadt lebst du?\n\n"
+                "Schreib mir deine Stadt oder Postleitzahl — ich suche passende Beratungsstellen für dich.")
+            return
+
+        if action == "steuerbescheid":
+            user_state[chat_id] = {"mode": "intg_steuerbescheid"}
+            bot.send_message(chat_id,
+                "📄 Schick mir den Text deines Steuerbescheids.\n"
+                "Ich erkläre dir was er bedeutet, ob du Geld bekommst oder nachzahlen musst. 💶")
+            return
+
+        if action == "steuererklaerung_info":
+            resp = claude.messages.create(
+                model="claude-haiku-4-5-20251001", max_tokens=400,
+                system=f"Du bist ein freundlicher Steuerberater-Assistent. Erkläre auf einfachem Deutsch und dann auf {native_lang}.",
+                messages=[{"role": "user", "content": "Was ist eine Steuererklärung in Deutschland? Wer muss sie machen? Wie macht man das? Kurz und verständlich, max 200 Wörter."}]
+            )
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("◀️ Zurück", callback_data="intg:steuern"))
+            bot.send_message(chat_id, resp.content[0].text.strip(), reply_markup=markup)
+            return
+
+        if action == "steuerfristen":
+            resp = claude.messages.create(
+                model="claude-haiku-4-5-20251001", max_tokens=300,
+                system=f"Du bist ein freundlicher Steuerberater-Assistent. Antworte auf Deutsch, dann kurze Zusammenfassung auf {native_lang}.",
+                messages=[{"role": "user", "content": "Was sind die wichtigsten Steuerfristen in Deutschland? Wann muss man die Steuererklärung abgeben? Gibt es Verlängerungen? Kurz und klar."}]
+            )
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("◀️ Zurück", callback_data="intg:steuern"))
+            bot.send_message(chat_id, resp.content[0].text.strip(), reply_markup=markup)
+            return
+
+        if action == "finanzamt":
+            user_state[chat_id] = {"mode": "intg_finanzamt"}
+            bot.send_message(chat_id,
+                "🏢 In welcher Stadt oder Postleitzahl wohnst du?\n"
+                "Ich finde dein zuständiges Finanzamt.")
+            return
+
+        return
+
+    if data.startswith("termin:"):
+        termin_type = data.split(":", 1)[1]
+        bot.answer_callback_query(call.id)
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        type_labels = {
+            "amt": "Amt / Jobcenter", "arzt": "Arzt / Krankenhaus",
+            "wohnung": "Wohnungsbesichtigung", "job": "Vorstellungsgespräch", "bank": "Bank"
+        }
+        label = type_labels.get(termin_type, termin_type)
+        uid   = str(chat_id)
+        level = user_data.get(uid, {}).get("level", "A2")
+        native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
+        user_state[chat_id] = {
+            "mode": "chat",
+            "scenario": f"Termin: {label}",
+            "npc_system": (
+                f"Du spielst eine Person am {label} in Deutschland. Der User (Niveau {level}) "
+                f"übt das Gespräch auf Deutsch. Sei geduldig, realistisch und hilfreich. "
+                f"Korrigiere Fehler sanft am Ende jeder Antwort. "
+                f"Bei großen Verständnisproblemen erkläre kurz auf {native_lang}. "
+                f"Starte das Gespräch als Mitarbeiter:in."
+            )
+        }
+        bot.send_message(chat_id,
+            f"🎭 Rollenspiel: {label}\n\n"
+            f"Ich bin jetzt die Mitarbeiter:in. Du kommst rein — los geht's!\n"
+            f"_(Zum Beenden: /restart)_", parse_mode="Markdown")
+        # Trigger NPC opening line
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001", max_tokens=100,
+            system=user_state[chat_id]["npc_system"],
+            messages=[{"role": "user", "content": "[Begrüße den Kunden auf Deutsch]"}]
+        )
+        bot.send_message(chat_id, resp.content[0].text.strip())
         return
 
     if data == "start_chat":
