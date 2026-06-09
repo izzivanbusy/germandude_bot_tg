@@ -2317,7 +2317,7 @@ def send_paywall(chat_id):
         f"✅ Voice-Nachrichten & Übersetzungen\n"
         f"✅ XP-System, Achievements & Shadowing\n"
         f"✅ Jederzeit kündbar\n\n"
-        f"_Noch keinen Trial? Tippe /freecode — oder schreib uns!_\n"
+        f"_Hast du einen Code? Tippe:_ /freecode DEINCODE\n"
         f"_Dein Streak und deine XP bleiben erhalten._"
     )
     last_bot_text[chat_id] = paywall_text
