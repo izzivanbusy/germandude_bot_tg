@@ -2697,70 +2697,34 @@ def generate_errors_and_exercises(chat_id, conversation_history):
         for m in history
     )
 
-    prompt = f"""Du bist ein Deutsch-Coach für Niveau {level}.
-Analysiere die Antworten des Users in diesem Gespräch.
+    prompt = f"""Du bist ein freundlicher Deutsch-Coach für Niveau {level}.
+Analysiere nur die Nachrichten des Users (nicht die Bot-Antworten).
 
-KEIN FEHLER — ignoriere folgendes komplett:
-- Apokope in der gesprochenen Sprache: „hab" statt „habe", „genieß" statt „genieße", „mach" statt „mache", „komm" statt „komme" usw. — das ist normales, korrektes Umgangsdeutsch.
-- Umgangssprachliche Verkürzungen, die Muttersprachler täglich verwenden.
+UMGANGSSPRACHE IST KEIN FEHLER — ignoriere KOMPLETT:
+- "ich hab", "ich mach", "ich geh", "ich ruf", "ich fahr", "ich komm"
+- "geh" statt "gehe", "hab" statt "habe", "mach" statt "mache"
+- Alle Apokopen und Kontraktionen die Muttersprachler täglich nutzen
+Wenn du sowas siehst: ignorieren, nicht erwähnen, nicht korrigieren!
 
-AUFGABE:
-1. Finde die 2–3 häufigsten oder wichtigsten Fehler des Users.
-2. Erkläre jeden Fehler kurz und klar (1–2 Sätze, passend zu Niveau {level}).
-3. Erstelle einen zusammenhängenden Lückentext (5–10 Sätze) zum Gesprächsthema.
-   - Baue die Fehler des Users als Lücken ein.
-   - Jede Lücke wird mit ______________ markiert (viele Unterstriche).
-   - Nummeriere jede Lücke: (1) ______________, (2) ______________ usw.
-4. Erstelle 5 Mini-Test-Aufgaben (Multiple Choice, je 3 Optionen) zu den Fehlern des Users.
+AUFGABE: Finde 2-3 echte Grammatik- oder Wortschatzfehler.
 
-FORMAT (Telegram Markdown, genau so):
+FORMAT — NUR Plaintext, keine Sternchen, keine Markdown:
 
-*🔍 Deine häufigsten Fehler:*
+🔍 Deine Fehler aus diesem Gespräch:
 
-1. ❌ [falscher Satz des Users]
-   ✅ [korrekter Satz]
-   💡 [kurze Erklärung]
+• ❌ [falscher Satz/Ausdruck des Users]
+  ✅ [korrekter Satz]
+  💡 [1 Satz Erklärung warum]
+  💬 Beispiel: [natürlicher Beispielsatz mit der richtigen Form]
 
-2. ❌ ...
-   ✅ ...
-   💡 ...
-
-*✏️ Lückentext:*
-
-[5–10 zusammenhängende Sätze zum Thema, Lücken als (1) ______________, (2) ______________ usw.]
-
-*🧩 Mini-Test:*
-
-1. [Frage]
-A) ...  B) ...  C) ...
-
-2. [Frage]
-A) ...  B) ...  C) ...
-
-3. [Frage]
-A) ...  B) ...  C) ...
-
-4. [Frage]
-A) ...  B) ...  C) ...
-
-5. [Frage]
-A) ...  B) ...  C) ...
+• ❌ ...
+  ✅ ...
+  💡 ...
+  💬 Beispiel: ...
 
 ---ANSWERS---
 
-*✅ Lösungen — Lückentext:*
-(1) [Antwort]
-(2) [Antwort]
-...
-
-*✅ Lösungen — Mini-Test:*
-1. [richtige Option + kurze Begründung]
-2. ...
-3. ...
-4. ...
-5. ...
-
-WICHTIG: Trenne Aufgaben und Lösungen IMMER mit der Zeile ---ANSWERS--- . Kein Text danach außer den Lösungen.
+[Falls keine echten Fehler gefunden: schreibe nur "Sehr gut! Keine echten Fehler in diesem Gespräch. 🎉"]
 
 GESPRÄCH:
 {conversation_text}
@@ -4004,6 +3968,7 @@ def show_level(chat_id):
 def show_errors(chat_id):
     uid        = str(chat_id)
     user       = user_data.get(uid, {})
+    level      = user.get("level", "A2")
     test_errs  = user.get("test_errors", [])
     voice_errs = [e for e in user.get("errors", []) if isinstance(e, str)]
 
@@ -4011,26 +3976,63 @@ def show_errors(chat_id):
         bot.send_message(chat_id, "Alles sauber 😄 Noch keine Fehler gespeichert.")
         return
 
-    lines = ["🧠 Deine Fehler", ""]
+    # Collect all errors to enrich with Claude
+    all_errors = []
+    for e in test_errs[-5:]:
+        wrong   = e.get("wrong", "")
+        correct = e.get("correct", "")
+        lvl     = e.get("level", level)
+        if wrong and correct:
+            all_errors.append({"wrong": wrong, "correct": correct, "level": lvl, "source": "test"})
+    for e in voice_errs[-5:]:
+        if " → " in e:
+            parts = e.split(" → ", 1)
+            all_errors.append({"wrong": parts[0].strip(), "correct": parts[1].strip(), "level": level, "source": "voice"})
 
-    if test_errs:
-        lines.append("📝 Aus dem Einstufungstest:")
-        for e in test_errs[-5:]:
-            wrong   = e.get("wrong", "")
-            correct = e.get("correct", "")
-            level   = e.get("level", "")
-            if wrong and correct:
-                lines.append(f"  ❌ {wrong}  →  ✅ {correct}  [{level}]")
-        lines.append("")
+    if not all_errors:
+        bot.send_message(chat_id, "Alles sauber 😄 Noch keine Fehler gespeichert.")
+        return
 
-    if voice_errs:
-        lines.append("🎙️ Aus deinen Gesprächen:")
-        for e in voice_errs[-5:]:
-            lines.append(f"  • {e}")
+    # Ask Claude for mini-explanation + example for each error
+    errors_input = "\n".join(
+        f"{i+1}. FALSCH: {e['wrong']} | RICHTIG: {e['correct']} | NIVEAU: {e['level']}"
+        for i, e in enumerate(all_errors)
+    )
+    try:
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=600,
+            system=(
+                f"Du bist ein freundlicher Deutschlehrer (Niveau {level}).\n"
+                "Analysiere diese Fehler und erstelle für jeden GENAU dieses Format:\n"
+                "N. ❌ [falsches Wort/Satz]\n"
+                "   ✅ [richtiges Wort/Satz]\n"
+                "   💡 [1 Satz Erklärung warum]\n"
+                "   💬 [1 natürlicher Beispielsatz mit der richtigen Form]\n"
+                "\n"
+                "WICHTIG: Umgangssprache ist KEIN Fehler!\n"
+                "Ignoriere komplett: 'ich hab', 'ich mach', 'ich geh', 'ich ruf', 'ich fahr', "
+                "'ich komm', 'geh' statt 'gehe', 'hab' statt 'habe' usw.\n"
+                "Das ist normales, korrektes Alltagsdeutsch — niemals korrigieren!\n"
+                "Nur echte Grammatik- oder Wortschatzfehler erklären."
+            ),
+            messages=[{"role": "user", "content": f"Fehler:\n{errors_input}"}]
+        )
+        result = _strip_md(resp.content[0].text.strip())
+    except Exception as e:
+        # Fallback: plain list
+        result = "\n".join(
+            f"• ❌ {e['wrong']}  →  ✅ {e['correct']}"
+            for e in all_errors
+        )
 
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("💪 Üben", callback_data="new_exercises"))
-    bot.send_message(chat_id, "\n".join(lines), reply_markup=markup)
+    header = "🧠 Deine Fehler\n" + "─" * 20 + "\n\n"
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("💪 Üben", callback_data="new_exercises"),
+        InlineKeyboardButton("🗑️ Löschen", callback_data="clear_errors"),
+    )
+    bot.send_message(chat_id, header + result, reply_markup=markup)
 
 # Grammar topics per level — used as focus for exercise sets
 GRAMMAR_TOPICS = {
@@ -5935,6 +5937,17 @@ Nur diese Zeilen, nichts sonst.""",
     if data == "pay_stars":
         bot.answer_callback_query(call.id)
         send_stars_invoice(chat_id)
+        return
+
+    if data == "clear_errors":
+        bot.answer_callback_query(call.id, "Fehler gelöscht ✓")
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        uid = str(chat_id)
+        user_data[uid]["test_errors"] = []
+        user_data[uid]["errors"]      = []
+        user_data[uid]["weak_points"] = []
+        save_users(user_data)
+        bot.send_message(chat_id, "🗑️ Alle Fehler gelöscht. Frischer Start! 💪")
         return
 
     if data == "start_chat":
