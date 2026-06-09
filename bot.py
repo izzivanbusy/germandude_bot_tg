@@ -6035,6 +6035,60 @@ def admin_set_premium(message):
     except: pass
 
 
+@flask_app.route("/send_discount_offers", methods=["POST"])
+def send_discount_offers_endpoint():
+    """Daily cron: send one-time 50% discount to users who joined 10+ days ago with no premium."""
+    auth = request.headers.get("X-Cron-Secret", "")
+    if auth != CRON_SECRET:
+        return jsonify({"error": "unauthorized"}), 401
+
+    now   = datetime.now()
+    sent  = 0
+    skip  = 0
+
+    for uid, user in user_data.items():
+        # Skip if already sent
+        if user.get("discount_offer_sent"):
+            skip += 1; continue
+        # Skip if already premium
+        if user.get("premium"):
+            skip += 1; continue
+        # Skip if joined less than 10 days ago
+        joined = user.get("joined") or user.get("trial_start")
+        if not joined:
+            skip += 1; continue
+        try:
+            days_since = (now - datetime.fromisoformat(joined)).days
+        except Exception:
+            skip += 1; continue
+        if days_since < 10:
+            skip += 1; continue
+
+        # Send the offer
+        try:
+            native_lang = user.get("native_language", "")
+            name = user.get("name") or "du"
+            bot.send_message(int(uid),
+                f"🎁 Hey {name}!\n\n"
+                f"Du bist jetzt seit {days_since} Tagen dabei — und wir mögen dich.\n\n"
+                f"Deshalb bekommst du heute einmalig *50% Rabatt* auf Premium:\n"
+                f"Nur €10 statt €20 für 30 Tage vollen Zugang.\n\n"
+                f"Dein persönlicher Code: *RABATT50*\n"
+                f"👉 Tippe /premium und gib den Code auf der Zahlungsseite ein.\n\n"
+                f"⏰ Dieses Angebot gilt nur einmalig für dich!",
+                parse_mode="Markdown"
+            )
+            user_data[uid]["discount_offer_sent"] = True
+            sent += 1
+            log.info(f"Discount offer sent to {uid}")
+        except Exception as e:
+            log.warning(f"Could not send discount offer to {uid}: {e}")
+
+    save_users(user_data)
+    log.info(f"Discount offers: {sent} sent, {skip} skipped")
+    return jsonify({"ok": True, "sent": sent, "skipped": skip})
+
+
 @flask_app.route("/reload_users", methods=["POST"])
 def reload_users_endpoint():
     secret = request.json.get("secret", "") if request.is_json else ""
