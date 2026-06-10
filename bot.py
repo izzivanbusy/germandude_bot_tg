@@ -1735,7 +1735,7 @@ def start_conversation(chat_id, scenario):
 def get_translation(chat_id, text_to_translate):
     """Translate the given text into the user's native language."""
     user = user_data.get(str(chat_id), {})
-    native_lang = user.get("native_language", "Englisch")
+    native_lang = user.get("native_language") or "Englisch"
 
     response = claude.messages.create(
         model="claude-haiku-4-5-20251001",
@@ -1895,7 +1895,7 @@ def contains_crisis_signal(text):
 
 def send_crisis_response(chat_id):
     """Send empathetic crisis response with resources."""
-    native_lang = user_data.get(str(chat_id), {}).get("native_language", "Englisch")
+    native_lang = user_data.get(str(chat_id), {}).get("native_language") or "Englisch"
     name = user_data.get(str(chat_id), {}).get("name", "")
 
     bot.send_message(chat_id,
@@ -2800,7 +2800,7 @@ def handle_flashcards(message):
     chat_id     = message.chat.id
     ensure_user(chat_id)
     uid         = str(chat_id)
-    native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
+    native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
 
     FLASHCARD_SETS = [
         ("Zeitangaben", "https://quizlet.com/de/929150830/zeitangaben-german-time-phrases-flash-cards/"),
@@ -3469,7 +3469,7 @@ def send_question(chat_id):
 
 def _trigger_a0_fail(chat_id):
     """User failed A0 screening — offer mini lessons or email."""
-    native_lang = user_data.get(str(chat_id), {}).get("native_language", "Englisch")
+    native_lang = user_data.get(str(chat_id), {}).get("native_language") or "Englisch"
     markup = InlineKeyboardMarkup()
     markup.add(
         InlineKeyboardButton("Ja! 💪", callback_data="lesson_yes"),
@@ -3624,7 +3624,7 @@ def lesson_yes_callback(call):
     if chat_id in test_state:
         return
 
-    native_lang = user_data.get(str(chat_id), {}).get("native_language", "Englisch")
+    native_lang = user_data.get(str(chat_id), {}).get("native_language") or "Englisch"
 
     # Intro message in native language
     try:
@@ -3708,7 +3708,7 @@ def lesson_no_callback(call):
     bot.answer_callback_query(call.id)
 
     # Translate the contact message into the user's native language
-    native_lang = user_data.get(str(chat_id), {}).get("native_language", "Englisch")
+    native_lang = user_data.get(str(chat_id), {}).get("native_language") or "Englisch"
     base_msg = (
         "Please send an email to kontakt@erfolgreich-mit-deutsch.de "
         "to arrange your first free German lesson. "
@@ -3795,7 +3795,7 @@ def send_level_feedback(chat_id, level):
     time.sleep(0.6)
 
     # ── Nachricht 4: Wie es funktioniert + Los geht's ───────────────────────
-    native_lang = user_data.get(str(chat_id), {}).get("native_language", "Englisch")
+    native_lang = user_data.get(str(chat_id), {}).get("native_language") or "Englisch"
     try:
         tr = claude.messages.create(
             model="claude-haiku-4-5-20251001",
@@ -4703,7 +4703,7 @@ def send_daily_gem(chat_id):
     uid         = str(chat_id)
     expression  = get_todays_gem(uid)
     user        = user_data.get(uid, {})
-    native_lang = user.get("native_language", "Englisch")
+    native_lang = user.get("native_language") or "Englisch"
     level       = user.get("level", "A2")
     try:
         resp = claude.messages.create(
@@ -4737,7 +4737,8 @@ def send_daily_gem(chat_id):
 
     lines = ["💎 German Gem des Tages", "", f"🗣 {expression}", typ, ""]
     if bedeutung:    lines += [f"📖 Bedeutung: {bedeutung}", ""]
-    if uebersetzung: lines += [f"🌍 {native_lang}: {uebersetzung}", ""]
+    if uebersetzung and native_lang and native_lang.lower() != "none":
+        lines += [f"🌍 {native_lang}: {uebersetzung}", ""]
     if beispiele:
         lines.append("Beispiele aus dem echten Leben:")
         for ex in beispiele: lines.append(f"• {ex}")
@@ -4963,7 +4964,7 @@ def handle(message):
                 "(kopieren & einfügen) — oder ein Foto des Briefes! 📸")
             return
         uid         = str(chat_id)
-        native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
+        native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
         bot.send_message(chat_id, "🔍 Analysiere den Brief...")
         try:
             resp = claude.messages.create(
@@ -4993,7 +4994,7 @@ def handle(message):
 
     if mode == "intg_brief_antworten":
         uid         = str(chat_id)
-        native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
+        native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
         bot.send_message(chat_id, "✍️ Schreibe den Antwortbrief...")
         try:
             resp = claude.messages.create(
@@ -5018,7 +5019,7 @@ def handle(message):
 
     if mode == "intg_steuerbescheid":
         uid         = str(chat_id)
-        native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
+        native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
         bot.send_message(chat_id, "💶 Analysiere den Steuerbescheid...")
         try:
             resp = claude.messages.create(
@@ -5045,7 +5046,7 @@ def handle(message):
 
     if mode in ("intg_beratung", "intg_finanzamt"):
         uid         = str(chat_id)
-        native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
+        native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
         is_finanzamt = (mode == "intg_finanzamt")
         prompt = (
             f"Finde das zuständige Finanzamt für: {text}. "
@@ -5366,7 +5367,7 @@ def handle_file_message(message):
     ensure_user(chat_id)
     mode = user_state.get(chat_id, {}).get("mode", "idle")
     uid  = str(chat_id)
-    native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
+    native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
 
     # Only process in integration brief mode
     if mode not in ("intg_brief_erklaeren", "intg_brief_antworten", "intg_steuerbescheid"):
@@ -5469,7 +5470,7 @@ def handle_file_message(message):
         user_state[chat_id]["mode"] = "intg_brief_erklaeren"
         # Reuse text handler by injecting into a fake text call
         uid  = str(chat_id)
-        native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
+        native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
         try:
             resp = claude.messages.create(
                 model="claude-haiku-4-5-20251001", max_tokens=700,
@@ -5749,7 +5750,7 @@ def master_callback_router(call):
         bot.answer_callback_query(call.id)
         bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
         uid         = str(chat_id)
-        native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
+        native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
 
         if action == "back":
             _show_integration_menu(chat_id); return
@@ -5852,7 +5853,7 @@ def master_callback_router(call):
         bot.answer_callback_query(call.id)
         bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
         uid         = str(chat_id)
-        native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
+        native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
         level       = user_data.get(uid, {}).get("level", "A2")
         prompt      = KULTUR_PROMPTS.get(topic_key, "Schreibe einen kurzen Text auf einfachem Deutsch.")
         topic_label = next((name for _, name, cb in KULTUR_TOPICS if cb == f"kultur:{topic_key}"), topic_key)
@@ -5927,7 +5928,7 @@ Nur diese Zeilen, nichts sonst.""",
         label = type_labels.get(termin_type, termin_type)
         uid   = str(chat_id)
         level = user_data.get(uid, {}).get("level", "A2")
-        native_lang = user_data.get(uid, {}).get("native_language", "Englisch")
+        native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
         user_state[chat_id] = {
             "mode": "chat",
             "scenario": f"Termin: {label}",
