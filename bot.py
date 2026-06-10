@@ -5720,6 +5720,10 @@ def master_callback_router(call):
         if not last_npc:
             last_npc = last_bot_text.get(chat_id) or last_bot_text.get(str(chat_id))
 
+        # Fallback: read text directly from the message the button is attached to
+        if not last_npc and call.message and call.message.text:
+            last_npc = call.message.text
+
         if not last_npc:
             mem = user_memory.get(chat_id, [])
             last_npc = next(
