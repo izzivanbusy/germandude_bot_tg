@@ -96,6 +96,39 @@ ALL_GOALS = [
     "Sport & Hobbys", "Am Telefon", "Job"
 ]
 
+def onboarding_complete(chat_id) -> bool:
+    """True if user has completed onboarding (name + language + test)."""
+    uid  = str(chat_id)
+    user = user_data.get(uid, {})
+    return bool(
+        user.get("name") and
+        user.get("native_language") and
+        user.get("level")
+    )
+
+
+def _require_onboarding(chat_id) -> bool:
+    """Send nudge if onboarding not complete. Returns True if blocked."""
+    if onboarding_complete(chat_id):
+        return False
+    uid   = str(chat_id)
+    user  = user_data.get(uid, {})
+    state = user_state.get(chat_id, {})
+    mode  = state.get("mode", "idle")
+
+    # Don't interrupt active onboarding or test
+    if mode in ("onboarding", "test"):
+        return True
+
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("👉 Onboarding starten", callback_data="restart_onboarding"))
+    bot.send_message(chat_id,
+        "⚠️ Bitte schließe zuerst das kurze Onboarding ab — es dauert nur 1 Minute!\n\n"
+        "Tippe /start um zu beginnen.",
+        reply_markup=markup)
+    return True
+
+
 def _track_feature(chat_id, feature: str):
     uid = str(chat_id)
     if uid not in user_data: return
@@ -2799,6 +2832,7 @@ def handle_flashcards(message):
     """Send Quizlet flashcard sets with translated names in user's language."""
     chat_id     = message.chat.id
     ensure_user(chat_id)
+    if _require_onboarding(chat_id): return
     uid         = str(chat_id)
     native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
 
@@ -3899,6 +3933,7 @@ def feedback(message):
 @bot.message_handler(commands=['progress'])
 def progress_cmd(message):
     ensure_user(message.chat.id)
+    if _require_onboarding(message.chat.id): return
     send_progress(message.chat.id)
 
 @bot.message_handler(commands=['fortschritt'])
@@ -4340,6 +4375,7 @@ def do_full_reset(chat_id):
 @bot.message_handler(commands=['themen'])
 def themen_cmd(message):
     ensure_user(message.chat.id)
+    if _require_onboarding(message.chat.id): return
     _track_feature(message.chat.id, 'themen')
     if not is_premium(message.chat.id): send_paywall(message.chat.id); return
     send_topic_buttons(message.chat.id)
@@ -4358,11 +4394,13 @@ def level_cmd(message):
 @bot.message_handler(commands=['errors'])
 def errors_cmd(message):
     ensure_user(message.chat.id)
+    if _require_onboarding(message.chat.id): return
     show_errors(message.chat.id)
 
 @bot.message_handler(commands=['practice'])
 def practice_cmd(message):
     ensure_user(message.chat.id)
+    if _require_onboarding(message.chat.id): return
     _track_feature(message.chat.id, 'practice')
     if not is_premium(message.chat.id): send_paywall(message.chat.id); return
     start_exercise(message.chat.id)
@@ -4582,6 +4620,7 @@ def _show_kultur_menu(chat_id):
 def handle_integration(message):
     chat_id = message.chat.id
     ensure_user(chat_id)
+    if _require_onboarding(chat_id): return
     _track_feature(chat_id, "integration")
     _show_integration_menu(chat_id)
 
@@ -4694,6 +4733,7 @@ def handle_gem_command(message):
     """Send today's German Gem and start the practice exercise."""
     chat_id = message.chat.id
     ensure_user(chat_id)
+    if _require_onboarding(chat_id): return
     _track_feature(chat_id, 'gem')
     send_daily_gem(chat_id)
 
@@ -5967,6 +6007,13 @@ Nur diese Zeilen, nichts sonst.""",
         user_data[uid]["weak_points"] = []
         save_users(user_data)
         bot.send_message(chat_id, "🗑️ Alle Fehler gelöscht. Frischer Start! 💪")
+        return
+
+    if data == "restart_onboarding":
+        bot.answer_callback_query(call.id)
+        ensure_user(chat_id)
+        user_state[chat_id] = {"mode": "onboarding", "step": "name"}
+        bot.send_message(chat_id, "👋 Wie heißt du?")
         return
 
     if data == "start_chat":
