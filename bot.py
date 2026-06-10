@@ -2700,31 +2700,46 @@ def generate_errors_and_exercises(chat_id, conversation_history):
     prompt = f"""Du bist ein freundlicher Deutsch-Coach für Niveau {level}.
 Analysiere nur die Nachrichten des Users (nicht die Bot-Antworten).
 
-UMGANGSSPRACHE IST KEIN FEHLER — ignoriere KOMPLETT:
-- "ich hab", "ich mach", "ich geh", "ich ruf", "ich fahr", "ich komm"
-- "geh" statt "gehe", "hab" statt "habe", "mach" statt "mache"
-- Alle Apokopen und Kontraktionen die Muttersprachler täglich nutzen
-Wenn du sowas siehst: ignorieren, nicht erwähnen, nicht korrigieren!
+NUR DIESE FEHLER KORRIGIEREN — nichts anderes:
 
-AUFGABE: Finde 2-3 echte Grammatik- oder Wortschatzfehler.
+1. VERBSTELLUNG — Das Verb steht auf der falschen Position:
+   - Hauptsatz: Verb muss auf Position 2 stehen
+   - Nebensatz: Verb muss ans Ende
+   - Perfekt/Modalverb: Infinitiv/Partizip ans Ende
+   Beispiel echter Fehler: "Ich gestern gegangen bin ins Kino" → "Ich bin gestern ins Kino gegangen"
 
-FORMAT — NUR Plaintext, keine Sternchen, keine Markdown:
+2. OBJEKT-REIHENFOLGE — Dativ/Akkusativ falsch gestellt:
+   - Beide Nomen: Dativ VOR Akkusativ → "Ich gebe dem Mann das Buch" (nicht: "dem Buch dem Mann")
+   - Pronomen stehen so weit vorne wie möglich
+   - Akkusativpronomen vor Dativnomen: "Ich gebe es dem Mann"
+   - Beide Pronomen: Akkusativ vor Dativ: "Ich gebe es ihm"
+   Beispiel echter Fehler: "Ich gebe das Buch dem Mann es" → "Ich gebe es ihm"
+
+3. FALSCHE KASUSFORM — z.B. "mit der Mann" statt "mit dem Mann"
+
+IGNORIERE KOMPLETT — das sind keine Fehler:
+- Wortstellung bei Zeitangaben: "Ich habe Hunger seit drei Stunden" = korrekt
+- Umgangssprache: "ich hab", "ich mach", "ich geh", alle Apokopen
+- Alternative korrekte Wortstellungen (Deutsch hat oft mehrere richtige Varianten)
+- Stilistische Präferenzen
+- Leichte Formulierungsunterschiede
+
+AUFGABE: Finde max. 2 EINDEUTIGE Fehler aus den Kategorien oben.
+Wenn kein eindeutiger Fehler: "Sehr gut — keine echten Fehler! 🎉" schreiben.
+Im Zweifel: NICHT korrigieren.
+
+FORMAT — nur Plaintext, keine Sternchen:
 
 🔍 Deine Fehler aus diesem Gespräch:
 
-• ❌ [falscher Satz/Ausdruck des Users]
+• ❌ [falscher Satz des Users — exakt zitiert]
   ✅ [korrekter Satz]
-  💡 [1 Satz Erklärung warum]
-  💬 Beispiel: [natürlicher Beispielsatz mit der richtigen Form]
-
-• ❌ ...
-  ✅ ...
-  💡 ...
-  💬 Beispiel: ...
+  💡 [1 Satz Erklärung — welche Regel, warum]
+  💬 Beispiel: [anderer natürlicher Satz mit derselben Regel]
 
 ---ANSWERS---
 
-[Falls keine echten Fehler gefunden: schreibe nur "Sehr gut! Keine echten Fehler in diesem Gespräch. 🎉"]
+[Falls keine echten Fehler: "Sehr gut — keine echten Fehler! 🎉"]
 
 GESPRÄCH:
 {conversation_text}
@@ -4004,17 +4019,20 @@ def show_errors(chat_id):
             max_tokens=600,
             system=(
                 f"Du bist ein freundlicher Deutschlehrer (Niveau {level}).\n"
-                "Analysiere diese Fehler und erstelle für jeden GENAU dieses Format:\n"
-                "N. ❌ [falsches Wort/Satz]\n"
-                "   ✅ [richtiges Wort/Satz]\n"
-                "   💡 [1 Satz Erklärung warum]\n"
-                "   💬 [1 natürlicher Beispielsatz mit der richtigen Form]\n"
-                "\n"
-                "WICHTIG: Umgangssprache ist KEIN Fehler!\n"
-                "Ignoriere komplett: 'ich hab', 'ich mach', 'ich geh', 'ich ruf', 'ich fahr', "
-                "'ich komm', 'geh' statt 'gehe', 'hab' statt 'habe' usw.\n"
-                "Das ist normales, korrektes Alltagsdeutsch — niemals korrigieren!\n"
-                "Nur echte Grammatik- oder Wortschatzfehler erklären."
+                "Erkläre für jeden Fehler genau dieses Format (nur Plaintext, keine Sternchen):\n"
+                "• ❌ [falscher Satz]\n"
+                "  ✅ [korrekter Satz]\n"
+                "  💡 [1 Satz Erklärung — welche Regel]\n"
+                "  💬 Beispiel: [anderer natürlicher Satz mit derselben Regel]\n\n"
+                "NUR diese Fehler erklären:\n"
+                "1. Verbstellung falsch (Verb nicht auf Position 2, oder Verb nicht am Ende im Nebensatz)\n"
+                "2. Objekt-Reihenfolge falsch (Dativ/Akkusativ, Pronomen-Stellung)\n"
+                "3. Falsche Kasusform (z.B. 'mit der Mann' statt 'mit dem Mann')\n\n"
+                "IGNORIERE KOMPLETT:\n"
+                "- 'ich hab', 'ich mach', 'ich geh' und alle Umgangssprache-Verkürzungen\n"
+                "- Alternative korrekte Wortstellungen — Deutsch hat oft mehrere richtige Varianten\n"
+                "- Stilistische Unterschiede und Zeitangaben-Stellung\n"
+                "Im Zweifel: nicht korrigieren."
             ),
             messages=[{"role": "user", "content": f"Fehler:\n{errors_input}"}]
         )
