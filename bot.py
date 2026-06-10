@@ -4784,11 +4784,12 @@ def send_daily_gem(chat_id):
         for ex in beispiele: lines.append(f"• {ex}")
     lines += ["", f"✏️ Deine Aufgabe: Schreib einen eigenen Satz mit: {expression}", "Ich überprüfe ihn und gebe dir Feedback. 🙂"]
     msg = "\n".join(lines)
-    last_bot_text[chat_id] = msg
-    user_state[chat_id] = {"mode": user_state.get(chat_id, {}).get("mode", "idle"), "gem_exercise": expression, "gem_text": expression}
+    _cid = int(chat_id)
+    last_bot_text[_cid] = msg
+    user_state[_cid] = {"mode": user_state.get(_cid, {}).get("mode", "idle"), "gem_exercise": expression, "gem_text": expression}
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
-    bot.send_message(chat_id, msg, reply_markup=markup)
+    bot.send_message(_cid, msg, reply_markup=markup)
 
 
 def check_gem_exercise(chat_id, user_sentence, gem_text):
@@ -5717,7 +5718,7 @@ def master_callback_router(call):
             last_npc = pending_texts.get(key)
 
         if not last_npc:
-            last_npc = last_bot_text.get(chat_id)
+            last_npc = last_bot_text.get(chat_id) or last_bot_text.get(str(chat_id))
 
         if not last_npc:
             mem = user_memory.get(chat_id, [])
