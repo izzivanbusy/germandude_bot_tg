@@ -2205,6 +2205,7 @@ STRIPE_SECRET_KEY          = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET      = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_PRICE_ID            = os.getenv("STRIPE_PRICE_ID", "")
 STRIPE_PRICE_ID_DISCOUNTED = os.getenv("STRIPE_PRICE_ID_DISCOUNTED", "")
+STRIPE_PRICE_ID_PLUS       = os.getenv("STRIPE_PRICE_ID_PLUS", "")       # €30 Premium Plus
 STRIPE_PAYMENT_LINK        = os.getenv("STRIPE_PAYMENT_LINK", "https://buy.stripe.com/6oUbJ20822qNdTU1bU9fW00")
 RAILWAY_DOMAIN             = os.getenv("RAILWAY_PUBLIC_DOMAIN", "germandudebottg-production.up.railway.app")
 if STRIPE_SECRET_KEY:
@@ -2213,6 +2214,30 @@ if STRIPE_SECRET_KEY:
 DISCOUNT_CODES = {
     "RABATT50": {"percent": 50, "price_eur": 10, "label": "€10/Monat (50% Rabatt)", "used_by": None},
 }
+
+def is_premium_plus(chat_id) -> bool:
+    """True if user has Premium Plus (€30) subscription."""
+    uid  = str(chat_id)
+    user = user_data.get(uid, {})
+    try:
+        fresh = load_users()
+        if uid in fresh:
+            user_data[uid] = fresh[uid]
+        user = user_data.get(uid, {})
+    except Exception:
+        pass
+    if not user.get("premium_plus"):
+        return False
+    premium_until = user.get("premium_plus_until")
+    if premium_until:
+        if datetime.fromisoformat(premium_until) > datetime.now():
+            return True
+        else:
+            user_data[uid]["premium_plus"] = False
+            save_users(user_data)
+            return False
+    return True
+
 
 def is_premium(chat_id):
     """True if user has active paid premium OR valid trial. Always syncs from disk."""
@@ -3222,6 +3247,18 @@ def handle_topic_callback(call):
 
     # Special mode: Quatschen
     if goal == "Quatschen":
+        if not is_premium_plus(chat_id):
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("👑 Premium Plus holen — €30/Monat", callback_data="pay_plus"))
+            bot.send_message(chat_id,
+                "👑 Quatsch Modus ist exklusiv für Premium Plus (€30/Monat).\n\n"
+                "Du bekommst:\n"
+                "✅ Alles aus Premium\n"
+                "✅ Quatsch Modus — einfach drauflos reden, kein Druck\n"
+                "✅ Kein Thema, kein Skript, kein Lehrer-Modus\n"
+                "✅ Dein Kumpel halt. 🍻",
+                reply_markup=markup)
+            return
         user_data[str(chat_id)]["goal"] = goal
         save_users(user_data)
         start_quatschen(chat_id)
@@ -5384,21 +5421,33 @@ def handle_pre_checkout(query):
 
 @bot.message_handler(content_types=["successful_payment"])
 def handle_successful_payment(message):
-    """Activate Premium after successful Stars payment."""
+    """Activate Premium (or Premium Plus) after successful Stars payment."""
     chat_id = message.chat.id
     uid     = str(chat_id)
     ensure_user(chat_id)
     from datetime import timedelta
+    expiry  = (datetime.now() + timedelta(days=30)).isoformat()
+    payload = message.successful_payment.invoice_payload if message.successful_payment else ""
+    is_plus = payload.startswith("premium_plus_")
     user_data[uid]["premium"]       = True
-    user_data[uid]["premium_until"] = (datetime.now() + timedelta(days=30)).isoformat()
+    user_data[uid]["premium_until"] = expiry
     user_data[uid]["stars_payment"] = True
+    if is_plus:
+        user_data[uid]["premium_plus"]       = True
+        user_data[uid]["premium_plus_until"] = expiry
     save_users(user_data)
-    log.info(f"✅ Stars Premium activated: {chat_id}")
-    bot.send_message(chat_id,
-        "⭐ Danke für deine Stars!\n\n"
-        "🎉 Du hast jetzt 30 Tage Premium-Zugang. 💪\n"
-        "Dein Streak und deine XP sind natürlich noch da.\n\n"
-        "Tippe /themen um weiterzumachen!")
+    log.info(f"✅ Stars Premium{'Plus' if is_plus else ''} activated: {chat_id}")
+    if is_plus:
+        bot.send_message(chat_id,
+            "⭐ Danke für deine Stars!\n\n"
+            "👑 Du hast jetzt 30 Tage Premium Plus inkl. Quatsch Modus. 🍻\n"
+            "Tippe /themen und wähle Quatschen!")
+    else:
+        bot.send_message(chat_id,
+            "⭐ Danke für deine Stars!\n\n"
+            "🎉 Du hast jetzt 30 Tage Premium-Zugang. 💪\n"
+            "Dein Streak und deine XP sind natürlich noch da.\n\n"
+            "Tippe /themen um weiterzumachen!")
 
 
 @bot.message_handler(content_types=['photo', 'document'])
@@ -5720,10 +5769,6 @@ def master_callback_router(call):
         if not last_npc:
             last_npc = last_bot_text.get(chat_id) or last_bot_text.get(str(chat_id))
 
-        # Fallback: read text directly from the message the button is attached to
-        if not last_npc and call.message and call.message.text:
-            last_npc = call.message.text
-
         if not last_npc:
             mem = user_memory.get(chat_id, [])
             last_npc = next(
@@ -5996,6 +6041,48 @@ Nur diese Zeilen, nichts sonst.""",
             messages=[{"role": "user", "content": "[Begrüße den Kunden auf Deutsch]"}]
         )
         bot.send_message(chat_id, resp.content[0].text.strip())
+        return
+
+    if data == "pay_plus":
+        bot.answer_callback_query(call.id)
+        uid = str(chat_id)
+        discount_code = user_data.get(uid, {}).get("discount_code")
+        price_id = STRIPE_PRICE_ID_PLUS
+        if not price_id:
+            bot.send_message(chat_id, "⚠️ Premium Plus ist gerade noch nicht verfügbar. Versuch es später!")
+            return
+        try:
+            session = stripe.checkout.Session.create(
+                payment_method_types=["card"],
+                mode="subscription",
+                line_items=[{"price": price_id, "quantity": 1}],
+                success_url=f"https://t.me/germandude_bot?start=plus_ok",
+                cancel_url=f"https://t.me/germandude_bot",
+                metadata={"telegram_id": str(chat_id), "plan": "plus"},
+            )
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("👑 Jetzt Premium Plus — €30/Monat", url=session.url))
+            markup.add(InlineKeyboardButton("⭐ Mit Stars — 2000 Stars", callback_data="pay_stars_plus"))
+            bot.send_message(chat_id, "👑 Premium Plus — €30/Monat\nInkl. Quatsch Modus:", reply_markup=markup)
+        except Exception as e:
+            log.error(f"Premium Plus checkout failed: {e}")
+            bot.send_message(chat_id, "⚠️ Zahlung konnte nicht gestartet werden. Versuch es später.")
+        return
+
+    if data == "pay_stars_plus":
+        bot.answer_callback_query(call.id)
+        try:
+            bot.send_invoice(
+                chat_id,
+                title="German Dude Premium Plus — 1 Monat",
+                description="Alles aus Premium + exklusiver Quatsch Modus. 30 Tage.",
+                payload=f"premium_plus_{chat_id}",
+                provider_token="",
+                currency="XTR",
+                prices=[telebot.types.LabeledPrice("Premium Plus 1 Monat", 2000)],
+            )
+        except Exception as e:
+            bot.send_message(chat_id, f"⚠️ Stars-Zahlung fehlgeschlagen: {e}")
         return
 
     if data == "pay_stars":
