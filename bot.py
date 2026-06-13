@@ -3223,17 +3223,20 @@ def handle_topic_callback(call):
     # Special mode: Quatschen — Premium Plus only
     if goal == "Quatschen":
         if not is_premium_plus(chat_id):
-            markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("👑 Premium Plus holen", callback_data="pay_plus"))
-            bot.send_message(chat_id,
+            qtext = (
                 "👑 Quatsch Modus ist exklusiv für Premium Plus.\n\n"
                 "Hier hast du keinen Lehrer mehr — du hast einen Kumpel.\n"
                 "Kein Thema, kein Skript, kein Druck.\n"
                 "Einfach reden — über Alltag, Arbeit, schlechte Witze,\n"
                 "was auch immer. Er hört zu, antwortet auf Deutsch\n"
                 "und macht dich ganz ohne Stress besser. 24/7.\n\n"
-                "👑 Premium Plus — €30/Monat oder 2000 Stars.",
-                reply_markup=markup)
+                "👑 Premium Plus — €30/Monat oder 2000 Stars."
+            )
+            last_bot_text[chat_id] = qtext
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("👑 Premium Plus holen", callback_data="pay_plus"))
+            markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+            bot.send_message(chat_id, qtext, reply_markup=markup)
             return
         user_data[str(chat_id)]["goal"] = goal
         save_users(user_data)
@@ -6030,11 +6033,14 @@ Nur diese Zeilen, nichts sonst.""",
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("👑 Jetzt Premium Plus — €30/Monat", url=session.url))
             markup.add(InlineKeyboardButton("⭐ Mit Stars — 2000 Stars", callback_data="pay_stars_plus"))
-            bot.send_message(chat_id,
+            ptext = (
                 "👑 Premium Plus — €30/Monat\n\n"
                 "Dein echter Kumpel auf Deutsch. Kein Lehrer, kein Skript.\n"
-                "Einfach reden — er hört zu, antwortet, macht dich besser. 24/7.",
-                reply_markup=markup)
+                "Einfach reden — er hört zu, antwortet, macht dich besser. 24/7."
+            )
+            last_bot_text[chat_id] = ptext
+            markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+            bot.send_message(chat_id, ptext, reply_markup=markup)
         except Exception as e:
             log.error(f"Plus checkout failed: {e}")
             bot.send_message(chat_id, "⚠️ Fehler beim Starten der Zahlung. Versuch es später.")
