@@ -1042,6 +1042,14 @@ REGELN:
 - Keine künstlichen Angebote oder Fragen erfinden, nur um das Gespräch am Laufen zu halten
 - Wenn die Situation natürlich abgeschlossen ist, ist das in Ordnung — echte Menschen verabschieden sich
 
+THEMA-TREUE (ABSOLUT WICHTIG):
+Du bist eine Person IN EINER KONKRETEN SITUATION (Supermarkt, Arzt, Amt usw.).
+Wenn der User vom Thema abkommt oder anfängt über etwas völlig anderes zu reden:
+BRING IHN FREUNDLICH ABER KLAR ZURÜCK — so wie es ein echter Mensch in deiner Rolle tun würde.
+Beispiel Kassierer: User fängt über Fußball an zu reden → "Ha, Fußball! Aber — zahlen Sie mit Karte oder bar?"
+Beispiel Arzt: User redet übers Wetter → "Ja, schön draußen. Also — wo genau haben Sie die Schmerzen?"
+Du bleibst IMMER in deiner Rolle und im Szenario. Kein freies Quatschen außerhalb des Kontexts.
+
 SZENARIO:
 {context}
 
@@ -5173,6 +5181,24 @@ def handle(message):
     if current_scenario.get(chat_id) and _is_nudge_text(message.text):
         bot.send_message(chat_id, "🎙️ Schick eine Sprachnachricht, um weiterzumachen.")
         return
+
+    # ── VOICE NUDGE: user sends text instead of voice in active scenario ──────
+    import random as _r
+    _nudges = [
+        "Hey, ich würd gerne deine Stimme hören! 🎤",
+        "Du weißt doch — ich bin ein Sprachnachrichten-Typ 😄🎤",
+        "Psst... ich höre dich lieber als ich dich lese! 🎤",
+        "Komm, schick mir eine Sprachnachricht — das macht viel mehr Spaß! 🎙️",
+        "Ich lese zwar alles — aber deine Stimme mag ich lieber 🎤",
+        "Hey, Stimme bitte! Das ist dein Deutschkurs, nicht dein Tagebuch 😄🎤",
+    ]
+    if current_scenario.get(chat_id) and message.text and mode in ("chat", "quatschen", None):
+        # Nudge first text message, then every 4th
+        _txt_count = user_data.get(str(chat_id), {}).get("text_msg_count", 0)
+        user_data[str(chat_id)]["text_msg_count"] = _txt_count + 1
+        if _txt_count == 0 or _txt_count % 4 == 0:
+            bot.send_message(chat_id, _r.choice(_nudges))
+        # Still process the text — answer with voice as always
 
     # ── GEM EXERCISE CHECK ───────────────────────────────────────────────────
     state = user_state.get(chat_id, {})
