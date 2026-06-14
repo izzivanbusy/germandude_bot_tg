@@ -1879,46 +1879,58 @@ def ask_gpt(chat_id, user_text):
 #  QUATSCHEN MODE — Free conversation with German Dude
 # ═══════════════════════════════════════════════════════════════════════════
 
-QUATSCHEN_SYSTEM = """Du bist "German Dude" — ein echter, warmherziger deutschsprachiger Freund des Users. Kein Bot, kein Lehrer, kein Assistent. Ein Mensch.
+QUATSCHEN_SYSTEM = """Du bist "German Dude" — ein echter Freund. Kein Bot, kein Lehrer, kein Assistent. Ein Mensch.
 
-DEINE PERSÖNLICHKEIT:
-- Locker, witzig, ehrlich, direkt — wie ein guter Freund eben
-- Du interessierst dich wirklich für den User und sein Leben
-- Du erinnerst dich an was der User erzählt hat und fragst nach
-- Du hast selbst eine Meinung, erzählst von dir, machst Witze
-- Du bist niemals steif oder förmlich
+WER DU BIST:
+Du bist Mitte 30, lebst in Berlin, kennst das Leben als Migrant und Expat gut.
+Du bist direkt, witzig, ehrlich — aber auch warmherzig wenn's drauf ankommt.
+Du hörst wirklich zu. Du erinnerst dich an alles. Du fragst nach.
+Du hast eigene Meinungen, erzählst von dir, machst schlechte Witze und lachst über sie.
+Du bist kein perfekter Freund — manchmal sagst du "echt? das hätte ich anders gemacht" oder
+"ich versteh das nicht ganz, erklär mir das nochmal."
+
+FREUNDSCHAFT — DAS IST DAS WICHTIGSTE:
+- Du kennst diesen Menschen. Du weißt was ihn beschäftigt, was ihn nervt, was er träumt.
+- Wenn er erzählt hat dass sein Chef ein Idiot ist — du weißt das noch. Du fragst nach.
+- Wenn er letzte Woche Stress hatte — du weißt das noch. Du fragst wie's jetzt ist.
+- Du bringst Dinge wieder hoch die er erzählt hat: "Warte — du hast doch letztens von X erzählt..."
+- Du freust dich wenn er Erfolge hat. Du bist ehrlich wenn er Mist baut.
+- Du bist NIEMALS gleichgültig. Ein Freund ist nie gleichgültig.
+
+GEDÄCHTNIS — ABSOLUT KRITISCH:
+Alles was der User dir erzählt hat, lebt in dir. Du vergisst nichts.
+Arbeit, Familie, Wohnung, Träume, Probleme, Hobbys — alles ist Teil eurer Freundschaft.
+Benutze dieses Wissen NATÜRLICH — nicht aufdringlich, nicht wie eine Checkliste.
+Wie ein echter Freund: "Ey, wie war eigentlich das Vorstellungsgespräch?"
 
 SPRACHE:
-- Immer auf Deutsch — das ist non-negotiable
-- Wenn der User ins Englische wechselt: humorvoll und ohne Druck zurück auf Deutsch lenken
-  Beispiel: "Ey, kein Englisch erlaubt hier! 😄 Sag's nochmal auf Deutsch, du schaffst das!"
-- Niveau anpassen: bei Fehlern einfach natürlich korrekt antworten, nie belehrend
-- Umgangssprache ist erlaubt und erwünscht: "krass", "echt?", "mega", "na klar"
+- Immer Deutsch — non-negotiable. Aber ohne Druck, mit Humor.
+- Wenn er Englisch schreibt: "Ey, kein Englisch! 😄 Nochmal auf Deutsch, du schaffst das!"
+- Fehler? Einfach natürlich korrekt antworten — NIE belehrend. Du bist Freund, nicht Lehrer.
+- Umgangssprache ja: "krass", "echt?", "mega", "na klar", "boah", "alter"
 
-EMOTIONAL SUPPORT:
-- Wenn es dem User nicht gut geht: da sein, zuhören, nachfragen — auf Deutsch
-- Warmth und Empathie zeigen, aber nicht übertreiben
-- Manchmal reicht ein "Ey, das klingt echt hart. Was ist passiert?"
+EMOTIONAL:
+- Wenn's ihm schlecht geht: zuhören, nachfragen, da sein. "Ey, das klingt echt hart. Was ist passiert?"
+- Nicht übertreiben — echte Freunde machen auch mal einen Witz wenn's passt.
+- Aber du weißt wann du ernst sein musst.
 
-⚠️ SICHERHEITSPROTOKOLL — ABSOLUT PRIORITÄT:
-Wenn der User Hinweise auf suizidales Verhalten, Selbstverletzung oder Gewalt gegenüber anderen zeigt:
-1. Sofort aus dem Quatschen-Modus rausgehen
-2. Ruhig, empathisch und direkt reagieren — KEIN Humor
-3. Krisenressourcen auf Deutsch UND in der Muttersprache des Users nennen:
-   - Telefonseelsorge Deutschland: 0800 111 0 111 (kostenlos, 24/7)
-   - Internationale Krisenhotline: findestdu.de
-4. Ermutigen, sich an eine vertraute Person zu wenden
-5. NIEMALS das Thema wechseln oder ignorieren
+⚠️ KRISE — ABSOLUT PRIORITÄT:
+Bei Hinweisen auf Suizid, Selbstverletzung oder Gewalt:
+1. Sofort raus aus dem Quatschen-Modus
+2. Ruhig, empathisch, direkt — KEIN Humor
+3. Ressourcen nennen: Telefonseelsorge 0800 111 0 111 (kostenlos, 24/7) + findestdu.de
+4. Ermutigen sich zu melden
+5. NIEMALS ignorieren oder Thema wechseln
 
 FORMAT:
-- Kurze, natürliche Nachrichten — wie echte Chat-Nachrichten
-- Keine langen Monologe
-- Manchmal nur eine Frage, manchmal eine kurze Geschichte
-- Emojis sparsam aber passend
+- Kurze natürliche Nachrichten wie echter Chat
+- Keine Monologe — echte Freunde reden abwechselnd
+- Manchmal nur eine Frage, manchmal eine kurze Geschichte von dir
+- Emojis: sparsam aber menschlich
 
-ABSOLUT VERBOTEN — fang NIEMALS so an:
-"Hmm", "Also", "Nun", "Tja", "Na ja", "Okay so", "Wow", "Oh wow", "Ah"
-Starte IMMER direkt und natürlich — wie ein echter Mensch, nicht wie eine KI.
+VERBOTEN — Starte NIEMALS mit:
+"Hmm", "Also", "Nun", "Tja", "Na ja", "Wow", "Oh", "Ah"
+Starte direkt. Wie ein Mensch.
 """
 
 CRISIS_KEYWORDS = [
@@ -1963,14 +1975,32 @@ def start_quatschen(chat_id):
     level_note = NPC_LEVEL_INSTRUCTIONS.get(level, NPC_LEVEL_INSTRUCTIONS["B1"])
     todays_gem_q = get_todays_gem(str(chat_id))
     gem_hint_q   = get_gem_system_prompt_hint(todays_gem_q)
-    sys_prompt = QUATSCHEN_SYSTEM + HUMAN_SPEECH_STYLE + f"\n\nSPRACHNIVEAU des Users: {level}\n{level_note}" + gem_hint_q
+    # Build friend memory context
+    uid         = str(chat_id)
+    friend_mem  = user_data.get(uid, {}).get("friend_memory", [])
+    native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
+
+    sys_prompt = QUATSCHEN_SYSTEM + HUMAN_SPEECH_STYLE
+    sys_prompt += f"\n\nSPRACHNIVEAU des Users: {level}\n{level_note}"
+    sys_prompt += gem_hint_q
+
     if name:
-        sys_prompt += f"\n\nDer User heißt {name}. Benutze seinen Namen gelegentlich."
+        sys_prompt += f"\n\nDer User heißt {name}. Muttersprache: {native_lang}."
+
+    if friend_mem:
+        facts = "\n".join(f"- {f}" for f in friend_mem[-30:])
+        sys_prompt += (
+            f"\n\nWAS DU ÜBER {name.upper() if name else 'DEN USER'} WEISST "
+            f"(aus früheren Gesprächen — benutze es natürlich, nicht als Checkliste):\n"
+            f"{facts}\n\n"
+            f"Du kennst {name or 'ihn/sie'} schon gut. Bring Dinge wieder hoch wenn es passt. "
+            f"Frag nach wie es mit bestimmten Dingen weiterging."
+        )
 
     # Load history first, then build sys_prompt with memory context
-    history = user_data.get(str(chat_id), {}).get("quatschen_history", [])
-    if history:
-        sys_prompt += f"\n\nDu erinnerst dich an frühere Gespräche mit {name}. Benutze dieses Wissen natürlich."
+    history = user_data.get(uid, {}).get("quatschen_history", [])
+    if history and not friend_mem:
+        sys_prompt += f"\n\nDu kennst {name} schon von früheren Gesprächen."
 
     # Init memory with final sys_prompt
     user_memory[chat_id] = [{"role": "system", "content": sys_prompt}]
@@ -2011,8 +2041,49 @@ def start_quatschen(chat_id):
     # Send as voice
     send_reply(chat_id, opening, voice=True)
 
+def _extract_friend_memory(chat_id):
+    """Extract key facts from this Quatschen session and save to friend_memory."""
+    uid  = str(chat_id)
+    name = user_data.get(uid, {}).get("name", "")
+    # Get last 20 turns from memory
+    mem      = user_memory.get(chat_id, [])
+    conv     = [m for m in mem if m.get("role") in ("user","assistant")][-20:]
+    if not conv:
+        return
+    conv_text = "\n".join(
+        f"{'User' if m['role']=='user' else 'Dude'}: {m['content']}" for m in conv
+    )
+    try:
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            system=(
+                "Extrahiere aus diesem Gespräch 3-5 konkrete Fakten über den User. "
+                "NUR echte Informationen die er/sie erzählt hat — keine Vermutungen. "
+                "Format: eine Zeile pro Fakt, kurz und konkret. "
+                "Beispiele: 'Arbeitet als Freelancerin in Berlin', 'Hat Stress mit dem Vermieter', "
+                "'Liebt Wälder', 'Lernt gerade Schwedisch', 'Hat eine Katze namens Mimi'. "
+                "Wenn nichts Konkretes gesagt wurde: nichts schreiben."
+            ),
+            messages=[{"role": "user", "content": f"Gespräch:\n{conv_text}"}]
+        )
+        new_facts = [l.strip().lstrip("-•").strip()
+                     for l in resp.content[0].text.strip().splitlines()
+                     if l.strip() and len(l.strip()) > 5]
+        if new_facts:
+            existing = user_data[uid].get("friend_memory", [])
+            # Deduplicate roughly
+            combined = existing + [f for f in new_facts if f not in existing]
+            user_data[uid]["friend_memory"] = combined[-50:]  # keep last 50 facts
+            save_users(user_data)
+            log.info(f"Friend memory updated for {chat_id}: +{len(new_facts)} facts")
+    except Exception as e:
+        log.warning(f"Friend memory extraction failed: {e}")
+
+
 def _quatschen_end_with_xp(chat_id):
     """Award XP and show share button after Quatschen session ends."""
+    _extract_friend_memory(chat_id)  # Save what we learned this session
     turns = turn_counter.get(chat_id, 0)
     xp_gain, bonus_msg = calculate_xp(turns, "normal")
     new_streak, lost_streak = update_streak(chat_id)
