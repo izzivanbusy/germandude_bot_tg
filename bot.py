@@ -4943,9 +4943,13 @@ def send_donation_menu(chat_id: int):
     )
     markup = InlineKeyboardMarkup()
     markup.row(
-        InlineKeyboardButton("☕ €3",   callback_data="donate:eur:3"),
-        InlineKeyboardButton("🍕 €5",   callback_data="donate:eur:5"),
-        InlineKeyboardButton("🎉 €10",  callback_data="donate:eur:10"),
+        InlineKeyboardButton("☕ €3",  callback_data="donate:eur:3"),
+        InlineKeyboardButton("🍕 €5",  callback_data="donate:eur:5"),
+        InlineKeyboardButton("🎉 €10", callback_data="donate:eur:10"),
+    )
+    markup.row(
+        InlineKeyboardButton("🌟 €20", callback_data="donate:eur:20"),
+        InlineKeyboardButton("💎 €50", callback_data="donate:eur:50"),
     )
     markup.add(InlineKeyboardButton("⭐ Mit Telegram Stars spenden", callback_data="donate:stars"))
     markup.add(InlineKeyboardButton("◀️ Zurück",                     callback_data="danke:back"))
@@ -4953,28 +4957,42 @@ def send_donation_menu(chat_id: int):
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
 
+# Stripe Price IDs für Spenden (einmalig in Stripe angelegt)
+DONATION_PRICES = {
+    3:  "price_1TiaHCJ6DBeqSSUPrdio7a6Z",
+    5:  "price_1TiaKTJ6DBeqSSUPVjD6yGq1",
+    10: "price_1TiaKjJ6DBeqSSUPaAzn4Xov",
+    20: "price_1TiaKwJ6DBeqSSUPTeC2Kba8",
+    50: "price_1TiaL5J6DBeqSSUPaverdmy8",
+}
+
+DONATION_LABELS = {
+    3:  "☕ Ein Kaffee",
+    5:  "🍕 Eine Pizza",
+    10: "🎉 Großes Danke!",
+    20: "🌟 Du rockst!",
+    50: "💎 Legendär!",
+}
+
 def create_donation_checkout(chat_id: int, amount_eur: int) -> str | None:
-    """Stripe Checkout Session für eine Einmalspende."""
+    """Stripe Checkout Session für eine Einmalspende mit vorhandenem Price."""
     if not STRIPE_SECRET_KEY:
         return None
+    price_id = DONATION_PRICES.get(amount_eur)
+    if not price_id:
+        return None
     try:
-        label_map = {3: "☕ Ein Kaffee", 5: "🍕 Eine Pizza", 10: "🎉 Großes Danke!"}
-        label = label_map.get(amount_eur, f"€{amount_eur} Spende")
         session = stripe.checkout.Session.create(
             payment_method_types=["card"],
             mode="payment",
-            line_items=[{
-                "price_data": {
-                    "currency": "eur",
-                    "product_data": {"name": f"German Dude Bot — {label}"},
-                    "unit_amount": amount_eur * 100,
-                },
-                "quantity": 1,
-            }],
+            line_items=[{"price": price_id, "quantity": 1}],
             success_url="https://t.me/germandude_bot?start=danke_spende",
             cancel_url="https://t.me/germandude_bot",
-            metadata={"telegram_id": str(chat_id), "type": "donation",
-                      "amount": str(amount_eur)},
+            metadata={
+                "telegram_id": str(chat_id),
+                "type":        "donation",
+                "amount":      str(amount_eur),
+            },
         )
         return session.url
     except Exception as e:
@@ -6833,15 +6851,15 @@ Nur diese Zeilen, nichts sonst.""",
         bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
         amount = int(data.split(":")[-1])
         url = create_donation_checkout(chat_id, amount)
+        label = DONATION_LABELS.get(amount, f"€{amount} Spende")
         if url:
             markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton(f"💳 Jetzt €{amount} spenden", url=url))
+            markup.add(InlineKeyboardButton(f"💳 Jetzt {label} — €{amount} spenden", url=url))
             markup.add(InlineKeyboardButton("◀️ Zurück", callback_data="danke:donate"))
             bot.send_message(
                 chat_id,
-                f"☕ *€{amount} Spende* — danke, das ist wunderbar!\n\n"
+                f"{label} — danke, das ist wunderbar! 🙏\n\n"
                 "Klick unten um zur sicheren Zahlungsseite zu kommen. 🔒",
-                parse_mode="Markdown",
                 reply_markup=markup
             )
         else:
