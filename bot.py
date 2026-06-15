@@ -70,6 +70,7 @@ bot.set_my_commands([
     BotCommand("flashcards",   "Vokabelkarten 🃏"),
     BotCommand("gem",          "German Gem 💎"),
     BotCommand("share",        "Bot teilen 🤝"),
+    BotCommand("danke",        "Danke sagen 🙏"),
     BotCommand("restart",      "Chat neu starten"),
     BotCommand("integration",  "Leben in Deutschland 🏛️"),
     BotCommand("support",      "Support 🆘"),
@@ -3434,6 +3435,17 @@ def start(message):
         except ValueError:
             pass
 
+    # Handle donation thank-you redirect from Stripe
+    if payload == "danke_spende":
+        if name:
+            bot.send_message(chat_id,
+                f"🙏 Danke für deine Spende, {name}! Du bist ein Schatz. 💙\n\n"
+                "Izzi freut sich wirklich sehr — danke dass du den German Dude Bot unterstützt!",
+                reply_markup=ReplyKeyboardRemove())
+        user_state[chat_id] = {"mode": "menu"}
+        send_topic_buttons(chat_id)
+        return
+
     # Returning user — skip onboarding
     if name:
         test_state.pop(chat_id, None)
@@ -4901,6 +4913,172 @@ def info_cmd(message):
         "Fragen? /support"
     )
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  /DANKE — Spenden + Feedback
+# ═══════════════════════════════════════════════════════════════════════════
+
+def send_danke_menu(chat_id: int):
+    """Hauptmenü für /danke."""
+    uid  = str(chat_id)
+    name = user_data.get(uid, {}).get("name", "")
+    text = (
+        f"🙏 Danke{', ' + name if name else ''}!\n\n"
+        "Schön dass du den German Dude Bot magst. "
+        "Was möchtest du tun?"
+    )
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("☕ Einen Kaffee spendieren",  callback_data="danke:donate"))
+    markup.add(InlineKeyboardButton("💬 Feedback hinterlassen",    callback_data="danke:feedback"))
+    markup.add(InlineKeyboardButton("🌍 übersetzen",               callback_data="translate_last"))
+    last_bot_text[chat_id] = text
+    bot.send_message(chat_id, text, reply_markup=markup)
+
+
+def send_donation_menu(chat_id: int):
+    """Spendenbetrags-Auswahl."""
+    text = (
+        "☕ *Wie viel magst du spendieren?*\n\n"
+        "Jede Spende hilft, den Bot am Laufen zu halten und weiterzuentwickeln. "
+        "Danke von Herzen! 🙏"
+    )
+    markup = InlineKeyboardMarkup()
+    markup.row(
+        InlineKeyboardButton("☕ €3",   callback_data="donate:eur:3"),
+        InlineKeyboardButton("🍕 €5",   callback_data="donate:eur:5"),
+        InlineKeyboardButton("🎉 €10",  callback_data="donate:eur:10"),
+    )
+    markup.add(InlineKeyboardButton("⭐ Mit Telegram Stars spenden", callback_data="donate:stars"))
+    markup.add(InlineKeyboardButton("◀️ Zurück",                     callback_data="danke:back"))
+    last_bot_text[chat_id] = text
+    bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
+
+
+def create_donation_checkout(chat_id: int, amount_eur: int) -> str | None:
+    """Stripe Checkout Session für eine Einmalspende."""
+    if not STRIPE_SECRET_KEY:
+        return None
+    try:
+        label_map = {3: "☕ Ein Kaffee", 5: "🍕 Eine Pizza", 10: "🎉 Großes Danke!"}
+        label = label_map.get(amount_eur, f"€{amount_eur} Spende")
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            mode="payment",
+            line_items=[{
+                "price_data": {
+                    "currency": "eur",
+                    "product_data": {"name": f"German Dude Bot — {label}"},
+                    "unit_amount": amount_eur * 100,
+                },
+                "quantity": 1,
+            }],
+            success_url="https://t.me/germandude_bot?start=danke_spende",
+            cancel_url="https://t.me/germandude_bot",
+            metadata={"telegram_id": str(chat_id), "type": "donation",
+                      "amount": str(amount_eur)},
+        )
+        return session.url
+    except Exception as e:
+        log.error(f"Donation checkout failed for {chat_id}: {e}")
+        return None
+
+
+def send_donation_stars_menu(chat_id: int):
+    """Stars-Spendenoptionen senden."""
+    text = "⭐ *Spenden mit Telegram Stars*\n\nWähle einen Betrag:"
+    markup = InlineKeyboardMarkup()
+    markup.row(
+        InlineKeyboardButton("⭐ 75 Stars",  callback_data="donate:stars:75"),
+        InlineKeyboardButton("⭐ 150 Stars", callback_data="donate:stars:150"),
+        InlineKeyboardButton("⭐ 350 Stars", callback_data="donate:stars:350"),
+    )
+    markup.add(InlineKeyboardButton("◀️ Zurück", callback_data="danke:donate"))
+    last_bot_text[chat_id] = text
+    bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
+
+
+def send_donation_stars_invoice(chat_id: int, stars: int):
+    """Stars-Invoice für eine Spende senden."""
+    label_map = {75: "☕ Ein Kaffee", 150: "🍕 Etwas mehr", 350: "🎉 Großes Danke!"}
+    label = label_map.get(stars, f"{stars} Stars Spende")
+    try:
+        bot.send_invoice(
+            chat_id,
+            title=f"German Dude Bot — {label}",
+            description="Danke dass du den German Dude Bot unterstützt! 🙏",
+            payload=f"donation_{chat_id}",
+            provider_token="",
+            currency="XTR",
+            prices=[telebot.types.LabeledPrice(label, stars)],
+        )
+    except Exception as e:
+        log.error(f"Stars donation invoice failed for {chat_id}: {e}")
+        bot.send_message(chat_id, "⚠️ Zahlung konnte nicht gestartet werden. Versuch es später.")
+
+
+def start_feedback_mode(chat_id: int):
+    """Feedback-Modus starten — nächste Textnachricht wird als Feedback gewertet."""
+    uid  = str(chat_id)
+    name = user_data.get(uid, {}).get("name", "")
+    user_state[chat_id] = {"mode": "feedback"}
+    bot.send_message(
+        chat_id,
+        f"💬 Was denkst du{', ' + name if name else ''}?\n\n"
+        "Schreib einfach drauflos — was dir gefällt, was du dir wünschst, "
+        "was dich nervt. Alles ist willkommen! 🙏\n\n"
+        "_Zum Abbrechen: /start_",
+        parse_mode="Markdown"
+    )
+
+
+def handle_feedback_message(chat_id: int, text: str):
+    """Feedback speichern + Admin benachrichtigen."""
+    uid  = str(chat_id)
+    user = user_data.get(uid, {})
+    name = user.get("name", "")
+
+    # Speichern
+    feedback_entry = {
+        "text":      text,
+        "timestamp": datetime.now().isoformat(),
+        "name":      name,
+        "level":     user.get("level", "?"),
+        "premium":   is_premium(chat_id),
+    }
+    user_data[uid].setdefault("feedback", [])
+    user_data[uid]["feedback"].append(feedback_entry)
+    save_users(user_data)
+
+    # Admin benachrichtigen
+    if ADMIN_CHAT_ID:
+        tier = "Plus" if is_premium_plus(chat_id) else ("Premium" if is_premium(chat_id) else "Free")
+        try:
+            bot.send_message(
+                ADMIN_CHAT_ID,
+                f"💬 *Neues Feedback*\n\n"
+                f"Von: {name or 'Unbekannt'} ({uid}) — {tier}, Niveau {user.get('level', '?')}\n\n"
+                f"_{text}_",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            log.warning(f"Could not send feedback to admin: {e}")
+
+    # User danken
+    user_state[chat_id] = {"mode": "idle"}
+    bot.send_message(
+        chat_id,
+        "🙏 Danke für dein Feedback! Das bedeutet mir wirklich viel.\n\n"
+        "Izzi liest alles persönlich — versprochen. 💙"
+    )
+
+
+@bot.message_handler(commands=['danke'])
+def danke_cmd(message):
+    chat_id = message.chat.id
+    ensure_user(chat_id)
+    _track_feature(chat_id, 'danke')
+    send_danke_menu(chat_id)
+
+
 @bot.message_handler(commands=['share'])
 def share_cmd(message):
     chat_id  = message.chat.id
@@ -5387,6 +5565,10 @@ def handle(message):
     if mode in ("ready", "topic_select"):
         # User typed instead of clicking — nudge them
         send_topic_buttons(chat_id)
+        return
+
+    if mode == "feedback":
+        handle_feedback_message(chat_id, text)
         return
 
     if mode == "exercises":
@@ -5903,6 +6085,12 @@ def handle_successful_payment(message):
             "Dein Streak und deine XP sind natürlich noch da.\n\n"
             "Tippe /themen oder fang einfach an zu quatschen!",
             parse_mode="Markdown")
+    elif payload.startswith("donation_"):
+        log.info(f"⭐ Stars donation received from {chat_id}")
+        bot.send_message(chat_id,
+            "⭐ Danke für deine Spende!\n\n"
+            "Das bedeutet wirklich viel und hilft, den Bot am Laufen zu halten. "
+            "Du bist ein Schatz. 🙏💙")
     else:
         user_data[uid]["premium_plus"] = False
         log.info(f"✅ Stars Premium activated: {chat_id}")
@@ -6620,6 +6808,61 @@ Nur diese Zeilen, nichts sonst.""",
         bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
         show_menu(chat_id)
         return
+
+    # ── DANKE / SPENDEN / FEEDBACK ────────────────────────────────────────
+    elif data == "danke:donate":
+        bot.answer_callback_query(call.id)
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        send_donation_menu(chat_id)
+        return
+
+    elif data == "danke:feedback":
+        bot.answer_callback_query(call.id)
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        start_feedback_mode(chat_id)
+        return
+
+    elif data == "danke:back":
+        bot.answer_callback_query(call.id)
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        send_danke_menu(chat_id)
+        return
+
+    elif data.startswith("donate:eur:"):
+        bot.answer_callback_query(call.id, "Zahlung wird vorbereitet...")
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        amount = int(data.split(":")[-1])
+        url = create_donation_checkout(chat_id, amount)
+        if url:
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton(f"💳 Jetzt €{amount} spenden", url=url))
+            markup.add(InlineKeyboardButton("◀️ Zurück", callback_data="danke:donate"))
+            bot.send_message(
+                chat_id,
+                f"☕ *€{amount} Spende* — danke, das ist wunderbar!\n\n"
+                "Klick unten um zur sicheren Zahlungsseite zu kommen. 🔒",
+                parse_mode="Markdown",
+                reply_markup=markup
+            )
+        else:
+            bot.send_message(chat_id,
+                "⚠️ Stripe ist gerade nicht verfügbar. "
+                "Versuch es mit Stars oder später nochmal!")
+        return
+
+    elif data == "donate:stars":
+        bot.answer_callback_query(call.id)
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        send_donation_stars_menu(chat_id)
+        return
+
+    elif data.startswith("donate:stars:"):
+        bot.answer_callback_query(call.id)
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        stars = int(data.split(":")[-1])
+        send_donation_stars_invoice(chat_id, stars)
+        return
+
     else:
         bot.answer_callback_query(call.id)
 
@@ -6778,34 +7021,52 @@ def stripe_webhook():
         customer_id = session.get("customer")
         sub_id      = session.get("subscription")
         plan        = session.get("metadata", {}).get("plan", "standard")
-        if telegram_id and str(telegram_id) in user_data:
-            uid = str(telegram_id)
-            user_data[uid]["premium"]                = True
-            user_data[uid]["stripe_customer_id"]     = customer_id
-            user_data[uid]["stripe_subscription_id"] = sub_id
-            if plan == "plus":
-                user_data[uid]["premium_plus"] = True
-                log.info(f"✅ Premium PLUS activated via Stripe: {telegram_id}")
-                welcome_msg = (
-                    "🎉 *Willkommen im Premium Plus Club!*\n\n"
-                    "Du hast jetzt vollen Zugang — inkl. Quatschen-Modus. 🗣️\n"
-                    "Dein Streak und deine XP sind natürlich noch da.\n\n"
-                    "Tippe /themen oder fang einfach an zu quatschen!"
-                )
-            else:
-                user_data[uid]["premium_plus"] = False
-                log.info(f"✅ Premium activated via Stripe: {telegram_id}")
-                welcome_msg = (
-                    "🎉 *Willkommen im Premium-Club!*\n\n"
-                    "Du hast jetzt vollen Zugriff auf alle Szenarien & Übungen. 💪\n"
-                    "Dein Streak und deine XP sind natürlich noch da.\n\n"
-                    "Tippe /themen um weiterzumachen!"
-                )
-            save_users(user_data)
+        event_type  = session.get("metadata", {}).get("type", "")
+
+        if not telegram_id or str(telegram_id) not in user_data:
+            return jsonify({"ok": True}), 200
+
+        uid = str(telegram_id)
+
+        # ── Spende — kein Premium aktivieren ─────────────────────────────
+        if event_type == "donation":
+            log.info(f"💙 Stripe donation received from {telegram_id}")
             try:
-                bot.send_message(int(telegram_id), welcome_msg, parse_mode="Markdown")
+                name = user_data.get(uid, {}).get("name", "")
+                bot.send_message(int(telegram_id),
+                    f"🙏 Danke für deine Spende{', ' + name if name else ''}! "
+                    "Das bedeutet wirklich viel. 💙")
             except Exception as e:
-                log.warning(f"Could not notify {telegram_id}: {e}")
+                log.warning(f"Could not send donation thanks to {telegram_id}: {e}")
+            return jsonify({"ok": True}), 200
+
+        # ── Premium / Premium Plus aktivieren ─────────────────────────────
+        user_data[uid]["premium"]                = True
+        user_data[uid]["stripe_customer_id"]     = customer_id
+        user_data[uid]["stripe_subscription_id"] = sub_id
+        if plan == "plus":
+            user_data[uid]["premium_plus"] = True
+            log.info(f"✅ Premium PLUS activated via Stripe: {telegram_id}")
+            welcome_msg = (
+                "🎉 *Willkommen im Premium Plus Club!*\n\n"
+                "Du hast jetzt vollen Zugang — inkl. Quatschen-Modus. 🗣️\n"
+                "Dein Streak und deine XP sind natürlich noch da.\n\n"
+                "Tippe /themen oder fang einfach an zu quatschen!"
+            )
+        else:
+            user_data[uid]["premium_plus"] = False
+            log.info(f"✅ Premium activated via Stripe: {telegram_id}")
+            welcome_msg = (
+                "🎉 *Willkommen im Premium-Club!*\n\n"
+                "Du hast jetzt vollen Zugriff auf alle Szenarien & Übungen. 💪\n"
+                "Dein Streak und deine XP sind natürlich noch da.\n\n"
+                "Tippe /themen um weiterzumachen!"
+            )
+        save_users(user_data)
+        try:
+            bot.send_message(int(telegram_id), welcome_msg, parse_mode="Markdown")
+        except Exception as e:
+            log.warning(f"Could not notify {telegram_id}: {e}")
 
     elif event["type"] == "customer.subscription.deleted":
         customer_id = event["data"]["object"].get("customer")
