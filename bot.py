@@ -1407,7 +1407,6 @@ GERMAN_GEMS = [
     "zwei Fliegen mit einer Klappe schlagen",
     "Das Zünglein an der Waage sein",
     "mit allen Wassern gewaschen sein",
-    "Arschgeige",
     "Trittrettfahrer",
     "Schaumschläger",
     "Mauerblümchen",
@@ -1511,7 +1510,6 @@ GERMAN_GEMS = [
     "Lehrjahre sind keine Herrenjahre",
     "Solang das deutsche Reich besteht, wird die Schraube rechts gedreht",
     "Rechts ist da wo der Daumen links ist",
-    "Spinnst du?",
     "ich glaube, ich spinne",
     "ich glaube, mein Schwein pfeifft",
     "wem gehört das hier?",
@@ -1853,10 +1851,11 @@ GERMAN_GEMS = [
     "ich krieg das schon hin",
     "keine Panik auf Titanic",
     "abgemacht",
-    "Teinen Termin vorziehen <-> verschieben",
+    "Einen Termin vorziehen <-> verschieben",
     "etwas unter die Lupe nehmen",
     "du Dummerchen",
     "ach du Scheiße!",
+    "Worauf willst du hinaus? (auf etwas hinauswollen)",
 ]
 
 # Utility functions for German Gems
