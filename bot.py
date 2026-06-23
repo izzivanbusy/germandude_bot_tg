@@ -71,6 +71,7 @@ bot.set_my_commands([
     BotCommand("gem",          "German Gem 💎"),
     BotCommand("share",        "Bot teilen 🤝"),
     BotCommand("danke",        "Danke sagen 🙏"),
+    BotCommand("upgrade",      "Premium / Premium Plus 🚀"),
     BotCommand("restart",      "Chat neu starten"),
     BotCommand("integration",  "Leben in Deutschland 🏛️"),
     BotCommand("support",      "Support 🆘"),
@@ -2697,6 +2698,85 @@ def send_paywall(chat_id):
     )
     last_bot_text[chat_id] = paywall_text
     bot.send_message(chat_id, paywall_text, parse_mode="Markdown", reply_markup=markup)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  /UPGRADE — Tier-bewusster Upgrade-Befehl
+#  Free → Premium oder Premium Plus | Premium → Premium Plus
+# ═══════════════════════════════════════════════════════════════════════════
+
+PREMIUM_VALUES = [
+    "✅ Unbegrenzte Szenarien & Übungen",
+    "✅ Alle Niveaus A1–C2",
+    "✅ Voice-Nachrichten & Übersetzungen",
+    "✅ XP-System, Achievements & Shadowing",
+]
+
+PREMIUM_PLUS_EXTRA_VALUES = [
+    "✅ Alles aus Premium",
+    "✅ Quatschen-Modus unlimitiert — dein KI-Kumpel, 24/7",
+    "✅ Freie Themen, kein Skript, einfach reden",
+]
+
+
+@bot.message_handler(commands=["upgrade"])
+def handle_upgrade(message):
+    """Zeigt tier-passende Upgrade-Optionen mit kurzen Value-Infos."""
+    chat_id = message.chat.id
+    ensure_user(chat_id)
+    if _require_onboarding(chat_id): return
+    _track_feature(chat_id, "upgrade")
+
+    uid  = str(chat_id)
+    name = user_data.get(uid, {}).get("name", "")
+    greet = f"{name}" if name else "du"
+
+    plus_checkout_url     = create_stripe_checkout(chat_id)
+    premium_values_str     = "\n".join(PREMIUM_VALUES)
+    plus_extra_values_str  = "\n".join(PREMIUM_PLUS_EXTRA_VALUES)
+
+    markup = InlineKeyboardMarkup()
+
+    if is_premium_plus(chat_id):
+        # ── Schon im Top-Tier ────────────────────────────────────────────
+        text = (
+            f"👑 Du bist schon ganz oben, {greet}!\n\n"
+            "Premium Plus — alles unlimitiert, inkl. Quatschen-Modus. "
+            "Es gibt nichts mehr zum Upgraden. 🎉\n\n"
+            "Magst du den Bot stattdessen unterstützen? /danke"
+        )
+        bot.send_message(chat_id, text)
+        return
+
+    elif is_premium(chat_id):
+        # ── Premium → Premium Plus ───────────────────────────────────────
+        text = (
+            f"🗣️ Bereit für den nächsten Schritt, {greet}?\n\n"
+            "Du hast schon *Premium* — hier kommt das Upgrade auf *Premium Plus*:\n\n"
+            f"{plus_extra_values_str}\n\n"
+            "💰 *€30/Monat* — du zahlst nur die Differenz zum nächsten Abrechnungsmonat."
+        )
+        markup.add(InlineKeyboardButton("🗣️ Auf Premium Plus upgraden", callback_data="pay_plus"))
+        markup.add(InlineKeyboardButton("⭐ Mit Stars — 2000 Stars", callback_data="pay_stars_plus"))
+
+    else:
+        # ── Free → Premium oder Premium Plus ─────────────────────────────
+        text = (
+            f"🚀 Bereit, mehr aus German Dude rauszuholen, {greet}?\n\n"
+            f"💼 *Premium — €20/Monat*\n{premium_values_str}\n\n"
+            f"🗣️ *Premium Plus — €30/Monat*\n{plus_extra_values_str}\n\n"
+            "_Hast du einen Code? Tippe:_ /freecode DEINCODE"
+        )
+        if plus_checkout_url:
+            markup.add(InlineKeyboardButton("💼 Premium — €20/Monat", url=plus_checkout_url))
+        markup.add(InlineKeyboardButton("⭐ Premium mit Stars — 1500 Stars", callback_data="pay_stars"))
+        markup.add(InlineKeyboardButton("🗣️ Premium Plus — €30/Monat", callback_data="pay_plus"))
+        markup.add(InlineKeyboardButton("⭐ Plus mit Stars — 2000 Stars", callback_data="pay_stars_plus"))
+
+    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+    last_bot_text[chat_id] = text
+    bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  DAILY FREE TIER + TWO-TIER GATE SYSTEM
