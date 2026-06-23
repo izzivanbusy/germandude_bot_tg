@@ -5450,21 +5450,21 @@ def send_daily_gem(chat_id):
         log.error(f"Gem generation failed: {e}")
         typ = "Ausdruck"; bedeutung = ""; uebersetzung = ""; beispiele = []
 
-    lines = ["💎 German Gem des Tages", "", f"🗣 {expression}", typ, ""]
+    lines = ["💎 *German Gem des Tages*", "", f"🗣 *{expression}*", f"_{typ}_", ""]
     if bedeutung:    lines += [f"📖 Bedeutung: {bedeutung}", ""]
     if uebersetzung and native_lang and native_lang.lower() != "none":
         lines += [f"🌍 {native_lang}: {uebersetzung}", ""]
     if beispiele:
         lines.append("Beispiele aus dem echten Leben:")
         for ex in beispiele: lines.append(f"• {ex}")
-    lines += ["", f"✏️ Deine Aufgabe: Schreib einen eigenen Satz mit: {expression}", "Ich überprüfe ihn und gebe dir Feedback. 🙂"]
+    lines += ["", f"✏️ Deine Aufgabe: Schreib oder sprich dein eigenes Beispiel mit: {expression}", "Ich überprüfe es und gebe dir Feedback. 🙂"]
     msg = "\n".join(lines)
     _cid = int(chat_id)
     last_bot_text[_cid] = msg
     user_state[_cid] = {"mode": user_state.get(_cid, {}).get("mode", "idle"), "gem_exercise": expression, "gem_text": expression}
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
-    bot.send_message(_cid, msg, reply_markup=markup)
+    bot.send_message(_cid, msg, parse_mode="Markdown", reply_markup=markup)
 
 
 def check_gem_exercise(chat_id, user_sentence, gem_text):
@@ -6301,8 +6301,13 @@ def handle_voice(message):
 
     # ── GEM EXERCISE CHECK ───────────────────────────────────────────────────
     state = user_state.get(chat_id, {})
-    if state.get("gem_exercise") and text:
-        check_gem_exercise(chat_id, text, state["gem_text"])
+    if state.get("gem_exercise"):
+        user_text = _transcribe_voice(message)
+        if user_text:
+            bot.send_message(chat_id, f"_📝 Du hast gesagt: {user_text}_", parse_mode="Markdown")
+            check_gem_exercise(chat_id, user_text, state["gem_text"])
+        else:
+            bot.send_message(chat_id, "Ich hab dich nicht verstanden 😅 Versuch's nochmal!")
         return
 
     # ── QUATSCHEN MODE ────────────────────────────────────────────────────────
