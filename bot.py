@@ -5567,6 +5567,12 @@ def handle(message):
     chat_id = message.chat.id
     text = message.text
 
+    # Befehle die hier ankommen, wurden von keinem früher registrierten
+    # commands=[...]-Handler erkannt. Statt sie als Chat-Text zu behandeln,
+    # an spätere Handler weiterreichen (z.B. Admin-Befehle weiter unten im File).
+    if text.startswith('/'):
+        return telebot.ContinueHandling()
+
     # Route via state machine
     mode = user_state.get(chat_id, {}).get("mode")
 
