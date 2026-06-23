@@ -18,7 +18,7 @@ import stripe
 import threading
 from flask import Flask, request, jsonify
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 from openai import OpenAI
 from telebot.types import (InlineKeyboardMarkup, InlineKeyboardButton,
@@ -150,7 +150,7 @@ def ensure_user(chat_id):
             "trial_start": None, "premium": False, "trial_code_used": None,
             "stripe_customer_id": None, "stripe_subscription_id": None,
             "premium_plus": False, "premium_plus_until": None,
-            "daily_convos": {},
+            "daily_convos": {}, "voice_push": {},
             # Tracking fields
             "joined": now, "message_count": 0, "paywall_hits": 0,
             "features_used": {}, "conversations_started": 0, "test_completed": False,
@@ -182,6 +182,7 @@ def ensure_user(chat_id):
         user_data[uid].setdefault("premium_plus", False)
         user_data[uid].setdefault("premium_plus_until", None)
         user_data[uid].setdefault("daily_convos", {})
+        user_data[uid].setdefault("voice_push", {})
     # Update activity on every interaction
     user_data[uid]["last_active"] = now
     user_data[uid]["message_count"] = user_data[uid].get("message_count", 0) + 1
@@ -6885,10 +6886,262 @@ Nur diese Zeilen, nichts sonst.""",
         send_donation_stars_invoice(chat_id, stars)
         return
 
+    elif data == "voicepush_quatsch":
+        bot.answer_callback_query(call.id)
+        try:
+            bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        except Exception:
+            pass
+        start_quatschen(chat_id)
+        return
+
     else:
         bot.answer_callback_query(call.id)
 
 # Stripe/webhook disabled for stability — re-enable later
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  VOICE PUSH RETENTION — Premium Plus, 3x/Woche zu zufälliger Zeit
+#  Persönliche Sprachnachricht vom German Dude — Ziel: zurück ins Quatschen.
+#
+#  ZEITZONE: Slots werden in echter Berlin-Zeit (CET/CEST, DST-automatisch)
+#  berechnet und dann als naive UTC gespeichert — konsistent mit dem Rest
+#  des Bots, der von einem UTC-Server (Railway-Standard) ausgeht.
+# ═══════════════════════════════════════════════════════════════════════════
+
+from zoneinfo import ZoneInfo
+BERLIN_TZ = ZoneInfo("Europe/Berlin")
+
+def _now_berlin() -> datetime:
+    """Aktuelle Zeit in Berlin — unabhängig von der Server-Zeitzone korrekt."""
+    return datetime.now(timezone.utc).astimezone(BERLIN_TZ)
+
+def _berlin_to_naive_utc(dt_berlin: datetime) -> datetime:
+    """Wandelt eine Berlin-aware Zeit in naive UTC um (Speicherformat des Bots)."""
+    return dt_berlin.astimezone(timezone.utc).replace(tzinfo=None)
+
+# Push-Fenster: Geschäftszeiten CET/CEST — 09:00 bis 18:00 Berlin-Zeit
+VOICE_PUSH_HOUR_MIN = 9
+VOICE_PUSH_HOUR_MAX = 18
+VOICE_PUSH_PER_WEEK = 3
+
+# Templates OHNE Name — immer verfügbar
+VOICE_PUSH_TEMPLATES_NO_NAME = [
+    "Heyy, na? Lange nichts gehört! Wie geht's dir so?",
+    "Hallo, Freundchen! Ewig nichts gehört von dir. Wie geht's dir überhaupt?",
+    "Hey du! Lebst du noch? Was geht ab?",
+    "Na, wo steckst du denn? Ich hab schon gewartet!",
+    "Hallo hallo! Hast du mich vergessen, oder was?",
+    "Hey du! Schon ne Weile her. Wie läuft's bei dir gerade?",
+    "Na sag mal, was machst du grad so? Lust auf ein kleines Gespräch?",
+    "Hey! Ich hab gerade an dich gedacht. Wie geht's dir?",
+    "Hallo! Bist du noch da, oder hab ich dich verloren?",
+    "Hey du, kleiner Tipp: ich hab Zeit zum Reden, falls du magst!",
+    "Servus! Schon eine Weile ruhig hier. Alles gut bei dir?",
+    "Hallo Fremder! Erkennst du mich noch?",
+    "Hey, was geht? Hab grad Zeit, falls du quatschen willst.",
+    "Na, wie war deine Woche bisher?",
+]
+
+# Templates MIT {name} Platzhalter — nur wenn name bekannt
+VOICE_PUSH_TEMPLATES_WITH_NAME = [
+    "Hey {name}! Lebst du noch? Was geht ab?",
+    "{name}, mein Freund! Zeit für ein bisschen Deutsch, oder?",
+    "Na, {name}! Wird langsam Zeit, dass wir mal wieder quatschen, oder?",
+    "Na, {name}! Wie war deine Woche bisher?",
+    "Hey {name}! Schon ne Weile her. Wie läuft's bei dir gerade?",
+    "{name}! Hab gerade an dich gedacht. Alles gut bei dir?",
+]
+
+# Templates mit {days} — nutzen last_active, nur wenn days >= 3
+VOICE_PUSH_TEMPLATES_WITH_DAYS = [
+    "Hey {name}! Seit {days} Tagen nix von dir gehört. Alles gut bei dir?",
+    "Na, {name}! {days} Tage Funkstille — ich hab mir schon Sorgen gemacht!",
+    "Hallo! Schon {days} Tage her seit wir gequatscht haben. Lust auf eine Runde?",
+]
+
+
+def _voice_push_pick_template(chat_id: int) -> str:
+    """Wählt ein passendes Template basierend auf Name + Inaktivitäts-Dauer."""
+    uid  = str(chat_id)
+    user = user_data.get(uid, {})
+    name = user.get("name", "")
+
+    days_inactive = 0
+    last_active = user.get("last_active")
+    if last_active:
+        try:
+            days_inactive = (datetime.now() - datetime.fromisoformat(last_active)).days
+        except Exception:
+            days_inactive = 0
+
+    pools = [VOICE_PUSH_TEMPLATES_NO_NAME]
+    if name:
+        pools.append(VOICE_PUSH_TEMPLATES_WITH_NAME)
+        if days_inactive >= 3:
+            pools.append(VOICE_PUSH_TEMPLATES_WITH_DAYS)
+
+    pool     = random.choice(pools)
+    template = random.choice(pool)
+    return template.format(name=name or "du", days=days_inactive)
+
+
+def _voice_push_generate_schedule() -> list:
+    """
+    Generiert bis zu 3 zufällige zukünftige Zeitpunkte für die laufende Woche
+    (Mo-So), innerhalb der Geschäftszeiten 09:00-18:00 *Berlin-Zeit*
+    (CET im Winter, CEST im Sommer — automatisch DST-korrekt). Bei späterem
+    Wocheneinstieg (z.B. User wird erst Freitag Premium Plus) gibt's
+    entsprechend weniger Slots.
+    """
+    now_berlin     = _now_berlin()
+    today_midnight = now_berlin.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start     = today_midnight - timedelta(days=now_berlin.weekday())  # Montag 00:00 Berlin
+
+    remaining_days = [
+        week_start + timedelta(days=d)
+        for d in range(7)
+        if (week_start + timedelta(days=d)) >= today_midnight
+    ]
+    num_slots = min(VOICE_PUSH_PER_WEEK, len(remaining_days))
+    if num_slots == 0:
+        return []
+    chosen_days = random.sample(remaining_days, num_slots)
+
+    schedule = []
+    for day in chosen_days:
+        hour      = random.randint(VOICE_PUSH_HOUR_MIN, VOICE_PUSH_HOUR_MAX - 1)
+        minute    = random.randint(0, 59)
+        dt_berlin = day.replace(hour=hour, minute=minute)
+        if dt_berlin <= now_berlin:
+            # Zeitpunkt heute schon vorbei → in den nächsten 30-180 Min ansetzen
+            dt_berlin = now_berlin + timedelta(minutes=random.randint(30, 180))
+        schedule.append(_berlin_to_naive_utc(dt_berlin).isoformat())
+    schedule.sort()
+    return schedule
+
+
+def get_or_create_voice_push_schedule(chat_id: int) -> dict:
+    """Holt den Wochenplan für diesen User, generiert bei Bedarf einen neuen.
+    Die Wochengrenze wird in Berlin-Zeit bestimmt, nicht in Server-Zeit."""
+    uid = str(chat_id)
+    current_week = _now_berlin().strftime("%G-W%V")
+    vp = user_data.get(uid, {}).get("voice_push", {})
+    if vp.get("week") != current_week:
+        vp = {
+            "week":      current_week,
+            "scheduled": _voice_push_generate_schedule(),
+            "sent":      [],
+        }
+        user_data[uid]["voice_push"] = vp
+        save_users(user_data)
+    return vp
+
+
+def send_voice_push(chat_id: int):
+    """Sendet eine personalisierte Voice-Push-Nachricht als echte Sprachnachricht."""
+    text = _voice_push_pick_template(chat_id)
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🗣️ Jetzt quatschen", callback_data="voicepush_quatsch"))
+    try:
+        audio = text_to_speech_stream(text, chat_id)
+        bot.send_voice(chat_id, audio, reply_markup=markup)
+    except Exception as e:
+        log.warning(f"Voice push TTS failed for {chat_id}, sende als Text: {e}")
+        bot.send_message(chat_id, f"🎤 {text}", reply_markup=markup)
+
+
+def broadcast_voice_pushes() -> dict:
+    """
+    Cron-Funktion: prüft für jeden Premium-Plus-User ob ein Push-Slot fällig ist
+    und sendet ihn. Soll alle 15-30 Min via Railway Cron aufgerufen werden.
+    """
+    now = datetime.now()
+    sent, skipped_inactive_session, skipped_not_plus, stale_skipped = 0, 0, 0, 0
+
+    for uid in list(user_data.keys()):
+        try:
+            chat_id = int(uid)
+        except ValueError:
+            continue
+
+        if not is_premium_plus(chat_id):
+            continue  # kein Schedule für Nicht-Plus-User anlegen
+
+        vp = get_or_create_voice_push_schedule(chat_id)
+        scheduled = vp.get("scheduled", [])
+        already_sent = set(vp.get("sent", []))
+
+        for slot in scheduled:
+            if slot in already_sent:
+                continue
+            try:
+                slot_dt = datetime.fromisoformat(slot)
+            except Exception:
+                already_sent.add(slot)
+                continue
+
+            if slot_dt > now:
+                continue  # noch nicht fällig
+
+            # Über 24h überfällig (z.B. nach Downtime) → stillschweigend verwerfen
+            if now - slot_dt > timedelta(hours=24):
+                already_sent.add(slot)
+                stale_skipped += 1
+                continue
+
+            # Nicht stören wenn User mitten in Test/Onboarding/aktiver Session ist
+            mode = user_state.get(chat_id, {}).get("mode")
+            if chat_id in test_state or mode in ("onboarding", "test", "chat", "quatschen"):
+                skipped_inactive_session += 1
+                continue  # Slot bleibt offen, nächster Cron-Tick versucht's erneut
+
+            try:
+                send_voice_push(chat_id)
+                already_sent.add(slot)
+                sent += 1
+                time.sleep(0.2)  # Telegram Flood-Schutz
+            except Exception as e:
+                log.warning(f"Voice push failed for {chat_id}: {e}")
+
+        vp["sent"] = list(already_sent)
+        user_data[uid]["voice_push"] = vp
+
+    save_users(user_data)
+    log.info(
+        f"Voice push run: {sent} gesendet, "
+        f"{skipped_inactive_session} wegen aktiver Session verschoben, "
+        f"{stale_skipped} als überfällig verworfen"
+    )
+    return {
+        "sent": sent,
+        "deferred_active_session": skipped_inactive_session,
+        "stale_dropped": stale_skipped,
+    }
+
+
+@bot.message_handler(commands=["sendvoicepushes"])
+def handle_broadcast_voice_pushes(message):
+    """Admin-only: manuell einen Voice-Push-Check auslösen."""
+    if ADMIN_CHAT_ID and message.chat.id != ADMIN_CHAT_ID:
+        return
+    bot.send_message(message.chat.id, "📤 Prüfe fällige Voice Pushes...")
+    result = broadcast_voice_pushes()
+    bot.send_message(
+        message.chat.id,
+        f"✅ {result['sent']} Voice Pushes gesendet\n"
+        f"⏸ {result['deferred_active_session']} verschoben (User aktiv)\n"
+        f"🗑 {result['stale_dropped']} verworfen (>24h überfällig)"
+    )
+
+
+@bot.message_handler(commands=["testvoicepush"])
+def handle_test_voice_push(message):
+    """Admin-only: Vorschau eines Voice Push an sich selbst, ohne Schedule zu beeinflussen."""
+    if ADMIN_CHAT_ID and message.chat.id != ADMIN_CHAT_ID:
+        return
+    send_voice_push(message.chat.id)
 
 
 @bot.message_handler(commands=["broadcastgems"])
@@ -7024,6 +7277,19 @@ def send_gems_endpoint():
         return jsonify({"ok": True, "sent": sent}), 200
     except Exception as e:
         log.error(f"Gem broadcast error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@flask_app.route("/send_voice_pushes", methods=["POST"])
+def send_voice_pushes_endpoint():
+    """Alle 15-30 Min via Railway Cron aufrufen. Prüft fällige Slots und sendet sie."""
+    auth = request.headers.get("X-Cron-Secret", "")
+    if auth != CRON_SECRET:
+        return jsonify({"error": "unauthorized"}), 401
+    try:
+        result = broadcast_voice_pushes()
+        return jsonify({"ok": True, **result}), 200
+    except Exception as e:
+        log.error(f"Voice push broadcast error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @flask_app.route("/stripe_webhook", methods=["POST"])
