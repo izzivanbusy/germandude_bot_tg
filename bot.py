@@ -5530,7 +5530,7 @@ def send_daily_gem(chat_id):
         log.error(f"Gem generation failed: {e}")
         typ = "Ausdruck"; bedeutung = ""; uebersetzung = ""; beispiele = []
 
-    lines = ["💎 *German Gem des Tages*", "", f"🗣 *{expression}*", f"_{typ}_", ""]
+    lines = ["💎 *German Gem des Tages*", "", f"🗣 *{expression}* · _{typ}_", ""]
     if bedeutung:    lines += [f"📖 Bedeutung: {bedeutung}", ""]
     if uebersetzung and native_lang and native_lang.lower() != "none":
         lines += [f"🌍 {native_lang}: {uebersetzung}", ""]
