@@ -3699,46 +3699,31 @@ def handle_onboarding(chat_id, text):
         lang = user_data[str(chat_id)].get("native_language", "English")
         name = user_data[str(chat_id)].get("name", "")
 
-        # Übersetzen hint in their language
+        # Welcome message in their language + go straight to topics
         try:
-            hint_resp = claude.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=80,
-                system="Reply with exactly one sentence only, no quotes, no extra text.",
-                messages=[{"role": "user", "content": (
-                    f"Write exactly 1 short friendly sentence in {lang} telling the user: "
-                    f"'Whenever you need a translation, just tap the übersetzen button.' "
-                    f"Informal tone."
-                )}]
-            )
-            lang_note = hint_resp.content[0].text.strip()
-            bot.send_message(chat_id, f"💬 {lang_note}")
-        except Exception:
-            pass
-
-        # Level test intro in their language
-        try:
-            test_resp = claude.messages.create(
+            welcome_resp = claude.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=120,
                 system="Reply with a short message only, no quotes, no extra text.",
                 messages=[{"role": "user", "content": (
-                    f"Write a short friendly message in {lang} to {name} saying: "
-                    f"'Let me quickly check your German level — 10 questions, 1 minute, no stress! Ready?' "
+                    f"Write a short warm welcome message in {lang} to {name} saying: "
+                    f"'Welcome! I will help you practice German through real conversations. "
+                    f"Pick a topic below and let's start! "
+                    f"Tip: tap the übersetzen button anytime for a translation.' "
                     f"Informal tone. Use 1-2 emojis."
                 )}]
             )
-            test_intro = test_resp.content[0].text.strip()
+            welcome_msg = welcome_resp.content[0].text.strip()
         except Exception:
-            test_intro = (
-                f"Nice, {name}! 🙌 Let me check your German level.\n"
-                "10 questions — 1 minute — no stress 😊\n\nReady?"
+            welcome_msg = (
+                f"Welcome, {name}! 🎉 I'll help you practice German through real conversations.\n\n"
+                "💬 Tip: tap the übersetzen button anytime for a translation.\n\n"
+                "Pick a topic below and let's go! 👇"
             )
 
-        user_state[chat_id] = {"mode": "test"}
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("📊 Start Level Check", callback_data="start_test"))
-        bot.send_message(chat_id, test_intro, reply_markup=markup)
+        user_state[chat_id] = {"mode": "menu"}
+        bot.send_message(chat_id, welcome_msg, reply_markup=ReplyKeyboardRemove())
+        send_topic_buttons(chat_id)
 
 def send_voice_intro(chat_id):
     bot.send_message(chat_id,
