@@ -3538,15 +3538,18 @@ def start(message):
         send_topic_buttons(chat_id)
         return
 
-    # New user — full onboarding
-    user_state[chat_id] = {"mode": "onboarding", "step": "name"}
+    # New user — full onboarding — language first
+    user_state[chat_id] = {"mode": "onboarding", "step": "native_language"}
     test_state.pop(chat_id, None)
     user_step.pop(chat_id, None)
 
     bot.send_message(chat_id,
-        "Hallo! Ich bin dein deutscher Kumpel! 🇩🇪😄\n"
-        "Ich werde dein Deutsch boosten — bald sprichst du wie ein Muttersprachler.\n\n"
-        "Aber erstmal... wie heißt du? So werde ich dich nennen! ☺️",
+        "🇩🇪 Hello! I'm GermanDude — your AI German companion.\n\n"
+        "🌍 What's your native language?\n"
+        "Какой ваш родной язык? / ¿Cuál es tu idioma?\n"
+        "Ana dilin nedir? / ما لغتك الأم؟\n"
+        "Qual é sua língua nativa? / Jaka jest twoja ojczyzna?\n\n"
+        "👇 Just type it below!",
         reply_markup=ReplyKeyboardRemove())
 
 # GOAL SELECTION
@@ -3617,80 +3620,125 @@ def send_goal_buttons(chat_id):
     markup.row(KeyboardButton("💼 Job"))
     bot.send_message(chat_id, "👉 Wofür brauchst du Deutsch?", reply_markup=markup)
 
-def send_gender_buttons(chat_id):
+def send_gender_buttons(chat_id, question="👇 Select your gender:"):
     markup = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.row(
-        KeyboardButton("männlich 👨🏻"),
-        KeyboardButton("weiblich 👩🏽‍💼"),
-        KeyboardButton("divers 😌")
+        KeyboardButton("👨 Male"),
+        KeyboardButton("👩 Female"),
+        KeyboardButton("🌈 Other")
     )
-    bot.send_message(chat_id,
-        "Ich bin ein Mann. Und du? Wähle dein Geschlecht 👇",
-        reply_markup=markup)
+    bot.send_message(chat_id, question, reply_markup=markup)
 
 GENDER_MAP = {
-    "männlich 👨🏻": "männlich",
-    "weiblich 👩🏽‍💼": "weiblich",
-    "divers 😌": "divers",
+    "👨 Male":   "männlich",
+    "👩 Female": "weiblich",
+    "🌈 Other":  "divers",
 }
 
 def handle_onboarding(chat_id, text):
     state = user_state[chat_id]
     step  = state.get("step")
 
-    if step == "name":
+    if step == "native_language":
+        lang = text.strip()
+        user_data[str(chat_id)]["native_language"] = lang
+        save_users(user_data)
+        state["step"] = "name"
+
+        # Ask for name in their language
+        try:
+            resp = claude.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=80,
+                system="You are a friendly bot. Reply with exactly one sentence only, no quotes, no extra text.",
+                messages=[{"role": "user", "content": (
+                    f"Write exactly 1 short friendly question in {lang} asking the user their name "
+                    f"(tell them this is what the bot will call them). "
+                    f"Informal tone. End with a 😊 emoji."
+                )}]
+            )
+            name_question = resp.content[0].text.strip()
+        except Exception:
+            name_question = "What's your name? 😊"
+
+        bot.send_message(chat_id, name_question, reply_markup=ReplyKeyboardRemove())
+
+    elif step == "name":
         name = text.strip()
         user_data[str(chat_id)]["name"] = name
         save_users(user_data)
+        lang = user_data[str(chat_id)].get("native_language", "English")
         state["step"] = "gender"
-        send_gender_buttons(chat_id)
+
+        # Ask for gender in their language
+        try:
+            resp = claude.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=80,
+                system="You are a friendly bot. Reply with exactly one sentence only, no quotes, no extra text.",
+                messages=[{"role": "user", "content": (
+                    f"Write exactly 1 short friendly sentence in {lang} greeting {name} "
+                    f"and asking them to choose their gender using the buttons below. "
+                    f"Informal tone. Use 1 emoji."
+                )}]
+            )
+            gender_question = resp.content[0].text.strip()
+        except Exception:
+            gender_question = f"Nice to meet you, {name}! 👋 What's your gender?"
+
+        send_gender_buttons(chat_id, question=gender_question)
 
     elif step == "gender":
         if text.strip() not in GENDER_MAP:
-            bot.send_message(chat_id, "Klick einfach auf einen der Buttons 🙂")
+            bot.send_message(chat_id, "👇 Please tap one of the buttons!")
             return
         gender = GENDER_MAP[text.strip()]
         user_data[str(chat_id)]["gender"] = gender
         save_users(user_data)
-        state["step"] = "native_language"
-        bot.send_message(chat_id,
-            "Meine Muttersprache ist Deutsch. Und deine? \n\nSchreibe einfach in den Chat! 🌍",
-            reply_markup=ReplyKeyboardRemove())
 
-    elif step == "native_language":
-        lang = text.strip()
-        user_data[str(chat_id)]["native_language"] = lang
-        save_users(user_data)
+        lang = user_data[str(chat_id)].get("native_language", "English")
         name = user_data[str(chat_id)].get("name", "")
 
-        # Send a short welcome note in the user's native language via GPT
+        # Übersetzen hint in their language
         try:
-            welcome_resp = claude.messages.create(
+            hint_resp = claude.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=120,
+                max_tokens=80,
+                system="Reply with exactly one sentence only, no quotes, no extra text.",
                 messages=[{"role": "user", "content": (
                     f"Write exactly 1 short friendly sentence in {lang} telling the user: "
-                    f"'Whenever you need a translation of my last message, just tap the übersetzen button.' "
-                    f"Use informal tone. Only the sentence, no quotes, no extra text."
+                    f"'Whenever you need a translation, just tap the übersetzen button.' "
+                    f"Informal tone."
                 )}]
             )
-            lang_note = welcome_resp.content[0].text.strip()
+            lang_note = hint_resp.content[0].text.strip()
             bot.send_message(chat_id, f"💬 {lang_note}")
         except Exception:
-            pass  # if translation fails, just skip
+            pass
 
-        # Skip goal selection — go straight to level test
+        # Level test intro in their language
+        try:
+            test_resp = claude.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=120,
+                system="Reply with a short message only, no quotes, no extra text.",
+                messages=[{"role": "user", "content": (
+                    f"Write a short friendly message in {lang} to {name} saying: "
+                    f"'Let me quickly check your German level — 10 questions, 1 minute, no stress! Ready?' "
+                    f"Informal tone. Use 1-2 emojis."
+                )}]
+            )
+            test_intro = test_resp.content[0].text.strip()
+        except Exception:
+            test_intro = (
+                f"Nice, {name}! 🙌 Let me check your German level.\n"
+                "10 questions — 1 minute — no stress 😊\n\nReady?"
+            )
+
         user_state[chat_id] = {"mode": "test"}
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("📊 Level-Check starten", callback_data="start_test"))
-        bot.send_message(chat_id,
-            f"Nice, {name}! 🙌 Dann wissen wir Bescheid.\n\n"
-            "Lass mich kurz checken, wie gut dein Deutsch schon ist.\n"
-            "10 Fragen — 1 Minute — kein Stress 😊\n\n"
-            "👉 Bereit?",
-            parse_mode="Markdown",
-            reply_markup=markup
-        )
+        markup.add(InlineKeyboardButton("📊 Start Level Check", callback_data="start_test"))
+        bot.send_message(chat_id, test_intro, reply_markup=markup)
 
 def send_voice_intro(chat_id):
     bot.send_message(chat_id,
@@ -4933,11 +4981,14 @@ def do_full_reset(chat_id):
     user_data[uid]["stripe_subscription_id"] = _stripe_subscription_id
     save_users(user_data)
 
-    user_state[chat_id] = {"mode": "onboarding", "step": "name"}
+    user_state[chat_id] = {"mode": "onboarding", "step": "native_language"}
     bot.send_message(chat_id,
-        "Hallo! Ich bin dein deutscher Kumpel! 🇩🇪😄\n"
-        "Ich werde dein Deutsch boosten — bald sprichst du wie ein Muttersprachler.\n\n"
-        "Aber erstmal... wie heißt du? So werde ich dich nennen! ☺️",
+        "🇩🇪 Hello! I'm GermanDude — your AI German companion.\n\n"
+        "🌍 What's your native language?\n"
+        "Какой ваш родной язык? / ¿Cuál es tu idioma?\n"
+        "Ana dilin nedir? / ما لغتك الأم؟\n"
+        "Qual é sua língua nativa? / Jaka jest twoja ojczyzna?\n\n"
+        "👇 Just type it below!",
         reply_markup=ReplyKeyboardRemove())
 
 # ─────────────────────────────────────────────
@@ -6875,8 +6926,12 @@ Nur diese Zeilen, nichts sonst.""",
     if data == "restart_onboarding":
         bot.answer_callback_query(call.id)
         ensure_user(chat_id)
-        user_state[chat_id] = {"mode": "onboarding", "step": "name"}
-        bot.send_message(chat_id, "👋 Wie heißt du?")
+        user_state[chat_id] = {"mode": "onboarding", "step": "native_language"}
+        bot.send_message(chat_id,
+            "🌍 What's your native language?\n"
+            "Какой ваш родной язык? / ¿Cuál es tu idioma?\n"
+            "Ana dilin nedir? / ما لغتك الأم؟\n\n"
+            "👇 Just type it below!")
         return
 
     if data == "start_chat":
