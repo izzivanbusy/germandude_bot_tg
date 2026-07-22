@@ -3710,28 +3710,31 @@ def handle_onboarding(chat_id, text):
                 system="Write only the message text. No quotes, no preamble, no extra explanation.",
                 messages=[{"role": "user", "content": (
                     f"Write a short, punchy message in {lang} to {name or 'the user'}. "
-                    f"Informal tone. Max 6 lines. Use 2-3 emojis max.\n\n"
-                    f"Hit these points in this order:\n"
+                    f"Informal tone. Max 10 lines. Use 3-4 emojis max.\n\n"
+                    f"Structure it like this:\n"
                     f"1. Address the fear/pain: many people already KNOW German but are too scared to speak it. "
                     f"Or they freeze when a German speaks to them.\n"
                     f"2. The solution: now they have a native German speaker as a personal friend in their pocket — "
                     f"available 24/7, no judgment, always patient.\n"
-                    f"3. The promise: just 10-20 minutes a day talking with me, "
-                    f"and speaking German will feel natural — fast.\n"
-                    f"4. End with one punchy line like 'Let's go.' or 'Pick a topic.' — "
-                    f"action-oriented, no fluff.\n\n"
+                    f"3. A concrete timeline — make it feel real and achievable:\n"
+                    f"   - In 4 weeks: they stop panicking in conversations, basic replies flow naturally\n"
+                    f"   - In 3 months: they handle everyday situations confidently — Ämter, colleagues, friends\n"
+                    f"   - In 1 year: almost native speaker level, Germans ask where they learned so well 😄\n"
+                    f"4. End with one punchy action line like 'Los geht's.' or 'Pick a topic.' — no fluff.\n\n"
                     f"Do NOT say 'AI', 'bot', 'app', or 'chatbot'. "
-                    f"Write as if I am a real German friend texting them."
+                    f"Write as if I am a real German friend texting them. "
+                    f"The timeline should feel exciting, not like a language course brochure."
                 )}]
             )
             pitch_msg = pitch_resp.content[0].text.strip()
         except Exception:
             pitch_msg = (
-                f"Kennst du das? Du lernst Deutsch, aber wenn ein Deutscher mit dir spricht — "
-                f"Blackout. 😅\n\n"
-                f"Jetzt hast du einen Muttersprachler als Kumpel in deiner Tasche. "
-                f"Immer da, kein Urteilen, kein Stress.\n\n"
-                f"10–20 Minuten am Tag mit mir — und Deutsch spricht sich bald wie von selbst.\n\n"
+                f"Kennst du das? Du lernst Deutsch, aber wenn ein Echter mit dir spricht — Blackout. 😅\n\n"
+                f"Ab jetzt hast du einen Muttersprachler als Kumpel in der Tasche. "
+                f"Immer da, kein Urteilen, kein Stress. Einfach reden.\n\n"
+                f"📅 In 4 Wochen: kein Panik mehr — einfache Antworten kommen von alleine.\n"
+                f"📅 In 3 Monaten: Ämter, Kollegen, Freunde — du meisterst den Alltag auf Deutsch.\n"
+                f"📅 In 1 Jahr: fast Muttersprachler. Deutsche fragen dich, wo du so gut gelernt hast. 😄\n\n"
                 f"Los geht's. 👇"
             )
 
