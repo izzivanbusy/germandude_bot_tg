@@ -3702,30 +3702,41 @@ def handle_onboarding(chat_id, text):
         lang = user_data[str(chat_id)].get("native_language", "English")
         name = user_data[str(chat_id)].get("name", "")
 
-        # Welcome message in their language + go straight to topics
+        # Punchy pitch in native language — pain points + value promise
         try:
-            welcome_resp = claude.messages.create(
+            pitch_resp = claude.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=120,
-                system="Reply with a short message only, no quotes, no extra text.",
+                max_tokens=220,
+                system="Write only the message text. No quotes, no preamble, no extra explanation.",
                 messages=[{"role": "user", "content": (
-                    f"Write a short warm welcome message in {lang} to {name} saying: "
-                    f"'Welcome! I will help you practice German through real conversations. "
-                    f"Pick a topic below and let's start! "
-                    f"Tip: tap the übersetzen button anytime for a translation.' "
-                    f"Informal tone. Use 1-2 emojis."
+                    f"Write a short, punchy message in {lang} to {name or 'the user'}. "
+                    f"Informal tone. Max 6 lines. Use 2-3 emojis max.\n\n"
+                    f"Hit these points in this order:\n"
+                    f"1. Address the fear/pain: many people already KNOW German but are too scared to speak it. "
+                    f"Or they freeze when a German speaks to them.\n"
+                    f"2. The solution: now they have a native German speaker as a personal friend in their pocket — "
+                    f"available 24/7, no judgment, always patient.\n"
+                    f"3. The promise: just 10-20 minutes a day talking with me, "
+                    f"and speaking German will feel natural — fast.\n"
+                    f"4. End with one punchy line like 'Let's go.' or 'Pick a topic.' — "
+                    f"action-oriented, no fluff.\n\n"
+                    f"Do NOT say 'AI', 'bot', 'app', or 'chatbot'. "
+                    f"Write as if I am a real German friend texting them."
                 )}]
             )
-            welcome_msg = welcome_resp.content[0].text.strip()
+            pitch_msg = pitch_resp.content[0].text.strip()
         except Exception:
-            welcome_msg = (
-                f"Welcome, {name}! 🎉 I'll help you practice German through real conversations.\n\n"
-                "💬 Tip: tap the übersetzen button anytime for a translation.\n\n"
-                "Pick a topic below and let's go! 👇"
+            pitch_msg = (
+                f"Kennst du das? Du lernst Deutsch, aber wenn ein Deutscher mit dir spricht — "
+                f"Blackout. 😅\n\n"
+                f"Jetzt hast du einen Muttersprachler als Kumpel in deiner Tasche. "
+                f"Immer da, kein Urteilen, kein Stress.\n\n"
+                f"10–20 Minuten am Tag mit mir — und Deutsch spricht sich bald wie von selbst.\n\n"
+                f"Los geht's. 👇"
             )
 
         user_state[chat_id] = {"mode": "menu"}
-        bot.send_message(chat_id, welcome_msg, reply_markup=ReplyKeyboardRemove())
+        bot.send_message(chat_id, pitch_msg, reply_markup=ReplyKeyboardRemove())
         send_topic_buttons(chat_id)
 
 def send_voice_intro(chat_id):
