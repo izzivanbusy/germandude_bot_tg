@@ -5234,102 +5234,151 @@ def restart_cmd(message):
 
 @bot.message_handler(commands=["adminstats"])
 def handle_adminstats(message):
-    """Admin-only: show bot statistics."""
+    """Admin-only: funnel dropout analysis + core stats."""
     if message.chat.id != ADMIN_CHAT_ID:
-        return  # silent ignore
+        return
 
-    from datetime import timedelta
     now   = datetime.now()
     users = load_users()
+    total = len(users)
+    if total == 0:
+        bot.send_message(message.chat.id, "Noch keine User.")
+        return
 
-    total        = len(users)
-    premium      = sum(1 for u in users.values() if u.get("premium"))
-    trial_active = 0
-    for uid, u in users.items():
+    # ── Tier-Übersicht ──────────────────────────────────────────────────────
+    n_plus    = sum(1 for u in users.values() if u.get("premium_plus"))
+    n_premium = sum(1 for u in users.values() if u.get("premium") and not u.get("premium_plus"))
+    n_trial   = 0
+    for u in users.values():
         if not u.get("premium") and u.get("trial_start") and u.get("trial_code_used"):
-            ts   = u["trial_start"]
-            days = TRIAL_CODES.get(u["trial_code_used"], 3) if isinstance(TRIAL_CODES.get(u.get("trial_code_used","")), int) else 3
-            if (now - datetime.fromisoformat(ts)).days < days:
-                trial_active += 1
-    free = total - premium - trial_active
+            days = TRIAL_CODES.get(u.get("trial_code_used", ""), 3)
+            if isinstance(days, int) and (now - datetime.fromisoformat(u["trial_start"])).days < days:
+                n_trial += 1
+    n_free = total - n_plus - n_premium - n_trial
 
-    # Activity
-    active_7d  = sum(1 for u in users.values()
-                     if u.get("last_active") and
-                     (now - datetime.fromisoformat(u["last_active"])).days <= 7)
-    active_30d = sum(1 for u in users.values()
-                     if u.get("last_active") and
-                     (now - datetime.fromisoformat(u["last_active"])).days <= 30)
-    inactive   = sum(1 for u in users.values()
-                     if not u.get("last_active") or
-                     (now - datetime.fromisoformat(u["last_active"])).days > 30)
+    # ── Funnel-Stufen ───────────────────────────────────────────────────────
+    # Stufe 1 — Joined (= alle)
+    f_joined = total
 
-    # Funnel
-    paywall_seen = sum(1 for u in users.values() if u.get("paywall_hits", 0) > 0)
-    conversion   = f"{premium/paywall_seen*100:.0f}%" if paywall_seen else "n/a"
+    # Stufe 2 — Onboarding komplett (Name + Sprache + Ziel gesetzt)
+    f_onboarded = sum(1 for u in users.values()
+                      if u.get("name") and u.get("native_language") and u.get("goal"))
 
-    # Languages
+    # Stufe 3 — Mindestens 1 Gespräch geführt
+    f_talked = sum(1 for u in users.values() if u.get("conversations_started", 0) >= 1)
+
+    # Stufe 4 — Wiederkehrender User (3+ Gespräche)
+    f_retained = sum(1 for u in users.values() if u.get("conversations_started", 0) >= 3)
+
+    # Stufe 5 — Paywall gesehen
+    f_paywall = sum(1 for u in users.values() if u.get("paywall_hits", 0) > 0)
+
+    # Stufe 6 — Konvertiert (Premium oder Plus)
+    f_converted = n_premium + n_plus
+
+    def pct(a, b):
+        return f"{a/b*100:.0f}%" if b else "–"
+
+    # ── Dropout-Analyse ─────────────────────────────────────────────────────
+    # Wo verlieren wir die meisten User?
+    drop_onboarding = f_joined  - f_onboarded  # Abbruch beim Onboarding
+    drop_first_conv = f_onboarded - f_talked    # Abbruch nach Onboarding, vor erstem Gespräch
+    drop_retention  = f_talked  - f_retained    # Einmal geschaut, nie wiedergekommen
+    drop_paywall    = f_paywall - f_converted   # Paywall gesehen, nicht konvertiert
+
+    # ── Aktivität ───────────────────────────────────────────────────────────
+    def days_since(u):
+        la = u.get("last_active")
+        if not la: return 9999
+        try: return (now - datetime.fromisoformat(la)).days
+        except: return 9999
+
+    active_1d  = sum(1 for u in users.values() if days_since(u) <= 1)
+    active_7d  = sum(1 for u in users.values() if days_since(u) <= 7)
+    active_30d = sum(1 for u in users.values() if days_since(u) <= 30)
+    churned    = sum(1 for u in users.values() if days_since(u) > 30)
+
+    total_convos = sum(u.get("conversations_started", 0) for u in users.values())
+    avg_convos   = f"{total_convos / total:.1f}" if total else "–"
+
+    # ── Voice Push (Premium Plus Retention) ─────────────────────────────────
+    current_week = now.strftime("%G-W%V")
+    vp_scheduled = sum(1 for u in users.values()
+                       if u.get("voice_push", {}).get("week") == current_week
+                       and len(u.get("voice_push", {}).get("scheduled", [])) > 0)
+    vp_sent_week = sum(len(u.get("voice_push", {}).get("sent", []))
+                       for u in users.values()
+                       if u.get("voice_push", {}).get("week") == current_week)
+
+    # ── Top Sprachen ─────────────────────────────────────────────────────────
     langs = {}
     for u in users.values():
-        lang = u.get("native_language") or "Unbekannt"
-        langs[lang] = langs.get(lang, 0) + 1
+        l = u.get("native_language") or "–"
+        langs[l] = langs.get(l, 0) + 1
     top_langs = sorted(langs.items(), key=lambda x: -x[1])[:5]
 
-    # Levels
-    levels = {}
-    for u in users.values():
-        lvl = u.get("level", "A2")
-        levels[lvl] = levels.get(lvl, 0) + 1
-
-    # Features
+    # ── Top Features ─────────────────────────────────────────────────────────
     features = {}
     for u in users.values():
         for feat, cnt in u.get("features_used", {}).items():
             features[feat] = features.get(feat, 0) + cnt
     top_features = sorted(features.items(), key=lambda x: -x[1])[:6]
 
-    # Test completion
-    test_done = sum(1 for u in users.values() if u.get("test_completed"))
-    test_not  = total - test_done
+    # ── Feedback-Einträge ────────────────────────────────────────────────────
+    n_feedback = sum(len(u.get("feedback", [])) for u in users.values())
 
+    # ── Output ───────────────────────────────────────────────────────────────
     lines = [
-        "📊 German Dude Bot — Stats",
+        "📊 *German Dude — Stats & Funnel*",
         "",
-        f"👥 User gesamt: {total}",
-        f"✅ Premium: {premium}",
-        f"⏳ Trial aktiv: {trial_active}",
-        f"🔒 Free: {free}",
+        "👥 *User-Übersicht*",
+        f"   Gesamt: {total}",
+        f"   👑 Premium Plus: {n_plus}",
+        f"   💼 Premium: {n_premium}",
+        f"   ⏳ Trial: {n_trial}",
+        f"   🔓 Free: {n_free}",
         "",
-        f"📈 Aktiv letzte 7 Tage: {active_7d}",
-        f"📅 Aktiv letzte 30 Tage: {active_30d}",
-        f"😴 Inaktiv (30+ Tage): {inactive}",
+        "🔽 *Funnel — wo springen sie ab?*",
+        f"   Joined:            {f_joined}",
+        f"   Onboarding fertig: {f_onboarded} ({pct(f_onboarded, f_joined)})",
+        f"   1. Gespräch:       {f_talked} ({pct(f_talked, f_onboarded)})",
+        f"   3+ Gespräche:      {f_retained} ({pct(f_retained, f_talked)})",
+        f"   Paywall gesehen:   {f_paywall}",
+        f"   Konvertiert:       {f_converted} ({pct(f_converted, f_paywall)})",
         "",
-        f"💳 Paywall-Funnel:",
-        f"   Paywall gesehen: {paywall_seen}",
-        f"   Davon Premium: {premium} ({conversion})",
+        "⚠️ *Größte Dropouts*",
+        f"   Beim Onboarding:    -{drop_onboarding}",
+        f"   Vor 1. Gespräch:    -{drop_first_conv}",
+        f"   Nach 1. Gespräch:   -{drop_retention}  ← Einmal & weg",
+        f"   An der Paywall:     -{drop_paywall}",
         "",
-        "🌍 Top Sprachen:",
+        "📅 *Aktivität*",
+        f"   Heute aktiv:    {active_1d}",
+        f"   Letzte 7 Tage:  {active_7d}",
+        f"   Letzte 30 Tage: {active_30d}",
+        f"   Abgesprungen:   {churned}  (30+ Tage inaktiv)",
+        f"   ⌀ Gespräche/User: {avg_convos}",
+        "",
+        "🎤 *Voice Pushes (diese Woche)*",
+        f"   Plus-User mit Schedule: {vp_scheduled}",
+        f"   Pushes gesendet:        {vp_sent_week}",
+        "",
+        "🌍 *Top Sprachen*",
     ]
     for lang, cnt in top_langs:
         lines.append(f"   {lang}: {cnt}")
 
-    lines += ["", "🎯 Level-Verteilung:"]
-    for lvl in ["A1","A2","B1","B2","C1","C2"]:
-        cnt = levels.get(lvl, 0)
-        if cnt: lines.append(f"   {lvl}: {cnt}")
-
     if top_features:
-        lines += ["", "🔥 Top Features:"]
+        lines += ["", "🔥 *Top Features*"]
         for feat, cnt in top_features:
-            lines.append(f"   /{feat}: {cnt}x")
+            lines.append(f"   /{feat}: {cnt}×")
 
     lines += [
         "",
-        f"📝 Test abgeschlossen: {test_done}",
-        f"⚠️  Test nie gemacht: {test_not}",
+        f"💬 Feedback-Einträge gesamt: {n_feedback}",
     ]
 
-    bot.send_message(message.chat.id, "\n".join(lines))
+    bot.send_message(message.chat.id, "\n".join(lines), parse_mode="Markdown")
 
 
 KULTUR_TOPICS = [
