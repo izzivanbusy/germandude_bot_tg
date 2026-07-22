@@ -1351,7 +1351,7 @@ Ton: warm, direkt, kein Motivational-Kitsch. Jede Zeile muss Substanz haben.
     cta_text = (
         f"🎤 *So geht's:*\n\n"
         f"Du sprichst — ich antworte. Wie ein echtes Gespräch.\n\n"
-        f"Du hast *{FREE_DAILY_LIMIT} kostenlose Gespräche täglich* — "
+        f"Du hast *{FREE_DAILY_LIMIT} kostenloses Gespräch täglich* — "
         f"Szenarien und Quatschen-Modus inklusive. Kein Code nötig.\n\n"
         f"📱 _{voice_hint}_\n\nBereit? 👇"
     )
@@ -2785,7 +2785,7 @@ def handle_upgrade(message):
 #  Premium Plus (€30): Alles unlimitiert inkl. Quatschen
 # ═══════════════════════════════════════════════════════════════════════════
 
-FREE_DAILY_LIMIT = 3
+FREE_DAILY_LIMIT = 1
 
 def _get_today() -> str:
     return datetime.now().strftime("%Y-%m-%d")
@@ -2810,7 +2810,7 @@ def has_free_convos_remaining(chat_id: int) -> bool:
     return get_daily_convo_count(chat_id) < FREE_DAILY_LIMIT
 
 def gate_scenario(chat_id: int) -> bool:
-    """Gate für Szenarien. Premium/Plus → immer rein. Free → bis 3/Tag."""
+    """Gate für Szenarien. Premium/Plus → immer rein. Free → 1/Tag."""
     if is_premium(chat_id):
         return True
     if has_free_convos_remaining(chat_id):
@@ -2820,7 +2820,7 @@ def gate_scenario(chat_id: int) -> bool:
 
 def gate_quatschen(chat_id: int) -> bool:
     """Gate für Quatschen-Modus.
-    Plus → immer rein. Regular Premium → Upgrade-Prompt. Free → bis 3/Tag."""
+    Plus → immer rein. Regular Premium → Upgrade-Prompt. Free → 1/Tag."""
     if is_premium_plus(chat_id):
         return True
     if is_premium(chat_id):  # Premium aber kein Plus
@@ -2832,7 +2832,7 @@ def gate_quatschen(chat_id: int) -> bool:
     return False
 
 def send_daily_limit_paywall(chat_id: int):
-    """Paywall nach 3 kostenlosen Gesprächen."""
+    """Paywall nach 1 kostenlosem Gespräch."""
     uid    = str(chat_id)
     user   = user_data.get(uid, {})
     name   = user.get("name", "")
@@ -2848,10 +2848,10 @@ def send_daily_limit_paywall(chat_id: int):
     if streak > 1:
         xp_line += f" und einen *{streak}-Tage-Streak*"
     text = (
-        f"🔒 Alle *{FREE_DAILY_LIMIT} kostenlosen Gespräche* für heute genutzt"
+        f"🔒 Dein *kostenloses Gespräch* für heute ist genutzt"
         f"{', ' + name if name else ''}!\n\n"
         f"{xp_line} — schad das jetzt zu stoppen.\n\n"
-        "📅 *Morgen gibt's automatisch 3 neue.* Versprochen.\n\n"
+        "📅 *Morgen gibt's automatisch ein neues.* Versprochen.\n\n"
         "Oder jetzt upgraden:\n\n"
         "💼 *Premium — €20/Monat*\n"
         "Szenarien unlimitiert + Übungen + Achievements\n\n"
@@ -2893,8 +2893,8 @@ def get_remaining_convos_hint(chat_id: int) -> str:
     remaining = max(0, FREE_DAILY_LIMIT - get_daily_convo_count(chat_id))
     if remaining == 0:
         return (
-            "\n\n_Das war dein letztes kostenloses Gespräch heute. "
-            "Morgen gibt's 3 neue — oder jetzt upgraden._"
+            "\n\n_Das war dein kostenloses Gespräch für heute. "
+            "Morgen gibt's ein neues — oder jetzt upgraden._"
         )
     return f"\n\n_💬 Noch *{remaining}* kostenloses{'e' if remaining > 1 else ''} Gespräch{'e' if remaining > 1 else ''} heute übrig._"
 
