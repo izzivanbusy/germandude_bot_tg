@@ -3544,12 +3544,15 @@ def start(message):
     user_step.pop(chat_id, None)
 
     bot.send_message(chat_id,
-        "🇩🇪 Hello! I'm GermanDude — your AI German companion.\n\n"
-        "🌍 What's your native language?\n"
-        "Какой ваш родной язык? / ¿Cuál es tu idioma?\n"
-        "Ana dilin nedir? / ما لغتك الأم؟\n"
-        "Qual é sua língua nativa? / Jaka jest twoja ojczyzna?\n\n"
-        "👇 Just type it below!",
+        "🇩🇪 Hallo! Ich bin dein Deutscher Kumpel.\n"
+        "Ich helfe dir, Deutsch zu sprechen — mit echten Gesprächen, jeden Tag.\n\n"
+        "🌍 Was ist deine Muttersprache?\n"
+        "What's your native language?\n"
+        "Какой твой родной язык?\n"
+        "Яка твоя рідна мова?\n"
+        "لغتك الأم هي؟\n"
+        "Ana dilin ne?\n\n"
+        "👇 Schreib's einfach unten!",
         reply_markup=ReplyKeyboardRemove())
 
 # GOAL SELECTION
@@ -4968,12 +4971,15 @@ def do_full_reset(chat_id):
 
     user_state[chat_id] = {"mode": "onboarding", "step": "native_language"}
     bot.send_message(chat_id,
-        "🇩🇪 Hello! I'm GermanDude — your AI German companion.\n\n"
-        "🌍 What's your native language?\n"
-        "Какой ваш родной язык? / ¿Cuál es tu idioma?\n"
-        "Ana dilin nedir? / ما لغتك الأم؟\n"
-        "Qual é sua língua nativa? / Jaka jest twoja ojczyzna?\n\n"
-        "👇 Just type it below!",
+        "🇩🇪 Hallo! Ich bin dein Deutscher Kumpel.\n"
+        "Ich helfe dir, Deutsch zu sprechen — mit echten Gesprächen, jeden Tag.\n\n"
+        "🌍 Was ist deine Muttersprache?\n"
+        "What's your native language?\n"
+        "Какой твой родной язык?\n"
+        "Яка твоя рідна мова?\n"
+        "لغتك الأم هي؟\n"
+        "Ana dilin ne?\n\n"
+        "👇 Schreib's einfach unten!",
         reply_markup=ReplyKeyboardRemove())
 
 # ─────────────────────────────────────────────
@@ -6962,10 +6968,13 @@ Nur diese Zeilen, nichts sonst.""",
         ensure_user(chat_id)
         user_state[chat_id] = {"mode": "onboarding", "step": "native_language"}
         bot.send_message(chat_id,
-            "🌍 What's your native language?\n"
-            "Какой ваш родной язык? / ¿Cuál es tu idioma?\n"
-            "Ana dilin nedir? / ما لغتك الأم؟\n\n"
-            "👇 Just type it below!")
+            "🌍 Was ist deine Muttersprache?\n"
+            "What's your native language?\n"
+            "Какой твой родной язык?\n"
+            "Яка твоя рідна мова?\n"
+            "لغتك الأم هي؟\n"
+            "Ana dilin ne?\n\n"
+            "👇 Schreib's einfach unten!")
         return
 
     if data == "start_chat":
