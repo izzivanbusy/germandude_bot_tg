@@ -6925,7 +6925,7 @@ Nur diese Zeilen, nichts sonst.""",
         try:
             session = stripe.checkout.Session.create(
                 payment_method_types=["card"],
-                mode="subscription",
+                mode="payment",
                 line_items=[{"price": price_id, "quantity": 1}],
                 success_url="https://t.me/germandude_bot?start=plus_ok",
                 cancel_url="https://t.me/germandude_bot",
@@ -6942,9 +6942,38 @@ Nur diese Zeilen, nichts sonst.""",
             last_bot_text[chat_id] = ptext
             markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
             bot.send_message(chat_id, ptext, reply_markup=markup)
+        except stripe.error.InvalidRequestError as e:
+            # Häufigste Ursache: Price ID ist einmalig, nicht recurring.
+            # Diagnose an Admin schicken und User auf Stars-Weg umleiten.
+            err_msg = str(e)
+            log.error(f"Plus checkout InvalidRequest: {err_msg}")
+            if ADMIN_CHAT_ID:
+                try:
+                    bot.send_message(ADMIN_CHAT_ID,
+                        f"⚠️ pay_plus Fehler (user {chat_id}):\n`{err_msg}`",
+                        parse_mode="Markdown")
+                except Exception:
+                    pass
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("⭐ Mit Stars zahlen — 2000 Stars", callback_data="pay_stars_plus"))
+            bot.send_message(chat_id,
+                "💳 Karte gerade nicht verfügbar — aber du kannst direkt mit Telegram Stars zahlen:",
+                reply_markup=markup)
         except Exception as e:
-            log.error(f"Plus checkout failed: {e}")
-            bot.send_message(chat_id, "⚠️ Fehler beim Starten der Zahlung. Versuch es später.")
+            err_msg = str(e)
+            log.error(f"Plus checkout failed: {err_msg}")
+            if ADMIN_CHAT_ID:
+                try:
+                    bot.send_message(ADMIN_CHAT_ID,
+                        f"⚠️ pay_plus Fehler (user {chat_id}):\n`{err_msg}`",
+                        parse_mode="Markdown")
+                except Exception:
+                    pass
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("⭐ Mit Stars zahlen — 2000 Stars", callback_data="pay_stars_plus"))
+            bot.send_message(chat_id,
+                "💳 Karte gerade nicht verfügbar — aber du kannst direkt mit Telegram Stars zahlen:",
+                reply_markup=markup)
         return
 
     if data == "pay_stars_plus":
