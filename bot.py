@@ -71,7 +71,7 @@ bot.set_my_commands([
     BotCommand("gem",          "German Gem 💎"),
     BotCommand("share",        "Bot teilen 🤝"),
     BotCommand("danke",        "Danke sagen 🙏"),
-    BotCommand("upgrade",      "Premium / Premium Plus 🚀"),
+    BotCommand("upgrade",      "Pläne & Preise 💎"),
     BotCommand("restart",      "Chat neu starten"),
     BotCommand("integration",  "Leben in Deutschland 🏛️"),
     BotCommand("support",      "Support 🆘"),
@@ -2706,16 +2706,17 @@ def send_paywall(chat_id):
 # ═══════════════════════════════════════════════════════════════════════════
 
 PREMIUM_VALUES = [
-    "✅ Unbegrenzte Szenarien & Übungen",
+    "✅ Unbegrenzte Gespräche & Szenarien",
     "✅ Alle Niveaus A1–C2",
-    "✅ Voice-Nachrichten & Übersetzungen",
+    "✅ Voice-Modus, Übungen & Flashcards",
     "✅ XP-System, Achievements & Shadowing",
 ]
 
 PREMIUM_PLUS_EXTRA_VALUES = [
     "✅ Alles aus Premium",
-    "✅ Quatschen-Modus unlimitiert — dein KI-Kumpel, 24/7",
-    "✅ Freie Themen, kein Skript, einfach reden",
+    "✅ Quatschen — kein Skript, kein Thema, kein Druck",
+    "✅ Finanzamt-Brief? Kündigung? Streit mit Vermieter? Einfach fragen.",
+    "✅ Da wenn Deutschland überwältigend wird — 24/7, nie urteilend",
 ]
 
 
@@ -2740,10 +2741,10 @@ def handle_upgrade(message):
     if is_premium_plus(chat_id):
         # ── Schon im Top-Tier ────────────────────────────────────────────
         text = (
-            f"👑 Du bist schon ganz oben, {greet}!\n\n"
-            "Premium Plus — alles unlimitiert, inkl. Quatschen-Modus. "
-            "Es gibt nichts mehr zum Upgraden. 🎉\n\n"
-            "Magst du den Bot stattdessen unterstützen? /danke"
+            f"👑 Du hast Premium Plus, {greet} — du bist bestens aufgestellt.\n\n"
+            "Dein Kumpel ist da wenn Deutschland stressig wird. "
+            "Nutz ihn. Schreib einfach drauflos.\n\n"
+            "Magst du den Bot unterstützen? /danke 💙"
         )
         bot.send_message(chat_id, text)
         return
@@ -2751,26 +2752,35 @@ def handle_upgrade(message):
     elif is_premium(chat_id):
         # ── Premium → Premium Plus ───────────────────────────────────────
         text = (
-            f"🗣️ Bereit für den nächsten Schritt, {greet}?\n\n"
-            "Du hast schon *Premium* — hier kommt das Upgrade auf *Premium Plus*:\n\n"
+            f"💎 *Bereit für den nächsten Schritt, {greet}?*\n\n"
+            "Du lernst schon Deutsch mit Premium — gut.\n\n"
+            "Aber kennst du das?\n"
+            "Ein Brief vom Finanzamt liegt auf dem Tisch.\n"
+            "Du musst kündigen, beschweren, erklären — aber weißt nicht wie.\n"
+            "Oder Deutschland fühlt sich manchmal einfach zu viel an.\n\n"
+            "*Premium Plus* ist dein Kumpel für genau diese Momente:\n\n"
             f"{plus_extra_values_str}\n\n"
-            "💰 *€30/Monat* — du zahlst nur die Differenz zum nächsten Abrechnungsmonat."
+            "€30/Monat. Kündbar jederzeit."
         )
-        markup.add(InlineKeyboardButton("🗣️ Auf Premium Plus upgraden", callback_data="pay_plus"))
+        markup.add(InlineKeyboardButton("👑 Auf Premium Plus upgraden", callback_data="pay_plus"))
         markup.add(InlineKeyboardButton("⭐ Mit Stars — 2000 Stars", callback_data="pay_stars_plus"))
 
     else:
         # ── Free → Premium oder Premium Plus ─────────────────────────────
         text = (
-            f"🚀 Bereit, mehr aus German Dude rauszuholen, {greet}?\n\n"
-            f"💼 *Premium — €20/Monat*\n{premium_values_str}\n\n"
-            f"🗣️ *Premium Plus — €30/Monat*\n{plus_extra_values_str}\n\n"
+            f"💎 *Pläne & Preise*\n\n"
+            f"🎓 *Premium — €20/Monat*\n"
+            f"Für alle die Deutsch wirklich lernen wollen.\n"
+            f"{premium_values_str}\n\n"
+            f"👑 *Premium Plus — €30/Monat*\n"
+            f"Nicht nur Deutsch lernen. In Deutschland ankommen.\n"
+            f"{plus_extra_values_str}\n\n"
             "_Hast du einen Code? Tippe:_ /freecode DEINCODE"
         )
         if plus_checkout_url:
-            markup.add(InlineKeyboardButton("💼 Premium — €20/Monat", url=plus_checkout_url))
+            markup.add(InlineKeyboardButton("🎓 Premium — €20/Monat", url=plus_checkout_url))
         markup.add(InlineKeyboardButton("⭐ Premium mit Stars — 1500 Stars", callback_data="pay_stars"))
-        markup.add(InlineKeyboardButton("🗣️ Premium Plus — €30/Monat", callback_data="pay_plus"))
+        markup.add(InlineKeyboardButton("👑 Premium Plus — €30/Monat", callback_data="pay_plus"))
         markup.add(InlineKeyboardButton("⭐ Plus mit Stars — 2000 Stars", callback_data="pay_stars_plus"))
 
     markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
@@ -2853,16 +2863,17 @@ def send_daily_limit_paywall(chat_id: int):
         f"{xp_line} — schad das jetzt zu stoppen.\n\n"
         "📅 *Morgen gibt's automatisch ein neues.* Versprochen.\n\n"
         "Oder jetzt upgraden:\n\n"
-        "💼 *Premium — €20/Monat*\n"
-        "Szenarien unlimitiert + Übungen + Achievements\n\n"
-        "🗣️ *Premium Plus — €30/Monat*\n"
-        "Alles aus Premium + Quatschen-Modus unlimitiert\n\n"
+        "🎓 *Premium — €20/Monat*\n"
+        "Unbegrenzte Gespräche & Übungen — alles was du zum Lernen brauchst.\n\n"
+        "👑 *Premium Plus — €30/Monat*\n"
+        "Nicht nur Deutsch lernen. In Deutschland ankommen.\n"
+        "Finanzamt-Briefe, Kündigungen, schwierige Gespräche — dein Kumpel ist da.\n\n"
         "_Hast du einen Code? /freecode DEINCODE_"
     )
     last_bot_text[chat_id] = text
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🗣️ Premium Plus — €30/Monat", callback_data="pay_plus"))
-    markup.add(InlineKeyboardButton("💼 Premium — €20/Monat", url=checkout_url))
+    markup.add(InlineKeyboardButton("👑 Premium Plus — €30/Monat", callback_data="pay_plus"))
+    markup.add(InlineKeyboardButton("🎓 Premium — €20/Monat", url=checkout_url))
     markup.add(InlineKeyboardButton("⭐ Stars zahlen", callback_data="pay_stars"))
     markup.add(InlineKeyboardButton("🎁 Freunde einladen → 3 Tage gratis", url=share_url))
     markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
@@ -2873,15 +2884,17 @@ def send_quatschen_upgrade_prompt(chat_id: int):
     uid  = str(chat_id)
     name = user_data.get(uid, {}).get("name", "")
     text = (
-        f"🗣️ *Quatschen ist Teil von Premium Plus*{', ' + name if name else ''}.\n\n"
-        "Dein persönlicher deutscher Kumpel — kein Skript, kein Szenario, "
-        "einfach reden. Über alles was dich gerade beschäftigt. Jeden Tag.\n\n"
-        "Du bist auf Premium — ein Upgrade reicht:\n"
-        "🗣️ *Premium Plus — €30/Monat*"
+        f"👑 *Quatschen ist Teil von Premium Plus*{', ' + name if name else ''}.\n\n"
+        "Hier ist kein Lehrer, kein Skript, kein Druck.\n"
+        "Einfach reden — über alles was dich gerade beschäftigt.\n\n"
+        "Einen Brief vom Finanzamt bekommen? Musst du kündigen und weißt nicht wie?\n"
+        "Schlechter Tag und Deutschland fühlt sich zu viel an?\n\n"
+        "Genau dafür ist Quatschen da. Dein Kumpel — 24/7, nie urteilend.\n\n"
+        "*Premium Plus — €30/Monat*"
     )
     last_bot_text[chat_id] = text
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🗣️ Jetzt auf Premium Plus upgraden", callback_data="pay_plus"))
+    markup.add(InlineKeyboardButton("👑 Jetzt auf Premium Plus upgraden", callback_data="pay_plus"))
     markup.add(InlineKeyboardButton("⭐ Stars — 2000 Stars", callback_data="pay_stars_plus"))
     markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
@@ -3827,12 +3840,10 @@ def handle_topic_callback(call):
     if goal == "Quatschen":
         if not is_premium_plus(chat_id):
             qtext = (
-                "👑 Quatsch Modus ist exklusiv für Premium Plus.\n\n"
-                "Hier hast du keinen Lehrer mehr — du hast einen Kumpel.\n"
-                "Kein Thema, kein Skript, kein Druck.\n"
-                "Einfach reden — über Alltag, Arbeit, schlechte Witze,\n"
-                "was auch immer. Er hört zu, antwortet auf Deutsch\n"
-                "und macht dich ganz ohne Stress besser. 24/7.\n\n"
+                "👑 Quatsch Modus ist Teil von Premium Plus.\n\n"
+                "Kein Skript, kein Thema, kein Druck — einfach reden.\n"
+                "Finanzamt-Brief? Kündigung? Oder einfach schlechter Tag?\n"
+                "Dein Kumpel hört zu. 24/7, nie urteilend.\n\n"
                 "👑 Premium Plus — €30/Monat oder 2000 Stars."
             )
             last_bot_text[chat_id] = qtext
@@ -6290,9 +6301,11 @@ def handle_successful_payment(message):
         log.info(f"✅ Stars Premium PLUS activated: {chat_id}")
         bot.send_message(chat_id,
             "⭐ Danke für deine Stars!\n\n"
-            "🎉 Du hast jetzt 30 Tage *Premium Plus* — inkl. Quatschen-Modus. 🗣️\n"
-            "Dein Streak und deine XP sind natürlich noch da.\n\n"
-            "Tippe /themen oder fang einfach an zu quatschen!",
+            "👑 *Willkommen bei Premium Plus!*\n\n"
+            "Nicht nur Deutsch lernen — in Deutschland ankommen.\n"
+            "Dein Kumpel ist jetzt 24/7 für dich da.\n\n"
+            "Finanzamt-Brief? Kündigung? Oder einfach mal reden?\n"
+            "Tippe /themen für Übungen — oder schreib ihm einfach drauflos. 🗣️",
             parse_mode="Markdown")
     elif payload.startswith("donation_"):
         log.info(f"⭐ Stars donation received from {chat_id}")
@@ -6935,9 +6948,12 @@ Nur diese Zeilen, nichts sonst.""",
             markup.add(InlineKeyboardButton("👑 Jetzt Premium Plus — €30/Monat", url=session.url))
             markup.add(InlineKeyboardButton("⭐ Mit Stars — 2000 Stars", callback_data="pay_stars_plus"))
             ptext = (
-                "👑 Premium Plus — €30/Monat\n\n"
-                "Dein echter Kumpel auf Deutsch. Kein Lehrer, kein Skript.\n"
-                "Einfach reden — er hört zu, antwortet, macht dich besser. 24/7."
+                "👑 *Premium Plus — €30/Monat*\n\n"
+                "Nicht nur Deutsch lernen. In Deutschland ankommen.\n\n"
+                "Finanzamt-Brief auf dem Tisch? Musst du kündigen, dich beschweren, "
+                "erklären — aber weißt nicht wie?\n"
+                "Oder Deutschland fühlt sich gerade einfach zu viel an?\n\n"
+                "Dein Kumpel ist da. Immer. Kein Urteilen, kein Stress."
             )
             last_bot_text[chat_id] = ptext
             markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
@@ -6980,8 +6996,8 @@ Nur diese Zeilen, nichts sonst.""",
         bot.answer_callback_query(call.id)
         try:
             bot.send_invoice(chat_id,
-                title="German Dude Premium Plus — 1 Monat",
-                description="Dein echter Kumpel auf Deutsch — kein Lehrer, kein Skript, kein Druck. Alles aus Premium + Quatsch Modus. 30 Tage.",
+                title="German Dude — Premium Plus (1 Monat)",
+                description="Nicht nur Deutsch lernen. In Deutschland ankommen. Quatschen-Modus, Alltagshilfe, Kumpel 24/7. 30 Tage.",
                 payload=f"premium_plus_{chat_id}",
                 provider_token="", currency="XTR",
                 prices=[telebot.types.LabeledPrice("Premium Plus 1 Monat", 2000)],
@@ -7563,10 +7579,11 @@ def stripe_webhook():
             user_data[uid]["premium_plus"] = True
             log.info(f"✅ Premium PLUS activated via Stripe: {telegram_id}")
             welcome_msg = (
-                "🎉 *Willkommen im Premium Plus Club!*\n\n"
-                "Du hast jetzt vollen Zugang — inkl. Quatschen-Modus. 🗣️\n"
-                "Dein Streak und deine XP sind natürlich noch da.\n\n"
-                "Tippe /themen oder fang einfach an zu quatschen!"
+                "👑 *Willkommen bei Premium Plus!*\n\n"
+                "Nicht nur Deutsch lernen — in Deutschland ankommen.\n"
+                "Dein Kumpel ist jetzt 24/7 für dich da.\n\n"
+                "Finanzamt-Brief? Kündigung? Oder einfach mal reden?\n"
+                "Tippe /themen für Übungen — oder schreib ihm einfach drauflos. 🗣️"
             )
         else:
             user_data[uid]["premium_plus"] = False
