@@ -3565,8 +3565,21 @@ def start(message):
         "Яка твоя рідна мова?\n"
         "لغتك الأم هي؟\n"
         "Ana dilin ne?\n\n"
-        "👇 Schreib's einfach unten!",
+        "👇 Tippe einfach — oder wähle hier:",
         reply_markup=ReplyKeyboardRemove())
+
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("🇬🇧 English",    callback_data="lang:English"),
+        InlineKeyboardButton("🇷🇺 Русский",    callback_data="lang:Русский"),
+        InlineKeyboardButton("🇺🇦 Українська", callback_data="lang:Українська"),
+        InlineKeyboardButton("🇹🇷 Türkçe",     callback_data="lang:Türkçe"),
+        InlineKeyboardButton("🇸🇦 العربية",    callback_data="lang:Arabic"),
+        InlineKeyboardButton("🇪🇸 Español",    callback_data="lang:Español"),
+        InlineKeyboardButton("🇫🇷 Français",   callback_data="lang:Français"),
+        InlineKeyboardButton("🇵🇱 Polski",     callback_data="lang:Polski"),
+    )
+    bot.send_message(chat_id, "​", reply_markup=markup)  # invisible char keeps message minimal
 
 # GOAL SELECTION
 def send_goal_selection(chat_id):
@@ -5047,18 +5060,39 @@ def practice_cmd(message):
 def info_cmd(message):
     chat_id = message.chat.id
     ensure_user(chat_id)
-    bot.send_message(chat_id,
-        "ℹ️ Dein Deutscher Kumpel — so funktioniert's:\n\n"
-        "🎯 /themen — Wähle ein Gesprächsthema\n"
-        "🎤 Sprich oder schreib auf Deutsch — dein Kumpel antwortet\n"
-        "❌ Fehler werden erklärt und gespeichert\n"
-        "💪 /practice — 3 Übungen zu deinen Schwächen\n"
+    uid  = str(chat_id)
+    name = user_data.get(uid, {}).get("name", "")
+
+    tier = ""
+    if is_premium_plus(chat_id):
+        tier = "\n👑 Du hast *Premium Plus* — vollen Zugang zu allem."
+    elif is_premium(chat_id):
+        tier = "\n🎓 Du hast *Premium* — zum Upgrade: /upgrade"
+    else:
+        tier = "\n🔓 Kostenlos: 1 Gespräch/Tag + tägliche Gems."
+
+    text = (
+        f"ℹ️ *Dein Deutscher Kumpel*{' — Hallo, ' + name + '!' if name else ''}\n\n"
+        "🎯 /themen — Gesprächsthema wählen\n"
+        "🎤 Sprich oder schreib auf Deutsch — Fehler werden erklärt & gespeichert\n"
+        "💪 /practice — Übungen zu deinen Schwächen\n"
         "🃏 /flashcards — Vokabelkarten auf Quizlet\n"
         "💎 /gem — Ausdruck des Tages\n"
         "📊 /progress — dein Fortschritt\n"
-        "🔁 /restart — neues Thema starten\n\n"
-        "Fragen? /support"
+        "📋 /integration — Amtsbriefe, Verträge & Formulare auf Deutsch verstehen\n"
+        "🔁 /restart — neues Gespräch starten\n\n"
+        "💎 *Pläne:*\n"
+        "🔓 Free: 1 Gespräch/Tag + tägliche Gems\n"
+        "🎓 Premium (€20/Mo): unlimitierte Gespräche & Übungen\n"
+        "👑 Premium Plus (€30/Mo): alles aus Premium + Alltag in Deutschland meistern\n"
+        "→ /upgrade für Details & Preise\n"
+        + tier +
+        "\n\nFragen? /support"
     )
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+    last_bot_text[chat_id] = text
+    bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  /DANKE — Spenden + Feedback
@@ -7022,6 +7056,18 @@ Nur diese Zeilen, nichts sonst.""",
         bot.send_message(chat_id, "🗑️ Alle Fehler gelöscht. Frischer Start! 💪")
         return
 
+    if data.startswith("lang:"):
+        # Language quick-tap during onboarding
+        bot.answer_callback_query(call.id)
+        if user_state.get(chat_id, {}).get("step") == "native_language":
+            lang = data[5:]
+            try:
+                bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+            except Exception:
+                pass
+            handle_onboarding(chat_id, lang)
+        return
+
     if data == "restart_onboarding":
         bot.answer_callback_query(call.id)
         ensure_user(chat_id)
@@ -7033,7 +7079,19 @@ Nur diese Zeilen, nichts sonst.""",
             "Яка твоя рідна мова?\n"
             "لغتك الأم هي؟\n"
             "Ana dilin ne?\n\n"
-            "👇 Schreib's einfach unten!")
+            "👇 Tippe einfach — oder wähle hier:")
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            InlineKeyboardButton("🇬🇧 English",    callback_data="lang:English"),
+            InlineKeyboardButton("🇷🇺 Русский",    callback_data="lang:Русский"),
+            InlineKeyboardButton("🇺🇦 Українська", callback_data="lang:Українська"),
+            InlineKeyboardButton("🇹🇷 Türkçe",     callback_data="lang:Türkçe"),
+            InlineKeyboardButton("🇸🇦 العربية",    callback_data="lang:Arabic"),
+            InlineKeyboardButton("🇪🇸 Español",    callback_data="lang:Español"),
+            InlineKeyboardButton("🇫🇷 Français",   callback_data="lang:Français"),
+            InlineKeyboardButton("🇵🇱 Polski",     callback_data="lang:Polski"),
+        )
+        bot.send_message(chat_id, "​", reply_markup=markup)
         return
 
     if data == "start_chat":
