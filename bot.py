@@ -2739,7 +2739,8 @@ PREMIUM_VALUES = [
 PREMIUM_PLUS_EXTRA_VALUES = [
     "✅ Alles aus Premium",
     "✅ Quatschen — kein Skript, kein Thema, kein Druck",
-    "✅ Finanzamt-Brief? Kündigung? Streit mit Vermieter? Einfach fragen.",
+    "✅ /integration — dein Helfer für alles in Deutschland",
+    "✅ Briefe, Verträge, Kündigung, Steuern, Mietrecht & mehr",
     "✅ Da wenn Deutschland überwältigend wird — 24/7, nie urteilend",
 ]
 
@@ -5711,6 +5712,28 @@ def handle_integration(message):
     ensure_user(chat_id)
     if _require_onboarding(chat_id): return
     _track_feature(chat_id, "integration")
+    if not is_premium_plus(chat_id):
+        uid  = str(chat_id)
+        name = user_data.get(uid, {}).get("name", "")
+        text = (
+            f"🏛️ *Leben in Deutschland — Premium Plus*{', ' + name if name else ''}\n\n"
+            "Dieser Bereich ist dein persönlicher Helfer für alles rund um Deutschland:\n\n"
+            "📄 Briefe & Dokumente erklären\n"
+            "✍️ Kündigung schreiben lassen\n"
+            "📋 Mietverträge & Verträge checken\n"
+            "🏠 Wohnungssuche meistern\n"
+            "💶 Steuern zurückbekommen\n"
+            "🗑️ Mülltrennung, Mietrecht & mehr\n\n"
+            "Alles auf Deutsch — mit mir als Kumpel der es erklärt.\n\n"
+            "→ *Premium Plus — €30/Monat*"
+        )
+        last_bot_text[chat_id] = text
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("👑 Jetzt Premium Plus", callback_data="pay_plus"))
+        markup.add(InlineKeyboardButton("⭐ Mit Stars — 2000 Stars", callback_data="pay_stars_plus"))
+        markup.add(translate_btn(chat_id))
+        bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
+        return
     _show_integration_menu(chat_id)
 
 
@@ -5727,30 +5750,35 @@ def _strip_md(text: str) -> str:
 def _show_integration_menu(chat_id):
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
-        InlineKeyboardButton("📄 Brief / Dokument erklären",    callback_data="intg:brief_erklaeren"),
-        InlineKeyboardButton("✍️ Antwort auf einen Brief",      callback_data="intg:brief_antworten"),
-        InlineKeyboardButton("🎭 Termin vorbereiten",           callback_data="intg:termin"),
-        InlineKeyboardButton("🗺️ Beratungsstellen finden",      callback_data="intg:beratung"),
-        InlineKeyboardButton("💶 Steuern & Finanzamt",          callback_data="intg:steuern"),
-        InlineKeyboardButton("🇩🇪 Deutsche Kultur",             callback_data="intg:kultur"),
+        InlineKeyboardButton("📄 Brief / Dokument erklären",     callback_data="intg:brief_erklaeren"),
+        InlineKeyboardButton("✍️ Kündigung schreiben lassen",    callback_data="intg:kuendigung"),
+        InlineKeyboardButton("📋 Vertrag checken",               callback_data="intg:vertragscheck"),
+        InlineKeyboardButton("💬 Schreib das für mich",          callback_data="intg:schreib"),
+        InlineKeyboardButton("🏠 Wohnungssuche in Deutschland",  callback_data="intg:wohnen"),
+        InlineKeyboardButton("🏘️ Was darf mein Vermieter?",     callback_data="intg:mieterrecht"),
+        InlineKeyboardButton("💶 Steuern & Finanzamt",           callback_data="intg:steuern"),
+        InlineKeyboardButton("🗑️ Mülltrennung",                 callback_data="intg:muell"),
+        InlineKeyboardButton("🎭 Termin vorbereiten",            callback_data="intg:termin"),
+        InlineKeyboardButton("🗺️ Beratungsstellen finden",       callback_data="intg:beratung"),
     )
     bot.send_message(chat_id,
-        "🏛️ Leben in Deutschland\n\nWomit kann ich dir helfen?",
-        reply_markup=markup)
+        "🏛️ *Leben in Deutschland*\n\nWomit kann ich dir helfen?",
+        parse_mode="Markdown", reply_markup=markup)
 
 
 def _show_steuern_menu(chat_id):
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
-        InlineKeyboardButton("📄 Steuerbescheid erklären",      callback_data="intg:steuerbescheid"),
+        InlineKeyboardButton("💰 Steuern zurückbekommen",        callback_data="intg:steuerrueckgabe"),
+        InlineKeyboardButton("📄 Steuerbescheid erklären",       callback_data="intg:steuerbescheid"),
         InlineKeyboardButton("📋 Was ist eine Steuererklärung?", callback_data="intg:steuererklaerung_info"),
-        InlineKeyboardButton("🗓️ Fristen & Termine",            callback_data="intg:steuerfristen"),
-        InlineKeyboardButton("🏢 Mein Finanzamt finden",        callback_data="intg:finanzamt"),
-        InlineKeyboardButton("◀️ Zurück",                       callback_data="intg:back"),
+        InlineKeyboardButton("🗓️ Fristen & Termine",             callback_data="intg:steuerfristen"),
+        InlineKeyboardButton("🏢 Mein Finanzamt finden",         callback_data="intg:finanzamt"),
+        InlineKeyboardButton("◀️ Zurück",                        callback_data="intg:back"),
     )
     bot.send_message(chat_id,
-        "💶 Steuern & Finanzamt\n\nWas brauchst du?",
-        reply_markup=markup)
+        "💶 *Steuern & Finanzamt*\n\nWas brauchst du?",
+        parse_mode="Markdown", reply_markup=markup)
 
 
 
@@ -6168,6 +6196,94 @@ def handle(message):
         bot.send_message(chat_id, result, reply_markup=markup)
         return
 
+    if mode == "intg_kuendigung":
+        uid = str(chat_id)
+        native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
+        bot.send_chat_action(chat_id, "typing")
+        try:
+            resp = claude.messages.create(
+                model="claude-haiku-4-5-20251001", max_tokens=500,
+                system=(
+                    "Du bist ein Experte für deutsches Vertragsrecht. "
+                    "Schreibe eine formelle, rechtlich korrekte Kündigung auf Deutsch. "
+                    "KEIN Markdown, keine Sternchen. Formatiere als echten Brief."
+                ),
+                messages=[{"role": "user", "content": (
+                    f"Schreibe eine Kündigung für: {text}\n\n"
+                    f"Verwende [Name] und [Adresse] als Platzhalter. "
+                    f"Kündigung zum nächstmöglichen Termin, mit Bitte um Bestätigung. "
+                    f"Datum: heute. Formell und rechtssicher."
+                )}]
+            )
+            result = _strip_md(resp.content[0].text.strip())
+        except Exception as e:
+            result = f"⚠️ Fehler beim Generieren: {e}"
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("✍️ Nochmal / andere Kündigung", callback_data="intg:kuendigung"))
+        markup.add(InlineKeyboardButton("🏛️ Menü", callback_data="intg:back"))
+        user_state[chat_id]["mode"] = "idle"
+        bot.send_message(chat_id,
+            f"📋 Deine Kündigung:\n\n{result}\n\n"
+            f"👆 Kopiere den Text, füll [Name] und [Adresse] aus und schick ihn ab.\n"
+            f"_Empfehlung: per Einschreiben mit Rückschein senden._",
+            reply_markup=markup)
+        return
+
+    if mode == "intg_vertragscheck":
+        uid = str(chat_id)
+        native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
+        bot.send_chat_action(chat_id, "typing")
+        try:
+            resp = claude.messages.create(
+                model="claude-haiku-4-5-20251001", max_tokens=600,
+                system=(
+                    f"Du bist ein Vertragsexperte. Analysiere den deutschen Vertragstext. "
+                    f"Erkläre auf einfachem Deutsch + kurze Zusammenfassung auf {native_lang}. "
+                    f"Kein Markdown, keine Sternchen. Gliedere in: Was ist wichtig, Was ist ungewöhnlich, Worauf achten."
+                ),
+                messages=[{"role": "user", "content": f"Analysiere diesen Vertragstext:\n\n{text}"}]
+            )
+            result = _strip_md(resp.content[0].text.strip())
+        except Exception as e:
+            result = f"⚠️ Fehler: {e}"
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("🏛️ Menü", callback_data="intg:back"))
+        user_state[chat_id]["mode"] = "idle"
+        bot.send_message(chat_id,
+            f"{result}\n\n⚠️ Für rechtliche Beratung: Mieterverein oder Anwalt.",
+            reply_markup=markup)
+        return
+
+    if mode == "intg_schreib":
+        uid = str(chat_id)
+        native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
+        bot.send_chat_action(chat_id, "typing")
+        try:
+            resp = claude.messages.create(
+                model="claude-haiku-4-5-20251001", max_tokens=400,
+                system=(
+                    "Du bist ein professioneller Schreibassistent für Deutsch als Fremdsprache. "
+                    "Schreibe einen formellen oder informellen deutschen Text basierend auf der Beschreibung. "
+                    "KEIN Markdown. Formatiere als echten Text/Brief/Nachricht."
+                ),
+                messages=[{"role": "user", "content": (
+                    f"Der User beschreibt auf {native_lang} was er auf Deutsch schreiben möchte:\n\n"
+                    f"{text}\n\n"
+                    f"Schreibe den fertigen deutschen Text. Wenn es ein formeller Brief ist, "
+                    f"benutze [Name] und [Adresse] als Platzhalter."
+                )}]
+            )
+            result = _strip_md(resp.content[0].text.strip())
+        except Exception as e:
+            result = f"⚠️ Fehler: {e}"
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("💬 Noch einen Text schreiben", callback_data="intg:schreib"))
+        markup.add(InlineKeyboardButton("🏛️ Menü", callback_data="intg:back"))
+        user_state[chat_id]["mode"] = "idle"
+        bot.send_message(chat_id, f"✍️ Hier ist dein Text auf Deutsch:\n\n{result}",
+            reply_markup=markup)
+        return
+
     if mode in ("intg_beratung", "intg_finanzamt"):
         uid         = str(chat_id)
         native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
@@ -6191,7 +6307,7 @@ def handle(message):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("🏛️ Menü", callback_data="intg:back"))
         user_state[chat_id]["mode"] = "idle"
-        bot.send_message(chat_id, result, reply_markup=markup)
+        bot.send_message(chat_id, _strip_md(result), reply_markup=markup)
         return
 
     # Voice selection
@@ -6537,11 +6653,11 @@ def handle_file_message(message):
     uid  = str(chat_id)
     native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
 
-    # Only process in integration brief mode
-    if mode not in ("intg_brief_erklaeren", "intg_brief_antworten", "intg_steuerbescheid"):
+    # Only process in integration brief/document modes
+    if mode not in ("intg_brief_erklaeren", "intg_brief_antworten", "intg_steuerbescheid", "intg_vertragscheck"):
         bot.send_message(chat_id,
             "📎 Dateien und Fotos nehme ich gerne für Briefe und Dokumente entgegen!\n"
-            "Nutze /integration → Brief erklären um einen Brief zu analysieren. 📄")
+            "Nutze /integration → Brief erklären oder Vertrag checken. 📄")
         return
 
     # ── PHOTO: send to Claude Vision ──────────────────────────────────────
@@ -6579,6 +6695,13 @@ def handle_file_message(message):
                 "intg_brief_antworten": (
                     f"Lies den Brief im Bild und schreibe eine formelle deutsche Antwort darauf.\n"
                     f"Danach kurze Erklärung auf {native_lang}."
+                ),
+                "intg_vertragscheck": (
+                    f"Analysiere den Vertragstext im Bild:\n"
+                    f"1. Was ist wichtig? Welche Klauseln sind entscheidend?\n"
+                    f"2. Was ist ungewöhnlich oder könnte nachteilig sein?\n"
+                    f"3. Kurze Zusammenfassung auf {native_lang}\n"
+                    f"Kein Markdown, Plaintext. Am Ende: Hinweis auf Mieterverein/Anwalt."
                 ),
             }
             system_p = action_prompts.get(mode, action_prompts["intg_brief_erklaeren"])
@@ -7020,6 +7143,159 @@ def master_callback_router(call):
 
         if action == "kultur":
             _show_kultur_menu(chat_id); return
+
+        # ── NEUE PREMIUM PLUS FEATURES ────────────────────────────────────
+
+        if action == "kuendigung":
+            user_state[chat_id] = {"mode": "intg_kuendigung"}
+            bot.send_message(chat_id,
+                "✍️ *Kündigung schreiben lassen*\n\n"
+                "Was möchtest du kündigen?\n\n"
+                "Schreib einfach z.B.:\n"
+                "• _Fitnessstudio McFit_\n"
+                "• _Handyvertrag Telekom_\n"
+                "• _Wohnung fristgerecht_\n"
+                "• _Strom-Vertrag Vattenfall_\n\n"
+                "Ich schreibe dir die fertige Kündigung — kopieren und abschicken. 📋",
+                parse_mode="Markdown")
+            return
+
+        if action == "vertragscheck":
+            user_state[chat_id] = {"mode": "intg_vertragscheck"}
+            bot.send_message(chat_id,
+                "📋 *Vertrag checken*\n\n"
+                "Schick mir den Vertragstext (kopieren & einfügen) oder ein Foto.\n\n"
+                "Ich erkläre dir die wichtigsten Klauseln in Klartext — "
+                "was du beachten musst, was ungewöhnlich ist, worauf du aufpassen solltest. 🔍\n\n"
+                "_⚠️ Für rechtliche Beratung wende dich an einen Anwalt oder die Mieterberatung._",
+                parse_mode="Markdown")
+            return
+
+        if action == "schreib":
+            user_state[chat_id] = {"mode": "intg_schreib"}
+            bot.send_message(chat_id,
+                "💬 *Schreib das für mich — auf Deutsch*\n\n"
+                f"Beschreib mir in {native_lang} (oder auf Deutsch) was du schreiben willst.\n\n"
+                "Zum Beispiel:\n"
+                "• _Ich will meinem Vermieter schreiben dass der Wasserhahn kaputt ist_\n"
+                "• _Ich will meinem Chef erklären dass ich morgen krank bin_\n"
+                "• _Ich will meinem Nachbarn sagen dass er zu laut ist_\n\n"
+                "Ich formuliere es auf professionellem Deutsch für dich. ✍️",
+                parse_mode="Markdown")
+            return
+
+        if action == "wohnen":
+            lang = user_data.get(str(chat_id), {}).get("native_language", "Englisch")
+            wohnen_text = (
+                "🏠 *Wohnungssuche in Deutschland*\n\n"
+                "Die härtesten Märkte: Berlin, München, Hamburg. Hier was du wissen musst:\n\n"
+                "📋 *Was du brauchst:*\n"
+                "• SCHUFA-Auskunft (kostenlos 1x/Jahr auf schufa.de)\n"
+                "• Gehaltsnachweis (3 Monate, ca. 3× die Kaltmiete netto)\n"
+                "• Mietschuldenfreiheitsbescheinigung (vom letzten Vermieter)\n"
+                "• Personalausweis / Reisepass\n\n"
+                "📞 *Beim Anruf für eine Besichtigung sag:*\n"
+                "_\"Guten Tag, ich rufe wegen der Wohnung in der [Straße] an. "
+                "Ist die noch verfügbar? Ich bin berufstätig und suche ab [Datum]. "
+                "Kann ich einen Besichtigungstermin bekommen?\"_\n\n"
+                "📧 *E-Mail-Vorlage:*\n"
+                "_Sehr geehrte Damen und Herren,\n"
+                "ich interessiere mich für Ihre Wohnung in der [Straße].\n"
+                "Ich bin [Beruf], arbeite seit [X Jahren] bei [Firma] und suche ab [Datum] "
+                "eine neue Wohnung. Gerne sende ich Ihnen auf Wunsch alle Unterlagen zu.\n"
+                "Mit freundlichen Grüßen, [Ihr Name]_\n\n"
+                "🔍 *Beste Portale:* ImmobilienScout24, Immowelt, WG-Gesucht (WGs), eBay Kleinanzeigen"
+            )
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("◀️ Zurück", callback_data="intg:back"))
+            last_bot_text[chat_id] = wohnen_text
+            bot.send_message(chat_id, wohnen_text, parse_mode="Markdown", reply_markup=markup)
+            return
+
+        if action == "mieterrecht":
+            mieter_text = (
+                "🏘️ *Was darf mein Vermieter — und was nicht?*\n\n"
+                "💶 *Kaution:*\n"
+                "Max. 3 Nettokaltmieten. Rückgabe innerhalb von 3-6 Monaten nach Auszug.\n\n"
+                "🔧 *Schönheitsreparaturen:*\n"
+                "Nur wenn ausdrücklich im Vertrag und rechtlich korrekt formuliert. "
+                "Viele Klauseln sind ungültig — prüfen lassen!\n\n"
+                "📈 *Mieterhöhung:*\n"
+                "Max. 20% in 3 Jahren (in vielen Städten 15%). Muss schriftlich kommen.\n"
+                "Du hast 2 Monate Zeit zum Widerspruch.\n\n"
+                "🏠 *Eigenbedarf:*\n"
+                "Vermieter darf kündigen wenn Familienmitglied einzieht. "
+                "Muss beweisbar sein. Mindestens 3 Monate Kündigungsfrist.\n\n"
+                "🔑 *Besichtigungen:*\n"
+                "Vermieter darf NICHT einfach rein. Muss 24h vorher ankündigen.\n\n"
+                "🌡️ *Heizung:*\n"
+                "Muss von Oktober bis April mindestens 20°C garantieren.\n\n"
+                "📞 *Hilfe holen:*\n"
+                "Mieterverein → ~60€/Jahr, unbegrenzte Beratung, lohnt sich fast immer.\n"
+                "mieterverein.de"
+            )
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("◀️ Zurück", callback_data="intg:back"))
+            last_bot_text[chat_id] = mieter_text
+            bot.send_message(chat_id, mieter_text, parse_mode="Markdown", reply_markup=markup)
+            return
+
+        if action == "muell":
+            muell_text = (
+                "🗑️ *Mülltrennung in Deutschland*\n\n"
+                "🟡 *Gelbe Tonne / Gelber Sack*\n"
+                "Verpackungen: Plastik, Dosen, Tetra Pak, Alufolie\n\n"
+                "🔵 *Blaue Tonne (Papiertonne)*\n"
+                "Papier, Zeitungen, Kartons, Briefumschläge\n\n"
+                "🟤 *Braune Tonne (Biotonne)*\n"
+                "Lebensmittelreste, Kaffeesatz, Eierschalen, Gartenabfälle\n\n"
+                "⚫ *Restmülltonne (Grau/Schwarz)*\n"
+                "Alles was nicht sortierbar ist: Windeln, Staubsaugerbeutel, Zigarettenstummel\n\n"
+                "🟢 *Grüner Punkt / Glascontainer*\n"
+                "Glas nach Farbe: Weiß, Braun, Grün\n\n"
+                "⚡ *Elektroschrott*\n"
+                "Zum Wertstoffhof oder Rückgabe im Elektromarkt\n\n"
+                "📦 *Sperrmüll*\n"
+                "Möbel, große Gegenstände → Termin bei der Stadt anmelden\n\n"
+                "_💡 Tipp: App \"AbfallApp\" oder die städtische Website zeigt dir den Abholkalender._"
+            )
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("◀️ Zurück", callback_data="intg:back"))
+            last_bot_text[chat_id] = muell_text
+            bot.send_message(chat_id, muell_text, parse_mode="Markdown", reply_markup=markup)
+            return
+
+        if action == "steuerrueckgabe":
+            steuer_text = (
+                "💰 *Steuern zurückbekommen — so geht's*\n\n"
+                "Durchschnittliche Rückerstattung in Deutschland: *ca. 1.000€*\n\n"
+                "🛠️ *Was du absetzen kannst:*\n"
+                "• Fahrtkosten zur Arbeit (0,30€/km, Hin- UND Rückweg)\n"
+                "• Homeoffice-Pauschale (6€/Tag, max. 1.260€/Jahr)\n"
+                "• Arbeitsmittel (Laptop, Schreibtisch, Headset...)\n"
+                "• Fortbildungen & Fachbücher\n"
+                "• Gewerkschaftsbeiträge\n"
+                "• Spenden\n"
+                "• Kinderbetreuungskosten\n"
+                "• Doppelte Haushaltsführung (zweite Wohnung wegen Job)\n\n"
+                "📱 *Welches Tool für dich?*\n\n"
+                "Für *Angestellte*:\n"
+                "→ *Taxfix* (taxfix.de) — einfach, app-basiert, ~35€\n"
+                "→ *WISO Steuer* (wiso-steuer.de) — auch für Komplizierteres, ~30€\n\n"
+                "Für *Freelancer / Selbstständige*:\n"
+                "→ *WISO Steuer* — deckt alle Einkunftsarten ab\n"
+                "→ *Steuerberater* — bei komplexen Fällen\n\n"
+                "🗓️ *Deadline:*\n"
+                "31. Juli des Folgejahres (z.B. für 2024 → 31. Juli 2025)\n"
+                "Mit Steuerberater bis 28. Februar des übernächsten Jahres\n\n"
+                "_💡 Keine Pflicht zur Abgabe als Arbeitnehmer — aber fast immer lohnt es sich!_"
+            )
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🗓️ Fristen & Termine", callback_data="intg:steuerfristen"))
+            markup.add(InlineKeyboardButton("◀️ Zurück", callback_data="intg:steuern"))
+            last_bot_text[chat_id] = steuer_text
+            bot.send_message(chat_id, steuer_text, parse_mode="Markdown", reply_markup=markup)
+            return
 
         return
 
