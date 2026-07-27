@@ -3839,8 +3839,63 @@ def handle_onboarding(chat_id, text):
             except Exception:
                 pitch_msg = PITCHES["English"]  # safe English fallback
 
-        user_state[chat_id] = {"mode": "menu"}
+        # Transition texts in native language — sets up the NPC intro
+        TRANSITIONS = {
+            "English":    "Stand by — I'm sending you a message right now. Just write back! 💬",
+            "Русский":    "Сейчас напишу тебе. Просто ответь мне! 💬",
+            "Українська": "Зараз напишу тобі. Просто відповідай! 💬",
+            "Türkçe":     "Sana hemen mesaj gönderiyorum. Sadece yanıtla! 💬",
+            "Arabic":     "سأرسل لك رسالة الآن. فقط ردّ عليّ! 💬",
+            "Español":    "Te mando un mensaje ahora mismo. ¡Solo responde! 💬",
+            "Français":   "Je t'envoie un message tout de suite. Réponds juste ! 💬",
+            "Polski":     "Zaraz piszę do Ciebie. Po prostu odpowiedz! 💬",
+        }
+        transition = TRANSITIONS.get(lang, "I'm sending you a message — just write back! 💬")
+
+        # Send pitch + transition
         bot.send_message(chat_id, pitch_msg, reply_markup=ReplyKeyboardRemove())
+        time.sleep(1.2)
+        bot.send_message(chat_id, transition)
+
+        # NPC voice intro — always in German, sets the scene
+        npc_intro_text = (
+            "Hey! Ich bin dein Deutscher Kumpel. "
+            "Ich komme aus Berlin — geboren und aufgewachsen hier. "
+            "Wie heißt du denn? Und woher kommst du?"
+        )
+        time.sleep(1.5)
+        bot.send_chat_action(chat_id, "record_audio")
+        try:
+            audio = text_to_speech_stream(npc_intro_text, chat_id)
+            markup_intro = InlineKeyboardMarkup()
+            markup_intro.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+            last_bot_text[chat_id] = npc_intro_text
+            bot.send_voice(chat_id, audio, reply_markup=markup_intro)
+        except Exception as e:
+            log.warning(f"NPC intro voice failed for {chat_id}: {e}")
+            bot.send_message(chat_id, f"🎤 {npc_intro_text}")
+
+        # Wait for user reply in handle_onboarding → step "intro_reply"
+        user_state[chat_id] = {"mode": "onboarding", "step": "intro_reply"}
+
+    elif step == "intro_reply":
+        # User replied to NPC intro — any response counts
+        name = user_data[str(chat_id)].get("name", "")
+        closing_text = (
+            f"Freut mich, dich kennenzulernen{', ' + name if name else ''}! "
+            f"Dann lass uns doch Deutsch SPRECHEN!"
+        )
+        user_state[chat_id] = {"mode": "menu"}
+
+        bot.send_chat_action(chat_id, "record_audio")
+        try:
+            audio = text_to_speech_stream(closing_text, chat_id)
+            bot.send_voice(chat_id, audio)
+        except Exception as e:
+            log.warning(f"Onboarding closing voice failed for {chat_id}: {e}")
+            bot.send_message(chat_id, f"😄 {closing_text}")
+
+        time.sleep(0.8)
         send_topic_buttons(chat_id)
 
 def send_voice_intro(chat_id):
@@ -6600,13 +6655,15 @@ def handle_voice(message):
     if mode == "onboarding":
         if state.get("step") == "name":
             user_text = _transcribe_voice(message)
-            # Use the full transcript as the name (trim excess punctuation/length)
             name = user_text.strip().strip(".,!?-–")[:40] if user_text else ""
             if name:
                 handle_onboarding(chat_id, name)
             else:
                 bot.send_message(chat_id, "Ich hab dich nicht verstanden 😅 Wie heißt du?")
-        # Goal step and all others: voice not applicable, ignore silently
+        elif state.get("step") == "intro_reply":
+            # Any voice reply counts — trigger the closing
+            handle_onboarding(chat_id, "_voice_reply_")
+        # All other onboarding steps: voice not applicable, ignore silently
         return
 
     # ── TEST MODE — extract a/b/c from spoken answer ─────────────────────────
