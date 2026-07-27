@@ -59,16 +59,13 @@ def _send_message_with_translate(chat_id, text, **kwargs):
 bot.send_message = _send_message_with_translate
 
 bot.set_my_commands([
-    BotCommand("info",         "So funktioniert der Bot ℹ️"),
+    BotCommand("info",         "Instruktion 📖"),
     BotCommand("start",        "Start"),
     BotCommand("themen",       "Themen wählen 🎯"),
-    BotCommand("level",        "Mein Niveau"),
-    BotCommand("achievements", "Meine Erfolge 🏅"),
-    BotCommand("progress",     "Mein Fortschritt"),
+    BotCommand("level",        "Mein Progress 📊"),
     BotCommand("errors",       "Meine Fehler"),
     BotCommand("practice",     "Übungen"),
     BotCommand("flashcards",   "Vokabelkarten 🃏"),
-    BotCommand("gem",          "German Gem 💎"),
     BotCommand("share",        "Bot teilen 🤝"),
     BotCommand("danke",        "Danke sagen 🙏"),
     BotCommand("upgrade",      "Pläne & Preise 💎"),
@@ -4576,72 +4573,100 @@ def feedback(message):
     bot.send_message(chat_id, result)
 
 # FORTSCHRITT COMMAND
-@bot.message_handler(commands=['progress'])
-def progress_cmd(message):
+@bot.message_handler(commands=['level'])
+def level_cmd(message):
     ensure_user(message.chat.id)
     if _require_onboarding(message.chat.id): return
-    send_progress(message.chat.id)
+    send_my_progress(message.chat.id)
 
-@bot.message_handler(commands=['fortschritt'])
-def fortschritt(message):
-    chat_id = message.chat.id
-    ensure_user(chat_id)
-    user = user_data[str(chat_id)]
+@bot.message_handler(commands=['progress'])
+def progress_cmd_redirect(message):
+    ensure_user(message.chat.id)
+    if _require_onboarding(message.chat.id): return
+    send_my_progress(message.chat.id)
 
-    level   = user.get("level", "A2")
-    streak  = user.get("scenario_streak", 0)
-    goal    = user.get("goal", "—")
-    name    = user.get("name", "User")
 
-    # Scenarios completed per goal
-    progress = user.get("user_progress", {})
-    total_done = sum(len(v) for v in progress.values())
-    goal_done  = len(progress.get(goal, []))
+def send_my_progress(chat_id: int):
+    """
+    Kombinierte Progress-Ansicht: Deutschniveau + XP + Streak + Achievements + Empfehlung.
+    Ersetzt die separaten /level, /progress, /achievements Commands.
+    """
+    uid   = str(chat_id)
+    user  = user_data.get(uid, {})
+    stats = user.get("user_stats", {})
+    name  = user.get("name", "")
 
-    # Streak bar toward next level (out of 3)
-    filled  = min(streak, 3)
-    bar     = "🟩" * filled + "⬜" * (3 - filled)
+    # ── Daten zusammentragen ────────────────────────────────────────────────
+    german_level = user.get("level", "A2")          # A1–C2 aus Onboarding/Adaptiv
+    xp           = stats.get("xp", 0)
+    bot_level    = stats.get("level", 1)
+    streak       = stats.get("streak", 0)
+    goal         = user.get("goal", "")
+    convos       = user.get("conversations_started", 0)
 
-    # Level progression position
-    LEVELS  = ["A1", "A2", "B1", "B2", "C1"]
-    lv_pos  = LEVELS.index(level) + 1 if level in LEVELS else "?"
-    lv_bar  = "".join("🔵" if LEVELS[i] == level else ("✅" if i < LEVELS.index(level) else "⚪") for i in range(len(LEVELS)))
+    # ── XP-Balken innerhalb des Bot-Levels ──────────────────────────────────
+    xp_in_level  = xp % 50
+    filled       = xp_in_level // 5
+    xp_bar       = "🟦" * filled + "⬜" * (10 - filled)
+    xp_to_next   = 50 - xp_in_level
 
-    # Weak points summary
-    wps = [wp for wp in user.get("weak_points", []) if isinstance(wp, dict)]
-    if wps:
-        wp_lines = "\n".join(
-            f"  • {wp.get('type','?')}  (Stärke: {wp.get('strength',0)})"
-            for wp in wps[-5:]
+    # ── Streak-Balken ───────────────────────────────────────────────────────
+    streak_bar = ("🔥" * min(streak, 7)) if streak > 0 else "💤 Noch kein Streak"
+
+    # ── Achievements ────────────────────────────────────────────────────────
+    earned = user.get("achievements", [])
+    ach_lines = []
+    for badge_id, key, threshold, emoji, title, desc in ACHIEVEMENT_DEFS:
+        if badge_id in earned:
+            ach_lines.append(f"{emoji} {title}")
+    ach_block = ("  " + "  ".join(ach_lines[:6])) if ach_lines else "  Noch keine — mach dein erstes Gespräch! 🎯"
+
+    # ── Empfehlung: Wochen bis nächstes Sprachniveau ────────────────────────
+    LEVEL_WEEKS = {
+        "A1": ("A2", 4),
+        "A2": ("B1", 8),
+        "B1": ("B2", 10),
+        "B2": ("C1", 14),
+        "C1": ("C2", 20),
+    }
+    next_info = LEVEL_WEEKS.get(german_level)
+
+    if next_info:
+        next_lvl, base_weeks = next_info
+        # Beschleunigung durch mehr tägliche Nutzung
+        # Basis: ~5 Gespräche/Woche → base_weeks
+        # +10 Min täglich = ca. 7 Gespräche/Woche → 30% schneller
+        fast_weeks = max(1, round(base_weeks * 0.70))
+        rec_block = (
+            f"⏱ *Dein Weg zu {next_lvl}:*\n"
+            f"  Bei aktuellem Tempo: ca. *{base_weeks} Wochen*\n"
+            f"  Mit 10 Min mehr täglich: ca. *{fast_weeks} Wochen* 🚀\n"
+            f"  → Einfach Quatschen — kein Lernplan, kein Druck."
         )
     else:
-        wp_lines = "  Noch keine erfasst"
+        rec_block = "🏆 Du bist auf dem höchsten Niveau — weiter so!"
 
-    # Session mode
-    s     = session_state.get(chat_id, {"struggle": 0, "success": 0})
-    mode  = get_dynamic_mode(s)
-    mode_emoji = {"easy": "🐢 Easy", "normal": "🚶 Normal", "hard": "🔥 Hard"}.get(mode, mode)
+    # ── Ziel-Info ───────────────────────────────────────────────────────────
+    goal_line = (f"🎯 *Dein Ziel:* {GOAL_TEXT.get(goal, goal)}\n" if goal else "")
 
+    # ── Zusammensetzen ──────────────────────────────────────────────────────
     text = (
-        f"📊 *Dein Fortschritt, {name}*\n"
-        f"━━━━━━━━━━━━━━━━━\n\n"
-        f"🎯 *Niveau:* {level}\n"
-        f"{lv_bar}\n"
-        f"A1 → A2 → B1 → B2 → C1\n\n"
-        f"⚡ *Level-Up Streak:* {streak}/3\n"
-        f"{bar}\n\n"
-        f"🗂 *Aktuelles Ziel:* {goal}\n"
-        f"📁 Szenarien in diesem Ziel: {goal_done} erledigt\n"
-        f"📚 Insgesamt erledigt: {total_done}\n\n"
-        f"🧠 *Schwachpunkte:*\n{wp_lines}\n\n"
-        f"🎮 *Aktuelle Schwierigkeit:* {mode_emoji}"
+        f"📊 *Mein Progress{', ' + name if name else ''}*\n"
+        f"──────────────────\n\n"
+        f"🇩🇪 *Deutschniveau:* {german_level}\n"
+        f"{goal_line}"
+        f"\n⭐ *XP:* {xp}  |  Level {bot_level}  |  +{xp_to_next} bis Level {bot_level + 1}\n"
+        f"{xp_bar}\n\n"
+        f"🔥 *Streak:* {streak} {'Tag' if streak == 1 else 'Tage'}  {streak_bar}\n\n"
+        f"🏅 *Achievements:*\n{ach_block}\n\n"
+        f"{rec_block}"
     )
 
-    bot.send_message(chat_id, text, parse_mode="Markdown")
-
-# ─────────────────────────────────────────────
-# MENU & FEATURE FUNCTIONS
-# ─────────────────────────────────────────────
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🎯 Jetzt Gespräch starten", callback_data="start_chat"))
+    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+    last_bot_text[chat_id] = text
+    bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
 def show_menu(chat_id):
     user_state[chat_id] = user_state.get(chat_id, {})
@@ -5040,7 +5065,8 @@ def menu_cmd(message):
 @bot.message_handler(commands=['level'])
 def level_cmd(message):
     ensure_user(message.chat.id)
-    show_level(message.chat.id)
+    if _require_onboarding(message.chat.id): return
+    send_my_progress(message.chat.id)
 
 @bot.message_handler(commands=['errors'])
 def errors_cmd(message):
@@ -5072,19 +5098,18 @@ def info_cmd(message):
         tier = "\n🔓 Kostenlos: 1 Gespräch/Tag + tägliche Gems."
 
     text = (
-        f"ℹ️ *Dein Deutscher Kumpel*{' — Hallo, ' + name + '!' if name else ''}\n\n"
+        f"📖 *Instruktion{' — Hallo, ' + name + '!' if name else ''}*\n\n"
         "🎯 /themen — Gesprächsthema wählen\n"
         "🎤 Sprich oder schreib auf Deutsch — Fehler werden erklärt & gespeichert\n"
         "💪 /practice — Übungen zu deinen Schwächen\n"
         "🃏 /flashcards — Vokabelkarten auf Quizlet\n"
-        "💎 /gem — Ausdruck des Tages\n"
-        "📊 /progress — dein Fortschritt\n"
-        "📋 /integration — Amtsbriefe, Verträge & Formulare auf Deutsch verstehen\n"
+        "📊 /level — Mein Progress, XP & Empfehlungen\n"
+        "📋 /integration — Amtsbriefe, Verträge & Formulare verstehen\n"
         "🔁 /restart — neues Gespräch starten\n\n"
         "💎 *Pläne:*\n"
         "🔓 Free: 1 Gespräch/Tag + tägliche Gems\n"
         "🎓 Premium (€20/Mo): unlimitierte Gespräche & Übungen\n"
-        "👑 Premium Plus (€30/Mo): alles aus Premium + Alltag in Deutschland meistern\n"
+        "👑 Premium Plus (€30/Mo): alles + Alltag in Deutschland meistern\n"
         "→ /upgrade für Details & Preise\n"
         + tier +
         "\n\nFragen? /support"
@@ -5741,25 +5766,9 @@ def handle_support(message):
 
 @bot.message_handler(commands=["achievements", "badges", "erfolge"])
 def handle_achievements(message):
-    chat_id = message.chat.id
-    uid = str(chat_id)
-    if uid not in user_data:
-        bot.send_message(chat_id, "Starte zuerst mit /start.")
-        return
-    earned = user_data[uid].get("achievements", [])
-    if not earned:
-        bot.send_message(chat_id,
-            "Noch keine Achievements 😅\nMach dein erstes Gespräch und leg los! 🎯")
-        return
-
-    lines = ["🏅 *Deine Achievements:*\n"]
-    for badge_id, key, threshold, emoji, title, desc in ACHIEVEMENT_DEFS:
-        if badge_id in earned:
-            lines.append(f"{emoji} *{title}* — _{desc}_")
-
-    total = len(earned)
-    lines.append(f"\n_{total}/{len(ACHIEVEMENT_DEFS)} freigeschaltet_")
-    bot.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
+    ensure_user(message.chat.id)
+    if _require_onboarding(message.chat.id): return
+    send_my_progress(message.chat.id)
 
 
 @bot.message_handler(commands=["levelup", "level_up", "nächstesniveau"])
