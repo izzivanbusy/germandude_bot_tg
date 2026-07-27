@@ -46,14 +46,12 @@ _orig_send_message = bot.send_message
 
 def _send_message_with_translate(chat_id, text, **kwargs):
     """Wrap bot.send_message to auto-inject übersetzen button on plain messages."""
-    # Store last bot text regardless
     if isinstance(text, str):
         last_bot_text[chat_id] = text
-    # Don't inject if message already has buttons or is a system/keyboard message
     if "reply_markup" not in kwargs or kwargs["reply_markup"] is None:
-        translate_btn = InlineKeyboardMarkup()
-        translate_btn.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
-        kwargs["reply_markup"] = translate_btn
+        _auto_markup = InlineKeyboardMarkup()
+        _auto_markup.add(translate_btn(chat_id))
+        kwargs["reply_markup"] = _auto_markup
     return _orig_send_message(chat_id, text, **kwargs)
 
 bot.send_message = _send_message_with_translate
@@ -1960,7 +1958,7 @@ def send_reply(chat_id, text, voice=True):
 
     # Text-only mode: user sent a text message, bot replies with text + translate button
     translate_markup = InlineKeyboardMarkup()
-    translate_markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data=f"translate_last"))
+    translate_markup.add(translate_btn(chat_id))
     if not voice:
         bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=translate_markup)
         return
@@ -1969,7 +1967,8 @@ def send_reply(chat_id, text, voice=True):
     pending_texts[text_key] = text
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("📄 Text anzeigen", callback_data=f"show_text:{text_key}"))
-    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data=f"translate:{text_key}"))
+    _flag = FLAG_MAP.get(user_data.get(str(chat_id), {}).get("native_language", ""), "🌍")
+    markup.add(InlineKeyboardButton(f"{_flag} übersetzen", callback_data=f"translate:{text_key}"))
 
     try:
         audio = text_to_speech_stream(text, chat_id)
@@ -2502,6 +2501,36 @@ ACHIEVEMENT_DEFS = [
 #  PAYWALL / SUBSCRIPTION SYSTEM
 # ═══════════════════════════════════════════════════════════════════════════
 
+# Language → flag emoji mapping for the translate button
+FLAG_MAP = {
+    "English":    "🇬🇧",
+    "Русский":    "🇷🇺",
+    "Українська": "🇺🇦",
+    "Türkçe":     "🇹🇷",
+    "Arabic":     "🇸🇦",
+    "Español":    "🇪🇸",
+    "Français":   "🇫🇷",
+    "Polski":     "🇵🇱",
+    "Deutsch":    "🇩🇪",
+    "Italiano":   "🇮🇹",
+    "Português":  "🇵🇹",
+    "中文":        "🇨🇳",
+    "日本語":       "🇯🇵",
+    "한국어":       "🇰🇷",
+    "हिंदी":       "🇮🇳",
+    "Română":     "🇷🇴",
+    "Čeština":    "🇨🇿",
+    "Magyar":     "🇭🇺",
+}
+
+def translate_btn(chat_id) -> InlineKeyboardButton:
+    """Returns a translate button with the user's language flag, falling back to 🌍."""
+    lang = user_data.get(str(chat_id), {}).get("native_language", "")
+    flag = FLAG_MAP.get(lang, "🌍")
+    label = f"{flag} übersetzen"
+    return InlineKeyboardButton(label, callback_data="translate_last")
+
+
 # Trial codes — add/remove here, or move to env var later
 # Format: { "CODE": days_granted }
 TRIAL_CODES = {
@@ -2672,9 +2701,7 @@ def send_paywall(chat_id):
         "🎁 Freunde einladen & 3 Tage gratis sichern",
         url=share_url
     ))
-    markup.add(InlineKeyboardButton(
-        "🌍 übersetzen", callback_data="translate_last"
-    ))
+    markup.add(translate_btn(chat_id))
 
     xp_streak_line = f"Du hast bereits *{xp} XP* gesammelt"
     if streak > 1:
@@ -2780,7 +2807,7 @@ def handle_upgrade(message):
         markup.add(InlineKeyboardButton("👑 Premium Plus — €30/Monat", callback_data="pay_plus"))
         markup.add(InlineKeyboardButton("⭐ Plus mit Stars — 2000 Stars", callback_data="pay_stars_plus"))
 
-    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+    markup.add(translate_btn(chat_id))
     last_bot_text[chat_id] = text
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
@@ -2873,7 +2900,7 @@ def send_daily_limit_paywall(chat_id: int):
     markup.add(InlineKeyboardButton("🎓 Premium — €20/Monat", url=checkout_url))
     markup.add(InlineKeyboardButton("⭐ Stars zahlen", callback_data="pay_stars"))
     markup.add(InlineKeyboardButton("🎁 Freunde einladen → 3 Tage gratis", url=share_url))
-    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+    markup.add(translate_btn(chat_id))
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
 def send_quatschen_upgrade_prompt(chat_id: int):
@@ -2893,7 +2920,7 @@ def send_quatschen_upgrade_prompt(chat_id: int):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("👑 Jetzt auf Premium Plus upgraden", callback_data="pay_plus"))
     markup.add(InlineKeyboardButton("⭐ Stars — 2000 Stars", callback_data="pay_stars_plus"))
-    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+    markup.add(translate_btn(chat_id))
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
 def get_remaining_convos_hint(chat_id: int) -> str:
@@ -3868,7 +3895,7 @@ def handle_onboarding(chat_id, text):
         try:
             audio = text_to_speech_stream(npc_intro_text, chat_id)
             markup_intro = InlineKeyboardMarkup()
-            markup_intro.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+            markup_intro.add(translate_btn(chat_id))
             last_bot_text[chat_id] = npc_intro_text
             bot.send_voice(chat_id, audio, reply_markup=markup_intro)
         except Exception as e:
@@ -3992,7 +4019,7 @@ def handle_topic_callback(call):
             last_bot_text[chat_id] = qtext
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("👑 Premium Plus holen", callback_data="pay_plus"))
-            markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+            markup.add(translate_btn(chat_id))
             bot.send_message(chat_id, qtext, reply_markup=markup)
             return
         user_data[str(chat_id)]["goal"] = goal
@@ -4110,8 +4137,7 @@ def start_scenario(chat_id, scenario):
     # 6. Send context text
     user = user_data.get(str(chat_id), {})
     lang = user.get("native_language")
-    lang_hint = f"\n🌍 Tippe /übersetzen um meine letzte Nachricht auf {lang} zu übersetzen." if lang else ""
-    bot.send_message(chat_id, f"🎭 {ctx}{lang_hint}")
+    bot.send_message(chat_id, f"🎭 {ctx}")
 
     # 7. Send voice nudge
     send_reply(chat_id, opening, voice=True)
@@ -4480,7 +4506,7 @@ def lesson_yes_callback(call):
     last_bot_text[chat_id] = lesson_text
 
     translate_markup = InlineKeyboardMarkup()
-    translate_markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+    translate_markup.add(translate_btn(chat_id))
     bot.send_message(chat_id, lesson_text, reply_markup=translate_markup)
 
     # Mini dialog
@@ -4506,7 +4532,7 @@ def lesson_yes_callback(call):
 
     restart_markup = InlineKeyboardMarkup()
     restart_markup.add(InlineKeyboardButton("🔄 Test erneut starten", callback_data="start_test"))
-    restart_markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+    restart_markup.add(translate_btn(chat_id))
     bot.send_message(chat_id, dialog_text, parse_mode="Markdown", reply_markup=restart_markup)
 
 
@@ -4797,7 +4823,7 @@ def send_my_progress(chat_id: int):
 
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🎯 Jetzt Gespräch starten", callback_data="start_chat"))
-    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+    markup.add(translate_btn(chat_id))
     last_bot_text[chat_id] = text
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
@@ -5248,7 +5274,7 @@ def info_cmd(message):
         "\n\nFragen? /support"
     )
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+    markup.add(translate_btn(chat_id))
     last_bot_text[chat_id] = text
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
@@ -5268,7 +5294,7 @@ def send_danke_menu(chat_id: int):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("☕ Einen Kaffee spendieren",  callback_data="danke:donate"))
     markup.add(InlineKeyboardButton("💬 Feedback hinterlassen",    callback_data="danke:feedback"))
-    markup.add(InlineKeyboardButton("🌍 übersetzen",               callback_data="translate_last"))
+    markup.add(translate_btn(chat_id))
     last_bot_text[chat_id] = text
     bot.send_message(chat_id, text, reply_markup=markup)
 
@@ -5851,7 +5877,7 @@ def send_daily_gem(chat_id):
     last_bot_text[_cid] = msg
     user_state[_cid] = {"mode": user_state.get(_cid, {}).get("mode", "idle"), "gem_exercise": expression, "gem_text": expression}
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+    markup.add(translate_btn(chat_id))
     bot.send_message(_cid, msg, parse_mode="Markdown", reply_markup=markup)
 
 
@@ -7059,7 +7085,7 @@ Nur diese Zeilen, nichts sonst.""",
             has_quiz = False
 
         markup = InlineKeyboardMarkup(row_width=2)
-        markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+        markup.add(translate_btn(chat_id))
         if has_quiz:
             markup.add(InlineKeyboardButton("✅ Quiz starten", callback_data="kultur_quiz_start"))
         markup.add(InlineKeyboardButton("📚 Andere Themen", callback_data="intg:kultur"))
@@ -7134,7 +7160,7 @@ Nur diese Zeilen, nichts sonst.""",
                 "Dein Kumpel ist da. Immer. Kein Urteilen, kein Stress."
             )
             last_bot_text[chat_id] = ptext
-            markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+            markup.add(translate_btn(chat_id))
             bot.send_message(chat_id, ptext, reply_markup=markup)
         except stripe.error.InvalidRequestError as e:
             # Häufigste Ursache: Price ID ist einmalig, nicht recurring.
