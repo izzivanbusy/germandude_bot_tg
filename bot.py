@@ -3724,42 +3724,120 @@ def handle_onboarding(chat_id, text):
 
         lang = user_data[str(chat_id)].get("native_language", "English")
         name = user_data[str(chat_id)].get("name", "")
+        name_part = f", {name}" if name else ""
 
-        # Punchy pitch in native language — pain points + value promise
-        try:
-            pitch_resp = claude.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=220,
-                system="Write only the message text. No quotes, no preamble, no extra explanation.",
-                messages=[{"role": "user", "content": (
-                    f"Write a short, punchy message in {lang} to {name or 'the user'}. "
-                    f"Informal tone. Max 10 lines. Use 3-4 emojis max.\n\n"
-                    f"Structure it like this:\n"
-                    f"1. Address the fear/pain: many people already KNOW German but are too scared to speak it. "
-                    f"Or they freeze when a German speaks to them.\n"
-                    f"2. The solution: now they have a native German speaker as a personal friend in their pocket — "
-                    f"available 24/7, no judgment, always patient.\n"
-                    f"3. A concrete timeline — make it feel real and achievable:\n"
-                    f"   - In 4 weeks: they stop panicking in conversations, basic replies flow naturally\n"
-                    f"   - In 3 months: they handle everyday situations confidently — Ämter, colleagues, friends\n"
-                    f"   - In 1 year: almost native speaker level, Germans ask where they learned so well 😄\n"
-                    f"4. End with one punchy action line like 'Los geht's.' or 'Pick a topic.' — no fluff.\n\n"
-                    f"Do NOT say 'AI', 'bot', 'app', or 'chatbot'. "
-                    f"Write as if I am a real German friend texting them. "
-                    f"The timeline should feel exciting, not like a language course brochure."
-                )}]
-            )
-            pitch_msg = pitch_resp.content[0].text.strip()
-        except Exception:
-            pitch_msg = (
-                f"Kennst du das? Du lernst Deutsch, aber wenn ein Echter mit dir spricht — Blackout. 😅\n\n"
-                f"Ab jetzt hast du einen Muttersprachler als Kumpel in der Tasche. "
-                f"Immer da, kein Urteilen, kein Stress. Einfach reden.\n\n"
-                f"📅 In 4 Wochen: kein Panik mehr — einfache Antworten kommen von alleine.\n"
-                f"📅 In 3 Monaten: Ämter, Kollegen, Freunde — du meisterst den Alltag auf Deutsch.\n"
-                f"📅 In 1 Jahr: fast Muttersprachler. Deutsche fragen dich, wo du so gut gelernt hast. 😄\n\n"
-                f"Los geht's. 👇"
-            )
+        # Hardcoded native-quality pitches for top 8 languages
+        # Claude Haiku makes morphology errors in inflected languages (Russian etc.) — don't use it for these
+        PITCHES = {
+            "English": (
+                f"You know the feeling{name_part}? You\'ve been learning German — but the moment "
+                f"a German starts talking, your mind goes blank. 😅\n\n"
+                f"Now you\'ve got me — a real German friend, 24/7 in your pocket.\n"
+                f"No pressure, no judgment. We just talk.\n\n"
+                f"📅 In 4 weeks: the panic fades, simple replies start flowing naturally.\n"
+                f"📅 In 3 months: Ämter, colleagues, friends — you handle it all with ease.\n"
+                f"📅 In 1 year: Germans will ask where you learned to speak so well. 😄\n\n"
+                f"Pick a topic — let\'s go. 👇"
+            ),
+            "Русский": (
+                f"Знакомо{name_part}? Ты учишь немецкий — а как только немец заговорил, "
+                f"всё вылетело из головы. 😅\n\n"
+                f"Теперь у тебя есть я — настоящий немецкий друг, 24/7 в кармане.\n"
+                f"Без давления, без осуждения. Просто разговариваем.\n\n"
+                f"📅 Через 4 недели: паника проходит, простые фразы приходят сами.\n"
+                f"📅 Через 3 месяца: Amt, коллеги, друзья — ты справляешься со всем.\n"
+                f"📅 Через год: немцы сами спросят, где ты так хорошо выучил язык. 😄\n\n"
+                f"Выбери тему — начнём. 👇"
+            ),
+            "Українська": (
+                f"Знайоме{name_part}? Ти вчиш німецьку — а щойно хтось заговорив, "
+                f"усе вилетіло з голови. 😅\n\n"
+                f"Тепер у тебе є я — справжній німецький друг, 24/7 у кишені.\n"
+                f"Без тиску, без осуду. Просто розмовляємо.\n\n"
+                f"📅 Через 4 тижні: паніка зникає, прості фрази приходять самі.\n"
+                f"📅 Через 3 місяці: Amt, колеги, друзі — ти з усім справляєшся.\n"
+                f"📅 Через рік: німці самі питатимуть, де ти так добре вивчив мову. 😄\n\n"
+                f"Обери тему — починаємо. 👇"
+            ),
+            "Türkçe": (
+                f"Tanıdık geldi mi{name_part}? Almanca öğreniyorsun — ama biri konuşmaya "
+                f"başlayınca her şey uçup gidiyor. 😅\n\n"
+                f"Artık 24/7 cebinde gerçek bir Alman arkadaşın var.\n"
+                f"Baskı yok, yargılama yok. Sadece konuşuyoruz.\n\n"
+                f"📅 4 haftada: panik geçiyor, basit cümleler kendiliğinden geliyor.\n"
+                f"📅 3 ayda: Amt, iş arkadaşları, dostlar — hepsinin altından kalkıyorsun.\n"
+                f"📅 1 yılda: Almanlar sana nereden bu kadar iyi öğrendin diye soracak. 😄\n\n"
+                f"Bir konu seç — başlayalım. 👇"
+            ),
+            "Arabic": (
+                f"تعرف هذا الإحساس{name_part}؟ تتعلم الألمانية — لكن بمجرد أن يتكلم أحد، "
+                f"يختفي كل شيء من رأسك. 😅\n\n"
+                f"الآن معك أنا — صديق ألماني حقيقي، 24/7 في جيبك.\n"
+                f"بدون ضغط، بدون حكم. نتكلم فقط.\n\n"
+                f"📅 خلال 4 أسابيع: يختفي الذعر، تجيء الردود البسيطة بشكل طبيعي.\n"
+                f"📅 خلال 3 أشهر: الدوائر الحكومية، الزملاء، الأصدقاء — تتعامل مع الجميع.\n"
+                f"📅 خلال سنة: سيسألك الألمان أين تعلمت اللغة بهذا المستوى. 😄\n\n"
+                f"اختر موضوعاً — لنبدأ. 👇"
+            ),
+            "Español": (
+                f"¿Te suena familiar{name_part}? Estás aprendiendo alemán — pero en cuanto "
+                f"alguien habla, se te va todo. 😅\n\n"
+                f"Ahora tienes a tu lado a un amigo alemán de verdad, 24/7 en tu bolsillo.\n"
+                f"Sin presión, sin juicios. Solo hablamos.\n\n"
+                f"📅 En 4 semanas: el pánico desaparece, las frases simples salen solas.\n"
+                f"📅 En 3 meses: Amt, compañeros, amigos — te manejas con todo.\n"
+                f"📅 En 1 año: los alemanes te preguntarán dónde aprendiste tan bien. 😄\n\n"
+                f"Elige un tema — empecemos. 👇"
+            ),
+            "Français": (
+                f"Tu connais ce sentiment{name_part} ? Tu apprends l\'allemand — mais dès "
+                f"qu\'un Allemand parle, tout disparaît. 😅\n\n"
+                f"Maintenant tu as moi — un vrai ami allemand, 24/7 dans ta poche.\n"
+                f"Sans pression, sans jugement. On parle, c\'est tout.\n\n"
+                f"📅 En 4 semaines : la panique s\'en va, les réponses simples viennent naturellement.\n"
+                f"📅 En 3 mois : l\'Amt, les collègues, les amis — tu gères tout.\n"
+                f"📅 En 1 an : les Allemands te demanderont où tu as si bien appris. 😄\n\n"
+                f"Choisis un sujet — on commence. 👇"
+            ),
+            "Polski": (
+                f"Znasz to uczucie{name_part}? Uczysz się niemieckiego — ale jak tylko ktoś "
+                f"zaczyna mówić, wszystko ulatuje z głowy. 😅\n\n"
+                f"Teraz masz mnie — prawdziwego niemieckiego przyjaciela, 24/7 w kieszeni.\n"
+                f"Bez presji, bez oceniania. Po prostu rozmawiamy.\n\n"
+                f"📅 Za 4 tygodnie: panika mija, proste odpowiedzi przychodzą same.\n"
+                f"📅 Za 3 miesiące: Amt, współpracownicy, znajomi — dajesz radę ze wszystkim.\n"
+                f"📅 Za rok: Niemcy sami zapytają, gdzie tak dobrze nauczyłeś się języka. 😄\n\n"
+                f"Wybierz temat — zaczynamy. 👇"
+            ),
+        }
+
+        if lang in PITCHES:
+            pitch_msg = PITCHES[lang]
+        else:
+            # Claude fallback for other languages — stronger prompt to avoid morphology errors
+            try:
+                pitch_resp = claude.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=250,
+                    system=(
+                        "You are a native speaker of the requested language. "
+                        "Write ONLY the message text. No quotes, no preamble. "
+                        "Use only words and grammar that a native speaker would naturally use. "
+                        "If unsure about any word form, choose a simpler expression instead."
+                    ),
+                    messages=[{"role": "user", "content": (
+                        f"Write a short message in {lang} to {name or 'the user'} (informal). "
+                        f"Max 10 lines, 3 emojis max. Cover:\n"
+                        f"1. Pain: knows German but freezes when a German speaks\n"
+                        f"2. Solution: real German friend in pocket, 24/7, no pressure, no judgment\n"
+                        f"3. Timeline: 4 weeks (panic gone), 3 months (handles Amt/work/friends), 1 year (native-level)\n"
+                        f"4. Short action line to pick a topic\n\n"
+                        f"CRITICAL: Use only simple, correct {lang}. No unusual word forms. Keep it natural."
+                    )}]
+                )
+                pitch_msg = pitch_resp.content[0].text.strip()
+            except Exception:
+                pitch_msg = PITCHES["English"]  # safe English fallback
 
         user_state[chat_id] = {"mode": "menu"}
         bot.send_message(chat_id, pitch_msg, reply_markup=ReplyKeyboardRemove())
