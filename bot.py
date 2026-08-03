@@ -98,7 +98,6 @@ def onboarding_complete(chat_id) -> bool:
     uid  = str(chat_id)
     user = user_data.get(uid, {})
     return bool(
-        user.get("name") and
         user.get("native_language") and
         user.get("level")
     )
@@ -3867,44 +3866,11 @@ def handle_onboarding(chat_id, text):
             except Exception:
                 pitch_msg = PITCHES["English"]  # safe English fallback
 
-        # Transition texts in native language — sets up the NPC intro
-        TRANSITIONS = {
-            "English":    "Stand by — I'm sending you a message right now. Just write back! 💬",
-            "Русский":    "Сейчас напишу тебе. Просто ответь мне! 💬",
-            "Українська": "Зараз напишу тобі. Просто відповідай! 💬",
-            "Türkçe":     "Sana hemen mesaj gönderiyorum. Sadece yanıtla! 💬",
-            "Arabic":     "سأرسل لك رسالة الآن. فقط ردّ عليّ! 💬",
-            "Español":    "Te mando un mensaje ahora mismo. ¡Solo responde! 💬",
-            "Français":   "Je t'envoie un message tout de suite. Réponds juste ! 💬",
-            "Polski":     "Zaraz piszę do Ciebie. Po prostu odpowiedz! 💬",
-        }
-        transition = TRANSITIONS.get(lang, "I'm sending you a message — just write back! 💬")
-
-        # Send pitch + transition
+        # Send pitch then drop straight into the bot — no voice gate
         bot.send_message(chat_id, pitch_msg, reply_markup=ReplyKeyboardRemove())
-        time.sleep(1.2)
-        bot.send_message(chat_id, transition)
-
-        # NPC voice intro — always in German, sets the scene
-        npc_intro_text = (
-            "Hey! Ich bin dein Deutscher Kumpel. "
-            "Ich komme aus Berlin — geboren und aufgewachsen hier. "
-            "Wie heißt du denn? Und woher kommst du?"
-        )
-        time.sleep(1.5)
-        bot.send_chat_action(chat_id, "record_audio")
-        try:
-            audio = text_to_speech_stream(npc_intro_text, chat_id)
-            markup_intro = InlineKeyboardMarkup()
-            markup_intro.add(translate_btn(chat_id))
-            last_bot_text[chat_id] = npc_intro_text
-            bot.send_voice(chat_id, audio, reply_markup=markup_intro)
-        except Exception as e:
-            log.warning(f"NPC intro voice failed for {chat_id}: {e}")
-            bot.send_message(chat_id, f"🎤 {npc_intro_text}")
-
-        # Wait for user reply in handle_onboarding → step "intro_reply"
-        user_state[chat_id] = {"mode": "onboarding", "step": "intro_reply"}
+        user_state[chat_id] = {"mode": "menu"}
+        time.sleep(0.8)
+        send_topic_buttons(chat_id)
 
     elif step == "intro_reply":
         # User replied to NPC intro — any response counts
