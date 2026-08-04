@@ -141,6 +141,7 @@ def ensure_user(chat_id):
             "name": None, "gender": None, "native_language": None,
             "goal": None, "level": "A2", "scenario_streak": 0,
             "weak_points": [], "errors": [], "test_errors": [],
+            "user_story": [],          # persistent cross-session memory — all modes
             "user_progress": {g: [] for g in ALL_GOALS},
             "user_stats": {"xp": 0, "level": 1, "streak": 0, "last_active": now, "total_scenarios": 0},
             "trial_start": None, "premium": False, "trial_code_used": None,
@@ -173,7 +174,7 @@ def ensure_user(chat_id):
         user_data[uid].setdefault("message_count", 0)
         user_data[uid].setdefault("paywall_hits", 0)
         user_data[uid].setdefault("features_used", {})
-        user_data[uid].setdefault("conversations_started", 0)
+        user_data[uid].setdefault("user_story", [])          # cross-session memory
         user_data[uid].setdefault("test_completed", False)
         user_data[uid].setdefault("premium_plus", False)
         user_data[uid].setdefault("premium_plus_until", None)
@@ -937,6 +938,19 @@ def build_system_prompt(chat_id, scenario):
 
     # Native language note for GPT
     lang_note = f"Die Muttersprache des Lernenden ist: {native_language}." if native_language else ""
+
+    # Persistent user story — facts from all past sessions
+    user_story = user_data.get(str(chat_id), {}).get("user_story", [])
+    if user_story:
+        story_facts = "\n".join(f"- {f}" for f in user_story[-30:])
+        story_note = (
+            f"\nWAS DU ÜBER {name.upper() or 'DEN USER'} WEISST (aus früheren Gesprächen):\n"
+            f"{story_facts}\n"
+            f"Nutze dieses Wissen natürlich — nicht aufzählen, sondern einweben wenn passend. "
+            f"Wenn er/sie etwas erwähnt das du schon weißt, reagiere als echter Freund: 'Ah, das mit dem Vermieter?' etc."
+        )
+    else:
+        story_note = ""
     formality  = resolve_formality(goal, context)
     voice      = persona["voice"]
     mode       = get_dynamic_mode(session_state.get(chat_id, {"struggle": 0, "success": 0}))
@@ -1065,16 +1079,6 @@ Du bist ein echter Mensch in dieser Rolle, kein KI-Assistent.
 {gem_hint}
 VERBOTEN — ABSOLUT: Fang NIEMALS mit "Hmm", "Also", "Nun", "Tja", "Na ja", "Okay so", "Ah", "Oh", "Wow" oder KI-typischen Füllwörtern an. ERSTE WORT muss ein echtes Wort sein — kein Filler. Starte direkt wie ein echter Mensch.
 
-MEHRERE KURZE NACHRICHTEN (OPTIONAL, ABER WIRKUNGSVOLL):
-Echte Menschen schreiben manchmal in kurzen aufeinanderfolgenden Nachrichten — besonders bei emotionalen oder spontanen Reaktionen.
-Du kannst deine Antwort in 2–3 kurze Teile aufteilen, getrennt durch |||
-Verwende das NUR wenn es sich natürlich anfühlt — also bei:
-- Spontanen Reaktionen: "Haha! 😄 ||| Das kenne ich. ||| Was ist passiert?"
-- Kurzen Bestätigungen gefolgt von einer Frage: "Ach so! ||| Und dann?"
-- Überraschungen: "Wirklich? ||| Das hätte ich nicht gedacht!"
-Nicht bei jedem Turn — nur wenn eine kurze Reaktion + Folgefrage natürlicher wirkt als ein Satz.
-Maximum: 3 Teile. Jeder Teil: max 1 kurzer Satz oder Ausruf.
-
 ANREDE & GESCHLECHT:
 {gender_note}
 Formelle Anrede des Lernenden: {formal_address}
@@ -1084,6 +1088,7 @@ In informellen Szenarien (Freunde, Party, Gym etc.) nutze einfach "{name}".
 MUTTERSPRACHE:
 {lang_note}
 Du antwortest IMMER auf Deutsch — unabhängig davon, in welcher Sprache der Lernende schreibt oder spricht.
+{story_note}
 
 {human_style}
 """
@@ -1963,25 +1968,10 @@ def send_reply(chat_id, text, voice=True):
     level = user_data.get(str(chat_id), {}).get("level", "B1") if chat_id else "B1"
     text = humanize_text(text, level)
 
-    # ── Split-voice: multiple short messages like a real human ────────────────
-    parts = [p.strip() for p in text.split("|||") if p.strip()]
-    if len(parts) > 1 and voice:
-        # All parts but the last: plain voice, no buttons
-        for part in parts[:-1]:
-            bot.send_chat_action(chat_id, "record_audio")
-            try:
-                audio = text_to_speech_stream(part, chat_id)
-                bot.send_voice(chat_id, audio)
-            except Exception as e:
-                log.warning(f"Split voice part failed for {chat_id}: {e}")
-                bot.send_message(chat_id, part)
-            time.sleep(random.uniform(0.6, 1.2))
-        # Last part gets buttons as usual
-        text = parts[-1]
-
-    # ── Single (or final) message ─────────────────────────────────────────────
+    # Store last bot text for übersetzen button
     last_bot_text[chat_id] = text
 
+    # Text-only mode: user sent a text message, bot replies with text + translate button
     translate_markup = InlineKeyboardMarkup()
     translate_markup.add(translate_btn(chat_id))
     if not voice:
@@ -2006,6 +1996,7 @@ def send_reply(chat_id, text, voice=True):
                 "🔇 Sprachnachrichten deaktiviert. Bitte aktiviere sie in Telegram-Einstellungen.",
                 reply_markup=markup)
         else:
+            # TTS failed — send as text with buttons
             bot.send_message(chat_id, f"💬 {text}", reply_markup=markup)
 
 def send_chat_reply(chat_id, text):
@@ -2233,6 +2224,7 @@ def start_quatschen(chat_id):
     # Build friend memory context
     uid         = str(chat_id)
     friend_mem  = user_data.get(uid, {}).get("friend_memory", [])
+    user_story  = user_data.get(uid, {}).get("user_story", [])
     native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
 
     sys_prompt = QUATSCHEN_SYSTEM + HUMAN_SPEECH_STYLE
@@ -2242,8 +2234,10 @@ def start_quatschen(chat_id):
     if name:
         sys_prompt += f"\n\nDer User heißt {name}. Muttersprache: {native_lang}."
 
-    if friend_mem:
-        facts = "\n".join(f"- {f}" for f in friend_mem[-30:])
+    # Combine friend_memory (Quatschen-specific) + user_story (all modes)
+    all_facts = list(dict.fromkeys(friend_mem + [f for f in user_story if f not in friend_mem]))
+    if all_facts:
+        facts = "\n".join(f"- {f}" for f in all_facts[-40:])
         sys_prompt += (
             f"\n\nWAS DU ÜBER {name.upper() if name else 'DEN USER'} WEISST "
             f"(aus früheren Gesprächen — benutze es natürlich, nicht als Checkliste):\n"
@@ -2300,7 +2294,6 @@ def _extract_friend_memory(chat_id):
     """Extract key facts from this Quatschen session and save to friend_memory."""
     uid  = str(chat_id)
     name = user_data.get(uid, {}).get("name", "")
-    # Get last 20 turns from memory
     mem      = user_memory.get(chat_id, [])
     conv     = [m for m in mem if m.get("role") in ("user","assistant")][-20:]
     if not conv:
@@ -2327,18 +2320,65 @@ def _extract_friend_memory(chat_id):
                      if l.strip() and len(l.strip()) > 5]
         if new_facts:
             existing = user_data[uid].get("friend_memory", [])
-            # Deduplicate roughly
             combined = existing + [f for f in new_facts if f not in existing]
-            user_data[uid]["friend_memory"] = combined[-50:]  # keep last 50 facts
+            user_data[uid]["friend_memory"] = combined[-50:]
             save_users(user_data)
             log.info(f"Friend memory updated for {chat_id}: +{len(new_facts)} facts")
     except Exception as e:
         log.warning(f"Friend memory extraction failed: {e}")
 
 
+def _extract_user_story(chat_id, history_snapshot=None):
+    """Extract key personal facts from ANY session and save to user_story.
+    Works across all modes: scenarios, Quatschen, everything.
+    Called after every conversation ends."""
+    uid  = str(chat_id)
+    name = user_data.get(uid, {}).get("name", "")
+    mem  = history_snapshot or user_memory.get(chat_id, [])
+    conv = [m for m in mem if m.get("role") in ("user", "assistant")][-20:]
+    if not conv:
+        return
+    conv_text = "\n".join(
+        f"{'User' if m['role']=='user' else 'Dude'}: {m['content']}" for m in conv
+    )
+    try:
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=250,
+            system=(
+                "Extrahiere aus diesem Gespräch konkrete persönliche Fakten über den User. "
+                "NUR was er/sie wirklich erwähnt hat — keine Vermutungen, keine Annahmen. "
+                "Format: eine kurze Zeile pro Fakt. "
+                "Beispiele guter Fakten: "
+                "'Arbeitet als Ingenieurin bei Bosch', "
+                "'Hat Rückenschmerzen seit zwei Wochen', "
+                "'Sucht 2-Zimmer-Wohnung in Prenzlauer Berg', "
+                "'Kind heißt Emma, 4 Jahre alt', "
+                "'Bewerbungsgespräch bei Siemens nächste Woche', "
+                "'Kommt ursprünglich aus der Ukraine, lebt seit 1 Jahr in Berlin', "
+                "'Mag kein Fleisch'. "
+                "Wenn im Gespräch nichts Persönliches erzählt wurde: gar nichts ausgeben."
+            ),
+            messages=[{"role": "user", "content": f"Gespräch:\n{conv_text}"}]
+        )
+        new_facts = [l.strip().lstrip("-•*").strip()
+                     for l in resp.content[0].text.strip().splitlines()
+                     if l.strip() and len(l.strip()) > 8]
+        if new_facts:
+            existing = user_data[uid].get("user_story", [])
+            # Simple dedup: skip facts already captured
+            combined = existing + [f for f in new_facts if f not in existing]
+            user_data[uid]["user_story"] = combined[-80:]   # keep last 80 facts
+            save_users(user_data)
+            log.info(f"User story updated for {chat_id}: +{len(new_facts)} facts → {len(combined)} total")
+    except Exception as e:
+        log.warning(f"User story extraction failed for {chat_id}: {e}")
+
+
 def _quatschen_end_with_xp(chat_id):
     """Award XP and show share button after Quatschen session ends."""
-    _extract_friend_memory(chat_id)  # Save what we learned this session
+    _extract_friend_memory(chat_id)   # Quatschen-specific casual facts
+    _extract_user_story(chat_id)       # Cross-modal persistent story
     turns = turn_counter.get(chat_id, 0)
     xp_gain, bonus_msg = calculate_xp(turns, "normal")
     new_streak, lost_streak = update_streak(chat_id)
@@ -6494,6 +6534,12 @@ def end_conversation(chat_id):
         generate_feedback(chat_id, history_snapshot)
     except Exception as e:
         log.warning(f"generate_feedback failed for {chat_id}: {e}")
+
+    # Extract and persist personal facts from this session
+    try:
+        _extract_user_story(chat_id, history_snapshot)
+    except Exception as e:
+        log.warning(f"User story extraction failed in end_conversation: {e}")
 
     # ── Error analysis + exercises (GPT) ─────────────────────────────────────
     bot.send_chat_action(chat_id, "typing")
