@@ -94,7 +94,7 @@ ALL_GOALS = [
 ]
 
 def onboarding_complete(chat_id) -> bool:
-    """True once user has given their name."""
+    """True once user has given their name (first reply)."""
     uid = str(chat_id)
     return bool(user_data.get(uid, {}).get("name"))
 
@@ -3578,7 +3578,8 @@ def start(message):
 
     # New user — conversational onboarding, situation-first
     user_state[chat_id] = {"mode": "onboarding", "step": "name"}
-    user_data[str(chat_id)]["onboarding_step"] = "name"
+    user_data[str(chat_id)]["onboarding_step"]      = "name"
+    user_data[str(chat_id)]["onboarding_started_at"] = datetime.now().isoformat()
     test_state.pop(chat_id, None)
     user_step.pop(chat_id, None)
     save_users(user_data)
@@ -3628,16 +3629,16 @@ GOAL_MAP = {
 
 # Ordered topic list for topic-selection buttons (index = callback key)
 TOPIC_LIST = [
-    ("🏥 Arzt / Apotheke",           "Soziales (Ämter, Ärzte)"),
-    ("🏛️ Bürgeramt / Jobcenter",     "Soziales (Ämter, Ärzte)"),
-    ("💼 Vorstellungsgespräch",       "Job"),
-    ("🏠 Vermieter / WG",            "Soziales (Ämter, Ärzte)"),
-    ("📞 Telefonat",                  "Am Telefon"),
-    ("🛒 Einkauf / Restaurant",       "Einkauf & Restaurants"),
-    ("👋 Kennenlernen",               "Selbstpräsentation"),
-    ("☕ Freunde / Dates",            "Freunde / Beziehungen"),
-    ("✈️ Reisen",                     "Tourismus & Reisen"),
-    ("💬 Einfach quatschen",          "Quatschen"),
+    ("🏥 Arzt / Apotheke",        "Soziales (Ämter, Ärzte)"),
+    ("🏛️ Bürgeramt / Jobcenter",  "Soziales (Ämter, Ärzte)"),
+    ("💼 Vorstellungsgespräch",    "Job"),
+    ("🏠 Vermieter / WG",         "Soziales (Ämter, Ärzte)"),
+    ("📞 Telefonat",               "Am Telefon"),
+    ("🛒 Einkauf / Restaurant",    "Einkauf & Restaurants"),
+    ("👋 Kennenlernen",            "Selbstpräsentation"),
+    ("☕ Freunde / Dates",         "Freunde / Beziehungen"),
+    ("✈️ Reisen",                  "Tourismus & Reisen"),
+    ("💬 Einfach quatschen",       "Quatschen"),
 ]
 
 def send_topic_buttons(chat_id):
@@ -3692,11 +3693,22 @@ def handle_onboarding(chat_id, text):
         "polski": "Polski", "polish": "Polski", "polnisch": "Polski",
     }
 
-    # ── Step 1: Name ──────────────────────────────────────────────────────────
     if step == "name":
         name = text.strip() or "du"
-        user_data[str(chat_id)]["name"] = name
-        user_data[str(chat_id)]["onboarding_step"] = "first_reply"
+        now  = datetime.now()
+
+        # ── time_to_first_reply ───────────────────────────────────────────────
+        started = user_data[str(chat_id)].get("onboarding_started_at")
+        if started:
+            try:
+                delta = (now - datetime.fromisoformat(started)).total_seconds()
+                user_data[str(chat_id)]["time_to_first_reply"] = round(delta)
+            except Exception:
+                pass
+
+        user_data[str(chat_id)]["name"]              = name
+        user_data[str(chat_id)]["first_reply_at"]    = now.isoformat()
+        user_data[str(chat_id)]["onboarding_step"]   = "first_reply"
         save_users(user_data)
         state["step"] = "first_reply"
 
@@ -3709,18 +3721,16 @@ def handle_onboarding(chat_id, text):
             f"Freut mich, {name}! Und wie geht's dir heute?",
             reply_markup=markup)
 
-    # ── Step 2: Language (after first mini-exchange) ───────────────────────────
     elif step == "native_language":
         raw  = text.strip()
         lang = LANG_NORM.get(raw.lower(), raw) if raw else "English"
-        user_data[str(chat_id)]["native_language"] = lang
-        user_data[str(chat_id)]["onboarding_step"] = "done"
+        user_data[str(chat_id)]["native_language"]  = lang
+        user_data[str(chat_id)]["onboarding_step"]  = "done"
         save_users(user_data)
         user_state[chat_id] = {"mode": "menu"}
         time.sleep(0.3)
         send_topic_buttons(chat_id)
 
-    # ── Legacy / fallback ────────────────────────────────────────────────────
     else:
         user_data[str(chat_id)]["onboarding_step"] = "done"
         save_users(user_data)
@@ -3729,7 +3739,6 @@ def handle_onboarding(chat_id, text):
 
 
 def _ask_language(chat_id):
-    """Ask for native language after first German exchange."""
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
         InlineKeyboardButton("🇬🇧 English",    callback_data="lang:English"),
@@ -3749,23 +3758,16 @@ def _ask_language(chat_id):
 
 
 def mood_callback(call):
-    """Handle 😊 Gut! / 😅 Ein bisschen nervös during onboarding."""
     chat_id = call.message.chat.id
     bot.answer_callback_query(call.id)
     mood = call.data.split(":")[1]
-    name = user_data.get(str(chat_id), {}).get("name", "")
 
     REACTIONS = {
-        "gut": {
-            "text":  "Das freut mich! 😄 Super — dann fangen wir direkt an.",
-            "voice": "Das freut mich! Super — dann fangen wir direkt an.",
-        },
-        "nervoes": {
-            "text":  "Kein Stress! 😌 Ich bin hier, um dir zu helfen — ganz ohne Druck.",
-            "voice": "Kein Stress! Ich bin hier, um dir zu helfen — ganz ohne Druck.",
-        },
+        "gut":     {"text": "Das freut mich! 😄 Super — dann fangen wir direkt an.",
+                    "voice": "Das freut mich! Super — dann fangen wir direkt an."},
+        "nervoes": {"text": "Kein Stress! 😌 Ich bin hier, um dir zu helfen — ganz ohne Druck.",
+                    "voice": "Kein Stress! Ich bin hier, um dir zu helfen — ganz ohne Druck."},
     }
-
     reaction = REACTIONS.get(mood, REACTIONS["gut"])
     bot.send_message(chat_id, reaction["text"], reply_markup=ReplyKeyboardRemove())
 
@@ -3856,6 +3858,20 @@ def handle_topic_callback(call):
         return
 
     bot.answer_callback_query(call.id)
+
+    # ── time_to_first_german ──────────────────────────────────────────────────
+    uid = str(chat_id)
+    if not user_data.get(uid, {}).get("first_german_at"):
+        now     = datetime.now()
+        started = user_data.get(uid, {}).get("onboarding_started_at")
+        user_data[uid]["first_german_at"] = now.isoformat()
+        if started:
+            try:
+                delta = (now - datetime.fromisoformat(started)).total_seconds()
+                user_data[uid]["time_to_first_german"] = round(delta)
+                save_users(user_data)
+            except Exception:
+                pass
 
     # Paywall check
     if not is_premium(chat_id):
@@ -5385,11 +5401,29 @@ def handle_adminstats(message):
         return f"{a/b*100:.0f}%" if b else "–"
 
     # ── Dropout-Analyse ─────────────────────────────────────────────────────
-    # Wo verlieren wir die meisten User?
-    drop_onboarding = f_joined  - f_onboarded  # Abbruch beim Onboarding
-    drop_first_conv = f_onboarded - f_talked    # Abbruch nach Onboarding, vor erstem Gespräch
-    drop_retention  = f_talked  - f_retained    # Einmal geschaut, nie wiedergekommen
-    drop_paywall    = f_paywall - f_converted   # Paywall gesehen, nicht konvertiert
+    drop_onboarding = f_joined  - f_onboarded
+    drop_first_conv = f_onboarded - f_talked
+    drop_retention  = f_talked  - f_retained
+    drop_paywall    = f_paywall - f_converted
+
+    # ── ⏱️ Time-to-first metrics ─────────────────────────────────────────────
+    ttfr_vals = [u["time_to_first_reply"]  for u in users.values()
+                 if isinstance(u.get("time_to_first_reply"), (int, float))]
+    ttfg_vals = [u["time_to_first_german"] for u in users.values()
+                 if isinstance(u.get("time_to_first_german"), (int, float))]
+
+    def avg_sec(vals):
+        if not vals: return "–"
+        a = sum(vals) / len(vals)
+        return f"{a:.0f}s" if a < 60 else f"{a/60:.1f}min"
+
+    def bucket(vals):
+        if not vals: return "–"
+        u30  = sum(1 for v in vals if v <= 30)
+        u60  = sum(1 for v in vals if 30 < v <= 60)
+        u120 = sum(1 for v in vals if 60 < v <= 120)
+        over = sum(1 for v in vals if v > 120)
+        return f"≤30s:{u30} · 30-60s:{u60} · 1-2min:{u120} · >2min:{over}"
 
     # ── Aktivität ───────────────────────────────────────────────────────────
     def days_since(u):
@@ -5456,6 +5490,12 @@ def handle_adminstats(message):
         f"   Vor 1. Gespräch:    -{drop_first_conv}",
         f"   Nach 1. Gespräch:   -{drop_retention}  ← Einmal & weg",
         f"   An der Paywall:     -{drop_paywall}",
+        "",
+        "⏱️ *Time to First — die wichtigste Metrik*",
+        f"   Ø bis erste Antwort:    {avg_sec(ttfr_vals)}  (n={len(ttfr_vals)})",
+        f"   Ø bis erstes Deutsch:   {avg_sec(ttfg_vals)}  (n={len(ttfg_vals)})",
+        f"   Verteilung Antwort:     {bucket(ttfr_vals)}",
+        f"   Verteilung Deutsch:     {bucket(ttfg_vals)}",
         "",
         "📅 *Aktivität*",
         f"   Heute aktiv:    {active_1d}",
@@ -7376,7 +7416,8 @@ Nur diese Zeilen, nichts sonst.""",
         bot.answer_callback_query(call.id)
         ensure_user(chat_id)
         user_state[chat_id] = {"mode": "onboarding", "step": "name"}
-        user_data[str(chat_id)]["onboarding_step"] = "name"
+        user_data[str(chat_id)]["onboarding_step"]       = "name"
+        user_data[str(chat_id)]["onboarding_started_at"] = datetime.now().isoformat()
         save_users(user_data)
         bot.send_message(chat_id,
             "Also, ich bin dein Deutscher Kumpel — GermanDude. 🇩🇪\n\n"
