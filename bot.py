@@ -141,7 +141,6 @@ def ensure_user(chat_id):
             "name": None, "gender": None, "native_language": None,
             "goal": None, "level": "A2", "scenario_streak": 0,
             "weak_points": [], "errors": [], "test_errors": [],
-            "user_story": [],          # persistent cross-session memory — all modes
             "user_progress": {g: [] for g in ALL_GOALS},
             "user_stats": {"xp": 0, "level": 1, "streak": 0, "last_active": now, "total_scenarios": 0},
             "trial_start": None, "premium": False, "trial_code_used": None,
@@ -174,7 +173,7 @@ def ensure_user(chat_id):
         user_data[uid].setdefault("message_count", 0)
         user_data[uid].setdefault("paywall_hits", 0)
         user_data[uid].setdefault("features_used", {})
-        user_data[uid].setdefault("user_story", [])          # cross-session memory
+        user_data[uid].setdefault("conversations_started", 0)
         user_data[uid].setdefault("test_completed", False)
         user_data[uid].setdefault("premium_plus", False)
         user_data[uid].setdefault("premium_plus_until", None)
@@ -938,19 +937,6 @@ def build_system_prompt(chat_id, scenario):
 
     # Native language note for GPT
     lang_note = f"Die Muttersprache des Lernenden ist: {native_language}." if native_language else ""
-
-    # Persistent user story — facts from all past sessions
-    user_story = user_data.get(str(chat_id), {}).get("user_story", [])
-    if user_story:
-        story_facts = "\n".join(f"- {f}" for f in user_story[-30:])
-        story_note = (
-            f"\nWAS DU ÜBER {name.upper() or 'DEN USER'} WEISST (aus früheren Gesprächen):\n"
-            f"{story_facts}\n"
-            f"Nutze dieses Wissen natürlich — nicht aufzählen, sondern einweben wenn passend. "
-            f"Wenn er/sie etwas erwähnt das du schon weißt, reagiere als echter Freund: 'Ah, das mit dem Vermieter?' etc."
-        )
-    else:
-        story_note = ""
     formality  = resolve_formality(goal, context)
     voice      = persona["voice"]
     mode       = get_dynamic_mode(session_state.get(chat_id, {"struggle": 0, "success": 0}))
@@ -1088,7 +1074,6 @@ In informellen Szenarien (Freunde, Party, Gym etc.) nutze einfach "{name}".
 MUTTERSPRACHE:
 {lang_note}
 Du antwortest IMMER auf Deutsch — unabhängig davon, in welcher Sprache der Lernende schreibt oder spricht.
-{story_note}
 
 {human_style}
 """
@@ -2224,7 +2209,6 @@ def start_quatschen(chat_id):
     # Build friend memory context
     uid         = str(chat_id)
     friend_mem  = user_data.get(uid, {}).get("friend_memory", [])
-    user_story  = user_data.get(uid, {}).get("user_story", [])
     native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
 
     sys_prompt = QUATSCHEN_SYSTEM + HUMAN_SPEECH_STYLE
@@ -2234,10 +2218,8 @@ def start_quatschen(chat_id):
     if name:
         sys_prompt += f"\n\nDer User heißt {name}. Muttersprache: {native_lang}."
 
-    # Combine friend_memory (Quatschen-specific) + user_story (all modes)
-    all_facts = list(dict.fromkeys(friend_mem + [f for f in user_story if f not in friend_mem]))
-    if all_facts:
-        facts = "\n".join(f"- {f}" for f in all_facts[-40:])
+    if friend_mem:
+        facts = "\n".join(f"- {f}" for f in friend_mem[-30:])
         sys_prompt += (
             f"\n\nWAS DU ÜBER {name.upper() if name else 'DEN USER'} WEISST "
             f"(aus früheren Gesprächen — benutze es natürlich, nicht als Checkliste):\n"
@@ -2294,6 +2276,7 @@ def _extract_friend_memory(chat_id):
     """Extract key facts from this Quatschen session and save to friend_memory."""
     uid  = str(chat_id)
     name = user_data.get(uid, {}).get("name", "")
+    # Get last 20 turns from memory
     mem      = user_memory.get(chat_id, [])
     conv     = [m for m in mem if m.get("role") in ("user","assistant")][-20:]
     if not conv:
@@ -2320,65 +2303,18 @@ def _extract_friend_memory(chat_id):
                      if l.strip() and len(l.strip()) > 5]
         if new_facts:
             existing = user_data[uid].get("friend_memory", [])
+            # Deduplicate roughly
             combined = existing + [f for f in new_facts if f not in existing]
-            user_data[uid]["friend_memory"] = combined[-50:]
+            user_data[uid]["friend_memory"] = combined[-50:]  # keep last 50 facts
             save_users(user_data)
             log.info(f"Friend memory updated for {chat_id}: +{len(new_facts)} facts")
     except Exception as e:
         log.warning(f"Friend memory extraction failed: {e}")
 
 
-def _extract_user_story(chat_id, history_snapshot=None):
-    """Extract key personal facts from ANY session and save to user_story.
-    Works across all modes: scenarios, Quatschen, everything.
-    Called after every conversation ends."""
-    uid  = str(chat_id)
-    name = user_data.get(uid, {}).get("name", "")
-    mem  = history_snapshot or user_memory.get(chat_id, [])
-    conv = [m for m in mem if m.get("role") in ("user", "assistant")][-20:]
-    if not conv:
-        return
-    conv_text = "\n".join(
-        f"{'User' if m['role']=='user' else 'Dude'}: {m['content']}" for m in conv
-    )
-    try:
-        resp = claude.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=250,
-            system=(
-                "Extrahiere aus diesem Gespräch konkrete persönliche Fakten über den User. "
-                "NUR was er/sie wirklich erwähnt hat — keine Vermutungen, keine Annahmen. "
-                "Format: eine kurze Zeile pro Fakt. "
-                "Beispiele guter Fakten: "
-                "'Arbeitet als Ingenieurin bei Bosch', "
-                "'Hat Rückenschmerzen seit zwei Wochen', "
-                "'Sucht 2-Zimmer-Wohnung in Prenzlauer Berg', "
-                "'Kind heißt Emma, 4 Jahre alt', "
-                "'Bewerbungsgespräch bei Siemens nächste Woche', "
-                "'Kommt ursprünglich aus der Ukraine, lebt seit 1 Jahr in Berlin', "
-                "'Mag kein Fleisch'. "
-                "Wenn im Gespräch nichts Persönliches erzählt wurde: gar nichts ausgeben."
-            ),
-            messages=[{"role": "user", "content": f"Gespräch:\n{conv_text}"}]
-        )
-        new_facts = [l.strip().lstrip("-•*").strip()
-                     for l in resp.content[0].text.strip().splitlines()
-                     if l.strip() and len(l.strip()) > 8]
-        if new_facts:
-            existing = user_data[uid].get("user_story", [])
-            # Simple dedup: skip facts already captured
-            combined = existing + [f for f in new_facts if f not in existing]
-            user_data[uid]["user_story"] = combined[-80:]   # keep last 80 facts
-            save_users(user_data)
-            log.info(f"User story updated for {chat_id}: +{len(new_facts)} facts → {len(combined)} total")
-    except Exception as e:
-        log.warning(f"User story extraction failed for {chat_id}: {e}")
-
-
 def _quatschen_end_with_xp(chat_id):
     """Award XP and show share button after Quatschen session ends."""
-    _extract_friend_memory(chat_id)   # Quatschen-specific casual facts
-    _extract_user_story(chat_id)       # Cross-modal persistent story
+    _extract_friend_memory(chat_id)  # Save what we learned this session
     turns = turn_counter.get(chat_id, 0)
     xp_gain, bonus_msg = calculate_xp(turns, "normal")
     new_streak, lost_streak = update_streak(chat_id)
@@ -6535,12 +6471,6 @@ def end_conversation(chat_id):
     except Exception as e:
         log.warning(f"generate_feedback failed for {chat_id}: {e}")
 
-    # Extract and persist personal facts from this session
-    try:
-        _extract_user_story(chat_id, history_snapshot)
-    except Exception as e:
-        log.warning(f"User story extraction failed in end_conversation: {e}")
-
     # ── Error analysis + exercises (GPT) ─────────────────────────────────────
     bot.send_chat_action(chat_id, "typing")
     exercises_text, answers_text = generate_errors_and_exercises(chat_id, history_snapshot)
@@ -7961,6 +7891,114 @@ def handle_test_voice_push(message):
     send_voice_push(message.chat.id)
 
 
+# ── TEXT PUSH — free user re-engagement ──────────────────────────────────────
+# Sent 3x/week (Mon, Wed, Fri) via Railway cron
+# Target: free users inactive 3-45 days, hasn't received push in last 2 days
+
+TEXT_PUSH_POOL = [
+    "na {name} 👋 wie war dein Tag? Lange nichts gehört! Ich hab gerade Feierabend und fahr jetzt nach Hause — und du?",
+    "heyy {name} 😄 gibt's was Neues bei dir? Schick mir mal kurz eine Voicenachricht, würd mich freuen!",
+    "{name}! Kurze Frage: hast du heute irgendwo Deutsch gesprochen? Erzähl mal 👂",
+    "hey {name} 👋 kleiner Check-in — Bürgeramt, Arzt, Supermarkt: wo hattest du zuletzt auf Deutsch Stress? Dann können wir das zusammen üben 💪",
+    "{name}!! ich hab heute jemanden getroffen der meinte, er lernt seit 2 Jahren Deutsch und traut sich immer noch nicht zu sprechen 😅 du kennst das sicher auch, oder? Magst du üben?",
+    "na {name}, alles gut? Ich sitz gerade in der U-Bahn und dacht: ich sollte mal wieder nach dir schauen 😄 was machst du gerade so?",
+    "hey {name}! Magst du kurz was auf Deutsch schreiben oder mir eine Sprachnachricht schicken? Einfach so — kein Druck 🙂",
+    "{name}, ich hab heute in der S-Bahn mitgehört wie zwei Leute über die Wohnung gechattet haben — voll interessant. Hast du grade auch irgendwas auf Lager? 😄",
+    "na {name} 🙋 lange nix! Wie läuft's so? Ich frag weil mir aufgefallen ist dass du ne Weile ruhig warst — alles okay?",
+    "hey {name}! Wusstest du, dass 5 Minuten Deutsch am Tag schon reichen um sich richtig zu verbessern? Ich wäre dabei 😊",
+]
+
+TEXT_PUSH_NO_NAME = [
+    "na du 👋 wie war dein Tag? Lange nichts gehört! Ich hab gerade Feierabend — fahr jetzt nach Hause. Und du?",
+    "heyy 😄 gibt's was Neues? Schick mir mal kurz eine Voicenachricht!",
+    "kurze Frage: hast du heute irgendwo Deutsch gesprochen? Erzähl mal 👂",
+    "hey 👋 kleiner Check-in — wo hattest du zuletzt auf Deutsch Stress? Können wir zusammen üben 💪",
+    "hey! Magst du kurz was auf Deutsch schreiben? Einfach so — kein Druck 🙂",
+]
+
+
+def _text_push_pick(chat_id: int) -> str:
+    uid  = str(chat_id)
+    name = user_data.get(uid, {}).get("name", "").strip()
+    if name:
+        return random.choice(TEXT_PUSH_POOL).format(name=name)
+    return random.choice(TEXT_PUSH_NO_NAME)
+
+
+def broadcast_text_pushes() -> dict:
+    """Send friendly text re-engagement messages to eligible free users."""
+    now    = datetime.now()
+    sent   = 0
+    skipped = 0
+
+    for uid, user in user_data.items():
+        # Only free users
+        if user.get("premium") or user.get("premium_plus"):
+            skipped += 1; continue
+
+        # Must have name (means they started onboarding)
+        if not user.get("name"):
+            skipped += 1; continue
+
+        # Inactive 3–45 days
+        last_active = user.get("last_active")
+        if not last_active:
+            skipped += 1; continue
+        try:
+            days_inactive = (now - datetime.fromisoformat(last_active)).days
+        except Exception:
+            skipped += 1; continue
+        if not (3 <= days_inactive <= 45):
+            skipped += 1; continue
+
+        # Don't send more than once every 2 days
+        last_push = user.get("last_text_push")
+        if last_push:
+            try:
+                if (now - datetime.fromisoformat(last_push)).days < 2:
+                    skipped += 1; continue
+            except Exception:
+                pass
+
+        # Send the push
+        try:
+            msg = _text_push_pick(int(uid))
+            bot.send_message(int(uid), msg)
+            user_data[uid]["last_text_push"] = now.isoformat()
+            sent += 1
+            log.info(f"Text push sent to {uid}")
+            time.sleep(0.05)   # gentle rate limiting
+        except Exception as e:
+            log.warning(f"Text push failed for {uid}: {e}")
+            skipped += 1
+
+    save_users(user_data)
+    log.info(f"Text push run: {sent} gesendet, {skipped} übersprungen")
+    return {"sent": sent, "skipped": skipped}
+
+
+@bot.message_handler(commands=["sendtextpushes"])
+def handle_send_text_pushes(message):
+    """Admin-only: manuell Text-Push-Run auslösen."""
+    if ADMIN_CHAT_ID and message.chat.id != ADMIN_CHAT_ID:
+        return
+    bot.send_message(message.chat.id, "📤 Starte Text-Push-Run...")
+    result = broadcast_text_pushes()
+    bot.send_message(message.chat.id,
+        f"✅ {result['sent']} Text Pushes gesendet\n"
+        f"⏭ {result['skipped']} übersprungen")
+
+
+@bot.message_handler(commands=["testtextpush"])
+def handle_test_text_push(message):
+    """Admin-only: Test-Text-Push an sich selbst."""
+    if ADMIN_CHAT_ID and message.chat.id != ADMIN_CHAT_ID:
+        return
+    msg = _text_push_pick(message.chat.id)
+    bot.send_message(message.chat.id, msg)
+    bot.send_message(message.chat.id, f"_(Das wäre der Push gewesen — kein Tracking)_", parse_mode="Markdown")
+
+
 @bot.message_handler(commands=["broadcastgems"])
 def handle_broadcast_gems(message):
     """Admin-only: manually trigger daily gem broadcast."""
@@ -8107,6 +8145,21 @@ def send_voice_pushes_endpoint():
         return jsonify({"ok": True, **result}), 200
     except Exception as e:
         log.error(f"Voice push broadcast error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@flask_app.route("/send_text_pushes", methods=["POST"])
+def send_text_pushes_endpoint():
+    """3x/Woche via Railway Cron (Mo, Mi, Fr ~18:00 Berlin).
+    Reaktiviert Free-User die 3-45 Tage inaktiv sind."""
+    auth = request.headers.get("X-Cron-Secret", "")
+    if auth != CRON_SECRET:
+        return jsonify({"error": "unauthorized"}), 401
+    try:
+        result = broadcast_text_pushes()
+        return jsonify({"ok": True, **result}), 200
+    except Exception as e:
+        log.error(f"Text push broadcast error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @flask_app.route("/stripe_webhook", methods=["POST"])
