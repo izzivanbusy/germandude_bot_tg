@@ -94,13 +94,10 @@ ALL_GOALS = [
 ]
 
 def onboarding_complete(chat_id) -> bool:
-    """True if user has completed onboarding (language + level)."""
+    """True once user has replied to the first German prompt (name saved)."""
     uid  = str(chat_id)
     user = user_data.get(uid, {})
-    return bool(
-        user.get("native_language") and
-        user.get("level")
-    )
+    return bool(user.get("name"))   # name is set after first reply
 
 
 def _require_onboarding(chat_id) -> bool:
@@ -3580,21 +3577,17 @@ def start(message):
         send_topic_buttons(chat_id)
         return
 
-    # New user — voice-first onboarding
+    # New user — conversational onboarding, zero friction
     user_state[chat_id] = {"mode": "onboarding", "step": "name"}
     user_data[str(chat_id)]["onboarding_step"] = "name"
     test_state.pop(chat_id, None)
     user_step.pop(chat_id, None)
     save_users(user_data)
 
-    voice1 = "Hey! Ich bin dein German Dude! Wie heißt du?"
-    bot.send_chat_action(chat_id, "record_audio")
-    try:
-        audio = text_to_speech_stream(voice1, chat_id)
-        bot.send_voice(chat_id, audio)
-    except Exception as e:
-        log.warning(f"Onboarding voice 1 failed for {chat_id}: {e}")
-        bot.send_message(chat_id, f"🎤 {voice1}")
+    bot.send_message(chat_id,
+        "Also, ich bin dein Deutscher Kumpel — GermanDude. 🇩🇪\n\n"
+        "Und wie heißt du?",
+        reply_markup=ReplyKeyboardRemove())
 
 # GOAL SELECTION
 def send_goal_selection(chat_id):
@@ -3685,104 +3678,55 @@ GENDER_MAP = {
 
 def handle_onboarding(chat_id, text):
     state = user_state.get(chat_id, {})
-    step  = state.get("step")
+    step  = state.get('step')
 
-    # Language normalizer — handles typed input case-insensitively
-    LANG_NORMALIZE = {
-        "english": "English", "englisch": "English", "англ": "English", "английский": "English",
-        "русский": "Русский", "russian": "Русский", "рус": "Русский", "ru": "Русский",
-        "украинский": "Українська", "украïнська": "Українська", "українська": "Українська",
-        "ukrainian": "Українська", "ua": "Українська",
-        "türkçe": "Türkçe", "tuerkce": "Türkçe", "turkish": "Türkçe", "türkisch": "Türkçe",
-        "arabic": "Arabic", "arabisch": "Arabic", "арабский": "Arabic", "العربية": "Arabic",
-        "español": "Español", "espanol": "Español", "spanish": "Español", "spanisch": "Español",
-        "français": "Français", "francais": "Français", "french": "Français", "französisch": "Français",
-        "polski": "Polski", "polish": "Polski", "polnisch": "Polski",
+    # Language normalizer for typed input
+    LANG_NORM = {
+        'english': 'English', 'englisch': 'English', 'английский': 'English',
+        'русский': 'Русский', 'russian': 'Русский', 'рус': 'Русский',
+        'украинский': 'Українська', 'українська': 'Українська', 'ukrainian': 'Українська',
+        'türkçe': 'Türkçe', 'turkish': 'Türkçe', 'türkisch': 'Türkçe',
+        'arabic': 'Arabic', 'arabisch': 'Arabic', 'арабский': 'Arabic',
+        'español': 'Español', 'spanish': 'Español', 'spanisch': 'Español',
+        'français': 'Français', 'french': 'Français', 'französisch': 'Français',
+        'polski': 'Polski', 'polish': 'Polski', 'polnisch': 'Polski',
     }
 
-    # ── Step 1: Name ──────────────────────────────────────────────────────────
-    if step == "name":
-        name = text.strip() or "du"
-        user_data[str(chat_id)]["name"] = name
-        user_data[str(chat_id)]["onboarding_step"] = "native_language"
+    # ── Step 1: Name → first German question ──────────────────────────────────
+    if step == 'name':
+        name = text.strip() or 'du'
+        user_data[str(chat_id)]['name'] = name
+        user_data[str(chat_id)]['onboarding_step'] = 'first_reply'
         save_users(user_data)
-        state["step"] = "native_language"
-
-        voice2 = (
-            "Meine Muttersprache ist Deutsch — ahahaha, das hörst du auch, oder? "
-            "Was ist deine Muttersprache?"
-        )
-        bot.send_chat_action(chat_id, "record_audio")
-        try:
-            audio = text_to_speech_stream(voice2, chat_id)
-            bot.send_voice(chat_id, audio)
-        except Exception as e:
-            log.warning(f"Onboarding voice 2 failed for {chat_id}: {e}")
-            bot.send_message(chat_id, f"🎤 {voice2}")
+        state['step'] = 'first_reply'
 
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
-            InlineKeyboardButton("🇬🇧 English",    callback_data="lang:English"),
-            InlineKeyboardButton("🇷🇺 Русский",    callback_data="lang:Русский"),
-            InlineKeyboardButton("🇺🇦 Українська", callback_data="lang:Українська"),
-            InlineKeyboardButton("🇹🇷 Türkçe",     callback_data="lang:Türkçe"),
-            InlineKeyboardButton("🇸🇦 العربية",    callback_data="lang:Arabic"),
-            InlineKeyboardButton("🇪🇸 Español",    callback_data="lang:Español"),
-            InlineKeyboardButton("🇫🇷 Français",   callback_data="lang:Français"),
-            InlineKeyboardButton("🇵🇱 Polski",     callback_data="lang:Polski"),
+            InlineKeyboardButton('😊 Gut!',               callback_data='mood:gut'),
+            InlineKeyboardButton('😅 Ein bisschen nervös', callback_data='mood:nervoes'),
         )
-        bot.send_message(chat_id, "👇", reply_markup=markup)
+        bot.send_message(chat_id,
+            f"Freut mich, {name}! Und wie geht's dir heute?",
+            reply_markup=markup)
 
-    # ── Step 2: Native Language ───────────────────────────────────────────────
-    elif step == "native_language":
+    # ── Step 2: Language (asked after first mini-convo) ───────────────────────
+    elif step == 'native_language':
         raw  = text.strip()
-        lang = LANG_NORMALIZE.get(raw.lower(), raw) if raw else "English"
-        user_data[str(chat_id)]["native_language"] = lang
-        user_data[str(chat_id)]["onboarding_step"] = "done"
+        lang = LANG_NORM.get(raw.lower(), raw) if raw else 'English'
+        user_data[str(chat_id)]['native_language'] = lang
+        user_data[str(chat_id)]['onboarding_step'] = 'done'
         save_users(user_data)
-
-        name = user_data[str(chat_id)].get("name", "")
-        name_part = f", {name}" if name else ""
-
-        voice3 = f"Cool{name_part}! Dann lass uns loslegen!"
-        bot.send_chat_action(chat_id, "record_audio")
-        try:
-            audio = text_to_speech_stream(voice3, chat_id)
-            bot.send_voice(chat_id, audio)
-        except Exception as e:
-            log.warning(f"Onboarding voice 3 failed for {chat_id}: {e}")
-            bot.send_message(chat_id, f"🎤 {voice3}")
-
-        INSTRUCTIONS = {
-            "English":    "Pick a topic below — I'll speak German, you respond however you can.\nTap *übersetzen* anytime for a translation. 🇩🇪",
-            "Русский":    "Выбери тему ниже — я говорю по-немецки, отвечай как получится.\nНажми *übersetzen* для перевода в любой момент. 🇩🇪",
-            "Українська": "Обери тему нижче — я говорю по-німецьки, відповідай як виходить.\nНатисни *übersetzen* для перекладу. 🇩🇪",
-            "Türkçe":     "Aşağıdan bir konu seç — ben Almanca konuşacağım, nasıl yapabilirsen öyle yanıtla.\nÇeviri için *übersetzen*'e bas. 🇩🇪",
-            "Arabic":     "اختر موضوعًا أدناه — سأتحدث بالألمانية، أجب كيفما استطعت.\nاضغط *übersetzen* للترجمة. 🇩🇪",
-            "Español":    "Elige un tema abajo — yo hablo alemán, responde como puedas.\nToca *übersetzen* para traducir cuando quieras. 🇩🇪",
-            "Français":   "Choisis un sujet ci-dessous — je parle allemand, réponds comme tu peux.\nAppuie sur *übersetzen* pour traduire. 🇩🇪",
-            "Polski":     "Wybierz temat poniżej — mówię po niemiecku, odpowiadaj jak potrafisz.\nNaciśnij *übersetzen* aby przetłumaczyć. 🇩🇪",
-        }
-        instruction = INSTRUCTIONS.get(lang, INSTRUCTIONS["English"])
-        time.sleep(0.5)
-        bot.send_message(chat_id, instruction, parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
-
-        user_state[chat_id] = {"mode": "menu"}
-        time.sleep(0.5)
+        user_state[chat_id] = {'mode': 'menu'}
+        time.sleep(0.3)
         send_topic_buttons(chat_id)
 
     # ── Legacy steps — push forward gracefully ────────────────────────────────
-    elif step in ("gender", "intro_reply", "native_language_old"):
-        user_state[chat_id] = {"mode": "menu"}
-        voice_fwd = "Cool! Dann lass uns loslegen!"
-        bot.send_chat_action(chat_id, "record_audio")
-        try:
-            audio = text_to_speech_stream(voice_fwd, chat_id)
-            bot.send_voice(chat_id, audio)
-        except Exception as e:
-            log.warning(f"Legacy step fwd voice failed for {chat_id}: {e}")
-        time.sleep(0.5)
-        send_topic_buttons(chat_id)
+    elif step in ('gender', 'intro_reply', 'first_reply'):
+        user_data[str(chat_id)]['onboarding_step'] = 'done'
+        save_users(user_data)
+        user_state[chat_id] = {'mode': 'menu'}
+        _ask_language(chat_id)
+
 
 def send_voice_intro(chat_id):
     bot.send_message(chat_id,
@@ -3797,6 +3741,62 @@ def send_voice_intro(chat_id):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🚀 Los geht's", callback_data="start_chat"))
     bot.send_message(chat_id, "Bereit?", reply_markup=markup)
+
+def _ask_language(chat_id):
+    """Ask for native language after first German exchange."""
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("🇬🇧 English",    callback_data="lang:English"),
+        InlineKeyboardButton("🇷🇺 Русский",    callback_data="lang:Русский"),
+        InlineKeyboardButton("🇺🇦 Українська", callback_data="lang:Українська"),
+        InlineKeyboardButton("🇹🇷 Türkçe",     callback_data="lang:Türkçe"),
+        InlineKeyboardButton("🇸🇦 العربية",    callback_data="lang:Arabic"),
+        InlineKeyboardButton("🇪🇸 Español",    callback_data="lang:Español"),
+        InlineKeyboardButton("🇫🇷 Français",   callback_data="lang:Français"),
+        InlineKeyboardButton("🇵🇱 Polski",     callback_data="lang:Polski"),
+    )
+    bot.send_message(chat_id,
+        "Übrigens — welche Sprache sprichst du? 🌍\n"
+        "What's your native language?",
+        reply_markup=markup)
+    user_state[chat_id] = {"mode": "onboarding", "step": "native_language"}
+
+
+def mood_callback(call):
+    """Handle 😊 Gut! / 😅 Ein bisschen nervös during onboarding."""
+    chat_id = call.message.chat.id
+    bot.answer_callback_query(call.id)
+    mood    = call.data.split(":")[1]   # "gut" or "nervoes"
+    name    = user_data.get(str(chat_id), {}).get("name", "")
+
+    REACTIONS = {
+        "gut": {
+            "text":  "Das freut mich! 😄 Super — dann fangen wir direkt an.",
+            "voice": "Das freut mich! Super — dann fangen wir direkt an.",
+        },
+        "nervoes": {
+            "text":  "Kein Stress! 😌 Ich bin hier, um dir zu helfen — ganz ohne Druck.",
+            "voice": "Kein Stress! Ich bin hier, um dir zu helfen — ganz ohne Druck.",
+        },
+    }
+
+    reaction = REACTIONS.get(mood, REACTIONS["gut"])
+
+    # Send text reaction immediately
+    bot.send_message(chat_id, reaction["text"], reply_markup=ReplyKeyboardRemove())
+
+    # Send voice reaction
+    bot.send_chat_action(chat_id, "record_audio")
+    try:
+        audio = text_to_speech_stream(reaction["voice"], chat_id)
+        bot.send_voice(chat_id, audio)
+    except Exception as e:
+        log.warning(f"Mood voice failed for {chat_id}: {e}")
+
+    # Ask language, then topics follow after lang is set
+    time.sleep(0.5)
+    _ask_language(chat_id)
+
 
 def start_chat_callback(call):
     chat_id = call.message.chat.id
@@ -5370,7 +5370,7 @@ def handle_adminstats(message):
 
     # Stufe 2 — Onboarding komplett (Name + Sprache + Ziel gesetzt)
     f_onboarded = sum(1 for u in users.values()
-                      if u.get("native_language") and u.get("level"))
+                      if u.get("name"))
 
     # Stufe 3 — Mindestens 1 Gespräch geführt
     f_talked = sum(1 for u in users.values() if u.get("conversations_started", 0) >= 1)
@@ -7372,30 +7372,19 @@ Nur diese Zeilen, nichts sonst.""",
             handle_onboarding(chat_id, lang)
         return
 
+    if data.startswith("mood:"):
+        mood_callback(call)
+        return
+
     if data == "restart_onboarding":
         bot.answer_callback_query(call.id)
         ensure_user(chat_id)
-        user_state[chat_id] = {"mode": "onboarding", "step": "native_language"}
+        user_state[chat_id] = {"mode": "onboarding", "step": "name"}
+        user_data[str(chat_id)]["onboarding_step"] = "name"
+        save_users(user_data)
         bot.send_message(chat_id,
-            "🌍 Was ist deine Muttersprache?\n"
-            "What's your native language?\n"
-            "Какой твой родной язык?\n"
-            "Яка твоя рідна мова?\n"
-            "لغتك الأم هي؟\n"
-            "Ana dilin ne?\n\n"
-            "👇 Tippe einfach — oder wähle hier:")
-        markup = InlineKeyboardMarkup(row_width=2)
-        markup.add(
-            InlineKeyboardButton("🇬🇧 English",    callback_data="lang:English"),
-            InlineKeyboardButton("🇷🇺 Русский",    callback_data="lang:Русский"),
-            InlineKeyboardButton("🇺🇦 Українська", callback_data="lang:Українська"),
-            InlineKeyboardButton("🇹🇷 Türkçe",     callback_data="lang:Türkçe"),
-            InlineKeyboardButton("🇸🇦 العربية",    callback_data="lang:Arabic"),
-            InlineKeyboardButton("🇪🇸 Español",    callback_data="lang:Español"),
-            InlineKeyboardButton("🇫🇷 Français",   callback_data="lang:Français"),
-            InlineKeyboardButton("🇵🇱 Polski",     callback_data="lang:Polski"),
-        )
-        bot.send_message(chat_id, "​", reply_markup=markup)
+            "Also, ich bin dein Deutscher Kumpel — GermanDude. 🇩🇪\n\n"
+            "Und wie heißt du?")
         return
 
     if data == "start_chat":
