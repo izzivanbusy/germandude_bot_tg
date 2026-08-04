@@ -94,9 +94,8 @@ ALL_GOALS = [
 ]
 
 def onboarding_complete(chat_id) -> bool:
-    """True once user has given their name (first reply)."""
-    uid = str(chat_id)
-    return bool(user_data.get(uid, {}).get("name"))
+    """True once user has given their name (first reply to bot)."""
+    return bool(user_data.get(str(chat_id), {}).get("name"))
 
 
 def _require_onboarding(chat_id) -> bool:
@@ -1924,7 +1923,9 @@ def text_to_speech_stream(text, chat_id=None):
             instructions=(
                 "Sprich wie ein echter Berliner — natürlich, flüssig, mit echtem Tempo. "
                 "Nicht zu langsam, nicht roboterhaft. Freundlich und direkt. "
-                "Natürliche Pausen nur an Satzgrenzen, kein künstliches Dehnen."
+                "Natürliche Pausen nur an Satzgrenzen, kein künstliches Dehnen. "
+                "Englische Lehnwörter wie 'cool', 'okay', 'sorry', 'wow', 'job', 'team', 'check', 'nice' "
+                "werden englisch ausgesprochen — nicht eingedeutscht."
             )
         )
         audio_file = BytesIO(response.read())
@@ -3576,20 +3577,33 @@ def start(message):
         send_topic_buttons(chat_id)
         return
 
-    # New user — conversational onboarding, situation-first
+    # New user — messenger-style, no menus, voice + text from the start
     user_state[chat_id] = {"mode": "onboarding", "step": "name"}
-    user_data[str(chat_id)]["onboarding_step"]      = "name"
+    user_data[str(chat_id)]["onboarding_step"]       = "name"
     user_data[str(chat_id)]["onboarding_started_at"] = datetime.now().isoformat()
     test_state.pop(chat_id, None)
     user_step.pop(chat_id, None)
     save_users(user_data)
 
-    bot.send_message(chat_id,
-        "Also, ich bin dein Deutscher Kumpel — GermanDude. 🇩🇪\n\n"
+    greeting_text  = (
+        "Hey! Ich bin dein German Dude — dein Berliner Kumpel. 🇩🇪\n\n"
         "Ich helfe dir, in Deutschland klarzukommen und dich sicher zu fühlen — "
         "beim Arzt, auf dem Amt, im Job oder einfach im Alltag.\n\n"
-        "Und wie heißt du?",
-        reply_markup=ReplyKeyboardRemove())
+        "Und wie heißt du?"
+    )
+    greeting_voice = (
+        "Hey! Ich bin dein German Dude — dein Berliner Kumpel. "
+        "Ich helfe dir, in Deutschland klarzukommen und dich sicher zu fühlen — "
+        "beim Arzt, auf dem Amt, im Job oder einfach im Alltag. "
+        "Und wie heißt du?"
+    )
+    bot.send_chat_action(chat_id, "record_audio")
+    try:
+        audio = text_to_speech_stream(greeting_voice, chat_id)
+        bot.send_voice(chat_id, audio)
+    except Exception as e:
+        log.warning(f"Onboarding greeting voice failed for {chat_id}: {e}")
+    bot.send_message(chat_id, greeting_text, reply_markup=ReplyKeyboardRemove())
 
 # GOAL SELECTION
 def send_goal_selection(chat_id):
@@ -3641,16 +3655,31 @@ TOPIC_LIST = [
     ("💬 Einfach quatschen",       "Quatschen"),
 ]
 
+# Free tier note — hardcoded, no Claude (morphology errors risk)
+FREE_TIER_TRANSLATIONS = {
+    "English":    "💡 _1 free conversation daily — no subscription needed._",
+    "Русский":    "💡 _1 разговор бесплатно каждый день — без подписки._",
+    "Українська": "💡 _1 розмова безкоштовно щодня — без підписки._",
+    "Türkçe":     "💡 _Günlük 1 ücretsiz sohbet — abonelik gerekmez._",
+    "Arabic":     "💡 _محادثة مجانية واحدة يومياً — بدون اشتراك._",
+    "Español":    "💡 _1 conversación gratuita al día — sin suscripción._",
+    "Français":   "💡 _1 conversation gratuite par jour — sans abonnement._",
+    "Polski":     "💡 _1 bezpłatna rozmowa dziennie — bez subskrypcji._",
+}
+
 def send_topic_buttons(chat_id):
+    lang   = user_data.get(str(chat_id), {}).get("native_language", "English")
     markup = InlineKeyboardMarkup(row_width=2)
     buttons = [
         InlineKeyboardButton(label, callback_data=f"topic:{i}")
         for i, (label, _) in enumerate(TOPIC_LIST)
     ]
     markup.add(*buttons)
+    free_de  = "💡 _1 Gespräch täglich kostenlos — kein Abo nötig._"
+    free_nat = FREE_TIER_TRANSLATIONS.get(lang, "")
+    note     = f"{free_de}\n{free_nat}" if free_nat and lang != "English" else free_de
     bot.send_message(chat_id,
-        "Was steht heute an? 👇\n\n"
-        "💡 _1 Gespräch täglich kostenlos — kein Abo nötig._",
+        f"Was steht heute an? 👇\n\n{note}",
         parse_mode="Markdown",
         reply_markup=markup)
 
@@ -3678,26 +3707,42 @@ GENDER_MAP = {
     "🌈 Other":  "divers",
 }
 
+# Country → native language map (for "Woher kommst du?" detection)
+COUNTRY_TO_LANG = {
+    "russland": "Русский", "russia": "Русский", "russ": "Русский", "рос": "Русский",
+    "ukraine": "Українська", "ukraina": "Українська", "україна": "Українська",
+    "türkei": "Türkçe", "turkey": "Türkçe", "türkiye": "Türkçe", "turcia": "Türkçe",
+    "syrien": "Arabic", "irak": "Arabic", "ägypten": "Arabic", "saudi": "Arabic",
+    "marokko": "Arabic", "tunesien": "Arabic", "algerien": "Arabic", "jordanien": "Arabic",
+    "spanien": "Español", "spain": "Español", "mexiko": "Español", "kolumbien": "Español",
+    "argentinien": "Español", "chile": "Español", "peru": "Español",
+    "frankreich": "Français", "france": "Français", "belgien": "Français",
+    "polen": "Polski", "poland": "Polski",
+    "england": "English", "uk": "English", "usa": "English", "united states": "English",
+    "australien": "English", "kanada": "English", "canada": "English",
+    "indien": "English", "nigeria": "English", "ghana": "English",
+    "kasachstan": "Русский", "aserbaidschan": "Türkçe", "usbekistan": "Русский",
+}
+
+def _detect_lang_from_origin(text: str) -> str:
+    """Best-effort: map country/city answer to native language."""
+    t = text.lower().strip()
+    for key, lang in COUNTRY_TO_LANG.items():
+        if key in t:
+            return lang
+    return None   # unknown — will ask explicitly
+
+
 def handle_onboarding(chat_id, text):
     state = user_state.get(chat_id, {})
     step  = state.get("step")
 
-    LANG_NORM = {
-        "english": "English", "englisch": "English", "английский": "English",
-        "русский": "Русский", "russian": "Русский", "рус": "Русский",
-        "украинский": "Українська", "українська": "Українська", "ukrainian": "Українська",
-        "türkçe": "Türkçe", "turkish": "Türkçe", "türkisch": "Türkçe",
-        "arabic": "Arabic", "arabisch": "Arabic", "арабский": "Arabic",
-        "español": "Español", "spanish": "Español", "spanisch": "Español",
-        "français": "Français", "french": "Français", "französisch": "Français",
-        "polski": "Polski", "polish": "Polski", "polnisch": "Polski",
-    }
-
+    # ── Step 1: Name ──────────────────────────────────────────────────────────
     if step == "name":
         name = text.strip() or "du"
         now  = datetime.now()
 
-        # ── time_to_first_reply ───────────────────────────────────────────────
+        # time_to_first_reply
         started = user_data[str(chat_id)].get("onboarding_started_at")
         if started:
             try:
@@ -3706,80 +3751,54 @@ def handle_onboarding(chat_id, text):
             except Exception:
                 pass
 
-        user_data[str(chat_id)]["name"]              = name
-        user_data[str(chat_id)]["first_reply_at"]    = now.isoformat()
-        user_data[str(chat_id)]["onboarding_step"]   = "first_reply"
+        user_data[str(chat_id)]["name"]           = name
+        user_data[str(chat_id)]["first_reply_at"] = now.isoformat()
+        user_data[str(chat_id)]["onboarding_step"] = "origin"
         save_users(user_data)
-        state["step"] = "first_reply"
+        state["step"] = "origin"
 
-        markup = InlineKeyboardMarkup(row_width=2)
-        markup.add(
-            InlineKeyboardButton("😊 Gut!",                callback_data="mood:gut"),
-            InlineKeyboardButton("😅 Ein bisschen nervös", callback_data="mood:nervoes"),
-        )
-        bot.send_message(chat_id,
-            f"Freut mich, {name}! Und wie geht's dir heute?",
-            reply_markup=markup)
+        q_text  = f"{name}! Schöner Name. Woher kommst du denn?"
+        q_voice = f"{name}! Schöner Name. Woher kommst du denn?"
+        bot.send_chat_action(chat_id, "record_audio")
+        try:
+            audio = text_to_speech_stream(q_voice, chat_id)
+            bot.send_voice(chat_id, audio)
+        except Exception as e:
+            log.warning(f"Onboarding step2 voice failed for {chat_id}: {e}")
+        bot.send_message(chat_id, q_text)
 
-    elif step == "native_language":
-        raw  = text.strip()
-        lang = LANG_NORM.get(raw.lower(), raw) if raw else "English"
+    # ── Step 2: Origin → detect language → topics ─────────────────────────────
+    elif step == "origin":
+        origin = text.strip()
+        lang   = _detect_lang_from_origin(origin)
+
+        if not lang:
+            # Can't detect — default English, they can change later via /sprache
+            lang = "English"
+
         user_data[str(chat_id)]["native_language"]  = lang
+        user_data[str(chat_id)]["origin"]           = origin
         user_data[str(chat_id)]["onboarding_step"]  = "done"
         save_users(user_data)
+
+        cool_voice = "Cool! Was steht heute an?"
+        bot.send_chat_action(chat_id, "record_audio")
+        try:
+            audio = text_to_speech_stream(cool_voice, chat_id)
+            bot.send_voice(chat_id, audio)
+        except Exception as e:
+            log.warning(f"Onboarding step3 voice failed for {chat_id}: {e}")
+
         user_state[chat_id] = {"mode": "menu"}
-        time.sleep(0.3)
+        time.sleep(0.4)
         send_topic_buttons(chat_id)
 
+    # ── Legacy / fallback ────────────────────────────────────────────────────
     else:
         user_data[str(chat_id)]["onboarding_step"] = "done"
         save_users(user_data)
         user_state[chat_id] = {"mode": "menu"}
-        _ask_language(chat_id)
-
-
-def _ask_language(chat_id):
-    markup = InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        InlineKeyboardButton("🇬🇧 English",    callback_data="lang:English"),
-        InlineKeyboardButton("🇷🇺 Русский",    callback_data="lang:Русский"),
-        InlineKeyboardButton("🇺🇦 Українська", callback_data="lang:Українська"),
-        InlineKeyboardButton("🇹🇷 Türkçe",     callback_data="lang:Türkçe"),
-        InlineKeyboardButton("🇸🇦 العربية",    callback_data="lang:Arabic"),
-        InlineKeyboardButton("🇪🇸 Español",    callback_data="lang:Español"),
-        InlineKeyboardButton("🇫🇷 Français",   callback_data="lang:Français"),
-        InlineKeyboardButton("🇵🇱 Polski",     callback_data="lang:Polski"),
-    )
-    bot.send_message(chat_id,
-        "Übrigens — welche Sprache sprichst du? 🌍\n"
-        "What's your native language?",
-        reply_markup=markup)
-    user_state[chat_id] = {"mode": "onboarding", "step": "native_language"}
-
-
-def mood_callback(call):
-    chat_id = call.message.chat.id
-    bot.answer_callback_query(call.id)
-    mood = call.data.split(":")[1]
-
-    REACTIONS = {
-        "gut":     {"text": "Das freut mich! 😄 Super — dann fangen wir direkt an.",
-                    "voice": "Das freut mich! Super — dann fangen wir direkt an."},
-        "nervoes": {"text": "Kein Stress! 😌 Ich bin hier, um dir zu helfen — ganz ohne Druck.",
-                    "voice": "Kein Stress! Ich bin hier, um dir zu helfen — ganz ohne Druck."},
-    }
-    reaction = REACTIONS.get(mood, REACTIONS["gut"])
-    bot.send_message(chat_id, reaction["text"], reply_markup=ReplyKeyboardRemove())
-
-    bot.send_chat_action(chat_id, "record_audio")
-    try:
-        audio = text_to_speech_stream(reaction["voice"], chat_id)
-        bot.send_voice(chat_id, audio)
-    except Exception as e:
-        log.warning(f"Mood voice failed for {chat_id}: {e}")
-
-    time.sleep(0.5)
-    _ask_language(chat_id)
+        send_topic_buttons(chat_id)
 
 
 
@@ -3862,9 +3881,9 @@ def handle_topic_callback(call):
     # ── time_to_first_german ──────────────────────────────────────────────────
     uid = str(chat_id)
     if not user_data.get(uid, {}).get("first_german_at"):
-        now     = datetime.now()
-        started = user_data.get(uid, {}).get("onboarding_started_at")
+        now = datetime.now()
         user_data[uid]["first_german_at"] = now.isoformat()
+        started = user_data.get(uid, {}).get("onboarding_started_at")
         if started:
             try:
                 delta = (now - datetime.fromisoformat(started)).total_seconds()
@@ -5401,6 +5420,7 @@ def handle_adminstats(message):
         return f"{a/b*100:.0f}%" if b else "–"
 
     # ── Dropout-Analyse ─────────────────────────────────────────────────────
+    # Wo verlieren wir die meisten User?
     drop_onboarding = f_joined  - f_onboarded
     drop_first_conv = f_onboarded - f_talked
     drop_retention  = f_talked  - f_retained
@@ -5492,10 +5512,10 @@ def handle_adminstats(message):
         f"   An der Paywall:     -{drop_paywall}",
         "",
         "⏱️ *Time to First — die wichtigste Metrik*",
-        f"   Ø bis erste Antwort:    {avg_sec(ttfr_vals)}  (n={len(ttfr_vals)})",
-        f"   Ø bis erstes Deutsch:   {avg_sec(ttfg_vals)}  (n={len(ttfg_vals)})",
-        f"   Verteilung Antwort:     {bucket(ttfr_vals)}",
-        f"   Verteilung Deutsch:     {bucket(ttfg_vals)}",
+        f"   Ø bis erste Antwort:  {avg_sec(ttfr_vals)}  (n={len(ttfr_vals)})",
+        f"   Ø bis erstes Deutsch: {avg_sec(ttfg_vals)}  (n={len(ttfg_vals)})",
+        f"   Verteilung Antwort:   {bucket(ttfr_vals)}",
+        f"   Verteilung Deutsch:   {bucket(ttfg_vals)}",
         "",
         "📅 *Aktivität*",
         f"   Heute aktiv:    {active_1d}",
@@ -7398,18 +7418,8 @@ Nur diese Zeilen, nichts sonst.""",
         return
 
     if data.startswith("lang:"):
+        # Legacy: lang buttons no longer shown in new flow, but handle gracefully
         bot.answer_callback_query(call.id)
-        if user_state.get(chat_id, {}).get("step") == "native_language":
-            lang = data[5:]
-            try:
-                bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
-            except Exception:
-                pass
-            handle_onboarding(chat_id, lang)
-        return
-
-    if data.startswith("mood:"):
-        mood_callback(call)
         return
 
     if data == "restart_onboarding":
@@ -7419,11 +7429,25 @@ Nur diese Zeilen, nichts sonst.""",
         user_data[str(chat_id)]["onboarding_step"]       = "name"
         user_data[str(chat_id)]["onboarding_started_at"] = datetime.now().isoformat()
         save_users(user_data)
-        bot.send_message(chat_id,
-            "Also, ich bin dein Deutscher Kumpel — GermanDude. 🇩🇪\n\n"
+        greeting_text  = (
+            "Hey! Ich bin dein German Dude — dein Berliner Kumpel. 🇩🇪\n\n"
             "Ich helfe dir, in Deutschland klarzukommen und dich sicher zu fühlen — "
             "beim Arzt, auf dem Amt, im Job oder einfach im Alltag.\n\n"
-            "Und wie heißt du?")
+            "Und wie heißt du?"
+        )
+        greeting_voice = (
+            "Hey! Ich bin dein German Dude — dein Berliner Kumpel. "
+            "Ich helfe dir, in Deutschland klarzukommen und dich sicher zu fühlen. "
+            "Und wie heißt du?"
+        )
+        bot.send_chat_action(chat_id, "record_audio")
+        try:
+            audio = text_to_speech_stream(greeting_voice, chat_id)
+            bot.send_voice(chat_id, audio)
+        except Exception:
+            pass
+        bot.send_message(chat_id, greeting_text)
+        return
         return
 
     if data == "start_chat":
