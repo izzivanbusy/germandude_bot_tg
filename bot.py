@@ -94,10 +94,9 @@ ALL_GOALS = [
 ]
 
 def onboarding_complete(chat_id) -> bool:
-    """True once user has replied to the first German prompt (name saved)."""
-    uid  = str(chat_id)
-    user = user_data.get(uid, {})
-    return bool(user.get("name"))   # name is set after first reply
+    """True once user has given their name."""
+    uid = str(chat_id)
+    return bool(user_data.get(uid, {}).get("name"))
 
 
 def _require_onboarding(chat_id) -> bool:
@@ -1912,7 +1911,7 @@ def text_to_speech_stream(text, chat_id=None):
     level = user_data.get(str(chat_id), {}).get("level", "B1") if chat_id else "B1"
     speed = get_speed(level)
     voice = user_voice.get(chat_id, "alloy") if chat_id else "alloy"
-    text  = clean_for_tts(text)
+    text = clean_for_tts(text)
     if not text or len(text.strip()) < 2:
         log.warning(f"TTS: text became empty after cleaning for {chat_id}")
         raise ValueError("Empty text after cleaning")
@@ -3577,7 +3576,7 @@ def start(message):
         send_topic_buttons(chat_id)
         return
 
-    # New user — conversational onboarding, zero friction
+    # New user — conversational onboarding, situation-first
     user_state[chat_id] = {"mode": "onboarding", "step": "name"}
     user_data[str(chat_id)]["onboarding_step"] = "name"
     test_state.pop(chat_id, None)
@@ -3586,6 +3585,8 @@ def start(message):
 
     bot.send_message(chat_id,
         "Also, ich bin dein Deutscher Kumpel — GermanDude. 🇩🇪\n\n"
+        "Ich helfe dir, in Deutschland klarzukommen und dich sicher zu fühlen — "
+        "beim Arzt, auf dem Amt, im Job oder einfach im Alltag.\n\n"
         "Und wie heißt du?",
         reply_markup=ReplyKeyboardRemove())
 
@@ -3627,16 +3628,16 @@ GOAL_MAP = {
 
 # Ordered topic list for topic-selection buttons (index = callback key)
 TOPIC_LIST = [
-    ("🧍 Selbstpräsentation",      "Selbstpräsentation"),
-    ("🧑‍🤝‍🧑 Freunde & Beziehungen", "Freunde / Beziehungen"),
-    ("🏢 Amt & Arzt",              "Soziales (Ämter, Ärzte)"),
-    ("🎉 Freizeit",                "Unterhaltung (Club, Kino etc)"),
-    ("🍽️ Einkauf & Restaurant",    "Einkauf & Restaurants"),
-    ("✈️ Reisen",                  "Tourismus & Reisen"),
-    ("🏋️ Sport & Hobbys",          "Sport & Hobbys"),
-    ("📞 Telefon",                 "Am Telefon"),
-    ("💼 Job",                     "Job"),
-    ("🗣️ Quatschen",               "Quatschen"),
+    ("🏥 Arzt / Apotheke",           "Soziales (Ämter, Ärzte)"),
+    ("🏛️ Bürgeramt / Jobcenter",     "Soziales (Ämter, Ärzte)"),
+    ("💼 Vorstellungsgespräch",       "Job"),
+    ("🏠 Vermieter / WG",            "Soziales (Ämter, Ärzte)"),
+    ("📞 Telefonat",                  "Am Telefon"),
+    ("🛒 Einkauf / Restaurant",       "Einkauf & Restaurants"),
+    ("👋 Kennenlernen",               "Selbstpräsentation"),
+    ("☕ Freunde / Dates",            "Freunde / Beziehungen"),
+    ("✈️ Reisen",                     "Tourismus & Reisen"),
+    ("💬 Einfach quatschen",          "Quatschen"),
 ]
 
 def send_topic_buttons(chat_id):
@@ -3647,7 +3648,7 @@ def send_topic_buttons(chat_id):
     ]
     markup.add(*buttons)
     bot.send_message(chat_id,
-        "🎯 Welches Thema willst du heute üben?\n\n"
+        "Was steht heute an? 👇\n\n"
         "💡 _1 Gespräch täglich kostenlos — kein Abo nötig._",
         parse_mode="Markdown",
         reply_markup=markup)
@@ -3678,69 +3679,54 @@ GENDER_MAP = {
 
 def handle_onboarding(chat_id, text):
     state = user_state.get(chat_id, {})
-    step  = state.get('step')
+    step  = state.get("step")
 
-    # Language normalizer for typed input
     LANG_NORM = {
-        'english': 'English', 'englisch': 'English', 'английский': 'English',
-        'русский': 'Русский', 'russian': 'Русский', 'рус': 'Русский',
-        'украинский': 'Українська', 'українська': 'Українська', 'ukrainian': 'Українська',
-        'türkçe': 'Türkçe', 'turkish': 'Türkçe', 'türkisch': 'Türkçe',
-        'arabic': 'Arabic', 'arabisch': 'Arabic', 'арабский': 'Arabic',
-        'español': 'Español', 'spanish': 'Español', 'spanisch': 'Español',
-        'français': 'Français', 'french': 'Français', 'französisch': 'Français',
-        'polski': 'Polski', 'polish': 'Polski', 'polnisch': 'Polski',
+        "english": "English", "englisch": "English", "английский": "English",
+        "русский": "Русский", "russian": "Русский", "рус": "Русский",
+        "украинский": "Українська", "українська": "Українська", "ukrainian": "Українська",
+        "türkçe": "Türkçe", "turkish": "Türkçe", "türkisch": "Türkçe",
+        "arabic": "Arabic", "arabisch": "Arabic", "арабский": "Arabic",
+        "español": "Español", "spanish": "Español", "spanisch": "Español",
+        "français": "Français", "french": "Français", "französisch": "Français",
+        "polski": "Polski", "polish": "Polski", "polnisch": "Polski",
     }
 
-    # ── Step 1: Name → first German question ──────────────────────────────────
-    if step == 'name':
-        name = text.strip() or 'du'
-        user_data[str(chat_id)]['name'] = name
-        user_data[str(chat_id)]['onboarding_step'] = 'first_reply'
+    # ── Step 1: Name ──────────────────────────────────────────────────────────
+    if step == "name":
+        name = text.strip() or "du"
+        user_data[str(chat_id)]["name"] = name
+        user_data[str(chat_id)]["onboarding_step"] = "first_reply"
         save_users(user_data)
-        state['step'] = 'first_reply'
+        state["step"] = "first_reply"
 
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
-            InlineKeyboardButton('😊 Gut!',               callback_data='mood:gut'),
-            InlineKeyboardButton('😅 Ein bisschen nervös', callback_data='mood:nervoes'),
+            InlineKeyboardButton("😊 Gut!",                callback_data="mood:gut"),
+            InlineKeyboardButton("😅 Ein bisschen nervös", callback_data="mood:nervoes"),
         )
         bot.send_message(chat_id,
             f"Freut mich, {name}! Und wie geht's dir heute?",
             reply_markup=markup)
 
-    # ── Step 2: Language (asked after first mini-convo) ───────────────────────
-    elif step == 'native_language':
+    # ── Step 2: Language (after first mini-exchange) ───────────────────────────
+    elif step == "native_language":
         raw  = text.strip()
-        lang = LANG_NORM.get(raw.lower(), raw) if raw else 'English'
-        user_data[str(chat_id)]['native_language'] = lang
-        user_data[str(chat_id)]['onboarding_step'] = 'done'
+        lang = LANG_NORM.get(raw.lower(), raw) if raw else "English"
+        user_data[str(chat_id)]["native_language"] = lang
+        user_data[str(chat_id)]["onboarding_step"] = "done"
         save_users(user_data)
-        user_state[chat_id] = {'mode': 'menu'}
+        user_state[chat_id] = {"mode": "menu"}
         time.sleep(0.3)
         send_topic_buttons(chat_id)
 
-    # ── Legacy steps — push forward gracefully ────────────────────────────────
-    elif step in ('gender', 'intro_reply', 'first_reply'):
-        user_data[str(chat_id)]['onboarding_step'] = 'done'
+    # ── Legacy / fallback ────────────────────────────────────────────────────
+    else:
+        user_data[str(chat_id)]["onboarding_step"] = "done"
         save_users(user_data)
-        user_state[chat_id] = {'mode': 'menu'}
+        user_state[chat_id] = {"mode": "menu"}
         _ask_language(chat_id)
 
-
-def send_voice_intro(chat_id):
-    bot.send_message(chat_id,
-        "🎧 Ganz wichtig:\n\n"
-        "Hier geht es nicht um Schreiben.\n"
-        "Du sprichst. Du hörst zu.\n\n"
-        "👉 Wie im echten Leben.\n\n"
-        "❗️ Damit du meine Sprachnachrichten empfangen kannst, stelle sicher, "
-        "dass Sprachnachrichten in deinen Telegram-Einstellungen aktiviert sind:\n"
-        "*Einstellungen → Privatsphäre → Sprachnachrichten → Alle*",
-        parse_mode="Markdown")
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🚀 Los geht's", callback_data="start_chat"))
-    bot.send_message(chat_id, "Bereit?", reply_markup=markup)
 
 def _ask_language(chat_id):
     """Ask for native language after first German exchange."""
@@ -3766,8 +3752,8 @@ def mood_callback(call):
     """Handle 😊 Gut! / 😅 Ein bisschen nervös during onboarding."""
     chat_id = call.message.chat.id
     bot.answer_callback_query(call.id)
-    mood    = call.data.split(":")[1]   # "gut" or "nervoes"
-    name    = user_data.get(str(chat_id), {}).get("name", "")
+    mood = call.data.split(":")[1]
+    name = user_data.get(str(chat_id), {}).get("name", "")
 
     REACTIONS = {
         "gut": {
@@ -3781,11 +3767,8 @@ def mood_callback(call):
     }
 
     reaction = REACTIONS.get(mood, REACTIONS["gut"])
-
-    # Send text reaction immediately
     bot.send_message(chat_id, reaction["text"], reply_markup=ReplyKeyboardRemove())
 
-    # Send voice reaction
     bot.send_chat_action(chat_id, "record_audio")
     try:
         audio = text_to_speech_stream(reaction["voice"], chat_id)
@@ -3793,10 +3776,24 @@ def mood_callback(call):
     except Exception as e:
         log.warning(f"Mood voice failed for {chat_id}: {e}")
 
-    # Ask language, then topics follow after lang is set
     time.sleep(0.5)
     _ask_language(chat_id)
 
+
+
+def send_voice_intro(chat_id):
+    bot.send_message(chat_id,
+        "🎧 Ganz wichtig:\n\n"
+        "Hier geht es nicht um Schreiben.\n"
+        "Du sprichst. Du hörst zu.\n\n"
+        "👉 Wie im echten Leben.\n\n"
+        "❗️ Damit du meine Sprachnachrichten empfangen kannst, stelle sicher, "
+        "dass Sprachnachrichten in deinen Telegram-Einstellungen aktiviert sind:\n"
+        "*Einstellungen → Privatsphäre → Sprachnachrichten → Alle*",
+        parse_mode="Markdown")
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🚀 Los geht's", callback_data="start_chat"))
+    bot.send_message(chat_id, "Bereit?", reply_markup=markup)
 
 def start_chat_callback(call):
     chat_id = call.message.chat.id
@@ -7361,7 +7358,6 @@ Nur diese Zeilen, nichts sonst.""",
         return
 
     if data.startswith("lang:"):
-        # Language quick-tap during onboarding
         bot.answer_callback_query(call.id)
         if user_state.get(chat_id, {}).get("step") == "native_language":
             lang = data[5:]
@@ -7384,6 +7380,8 @@ Nur diese Zeilen, nichts sonst.""",
         save_users(user_data)
         bot.send_message(chat_id,
             "Also, ich bin dein Deutscher Kumpel — GermanDude. 🇩🇪\n\n"
+            "Ich helfe dir, in Deutschland klarzukommen und dich sicher zu fühlen — "
+            "beim Arzt, auf dem Amt, im Job oder einfach im Alltag.\n\n"
             "Und wie heißt du?")
         return
 
