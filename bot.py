@@ -94,11 +94,10 @@ ALL_GOALS = [
 ]
 
 def onboarding_complete(chat_id) -> bool:
-    """True if user has completed onboarding (name + language + test)."""
+    """True if user has completed onboarding (language + level)."""
     uid  = str(chat_id)
     user = user_data.get(uid, {})
     return bool(
-        user.get("name") and
         user.get("native_language") and
         user.get("level")
     )
@@ -3494,21 +3493,14 @@ def handle_code(message):
 def _grant_referral_days(referrer_id: int, new_user_id: int):
     """Give the referrer 3 extra trial days when their friend joins."""
     uid  = str(referrer_id)
-    nuid = str(new_user_id)
     if uid not in user_data:
         return
     user = user_data[uid]
     # Only reward once per referred friend
     refs = user.setdefault("referrals_rewarded", [])
-    if nuid in refs:
+    if str(new_user_id) in refs:
         return
-    refs.append(nuid)
-
-    # Track for stats
-    user_data[uid]["referral_count"]      = user_data[uid].get("referral_count", 0) + 1
-    user_data[uid]["referral_bonus_days"] = user_data[uid].get("referral_bonus_days", 0) + 3
-    if nuid in user_data:
-        user_data[nuid]["referred_by"] = referrer_id
+    refs.append(str(new_user_id))
 
     # Extend trial: push trial_start back by 3 days (or activate if none)
     trial_start = user.get("trial_start")
@@ -3656,7 +3648,11 @@ def send_topic_buttons(chat_id):
         for i, (label, _) in enumerate(TOPIC_LIST)
     ]
     markup.add(*buttons)
-    bot.send_message(chat_id, "🎯 Welches Thema willst du heute üben?", reply_markup=markup)
+    bot.send_message(chat_id,
+        "🎯 Welches Thema willst du heute üben?\n\n"
+        "💡 _1 Gespräch täglich kostenlos — kein Abo nötig._",
+        parse_mode="Markdown",
+        reply_markup=markup)
 
 def send_goal_buttons(chat_id):
     markup = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -3685,6 +3681,19 @@ GENDER_MAP = {
 def handle_onboarding(chat_id, text):
     state = user_state.get(chat_id, {})
     step  = state.get("step")
+
+    # Language normalizer — handles typed input case-insensitively
+    LANG_NORMALIZE = {
+        "english": "English", "englisch": "English", "англ": "English", "английский": "English",
+        "русский": "Русский", "russian": "Русский", "рус": "Русский", "ru": "Русский",
+        "украинский": "Українська", "украïнська": "Українська", "українська": "Українська",
+        "ukrainian": "Українська", "ua": "Українська",
+        "türkçe": "Türkçe", "tuerkce": "Türkçe", "turkish": "Türkçe", "türkisch": "Türkçe",
+        "arabic": "Arabic", "arabisch": "Arabic", "арабский": "Arabic", "العربية": "Arabic",
+        "español": "Español", "espanol": "Español", "spanish": "Español", "spanisch": "Español",
+        "français": "Français", "francais": "Français", "french": "Français", "französisch": "Français",
+        "polski": "Polski", "polish": "Polski", "polnisch": "Polski",
+    }
 
     # ── Step 1: Name ──────────────────────────────────────────────────────────
     if step == "name":
@@ -3719,11 +3728,10 @@ def handle_onboarding(chat_id, text):
         )
         bot.send_message(chat_id, "👇", reply_markup=markup)
 
-    # ── Step 2: Native Language ────────────────────────────────────────────────
+    # ── Step 2: Native Language ───────────────────────────────────────────────
     elif step == "native_language":
-        lang = text.strip()
-        if not lang:
-            lang = "English"
+        raw  = text.strip()
+        lang = LANG_NORMALIZE.get(raw.lower(), raw) if raw else "English"
         user_data[str(chat_id)]["native_language"] = lang
         user_data[str(chat_id)]["onboarding_step"] = "done"
         save_users(user_data)
@@ -3740,16 +3748,15 @@ def handle_onboarding(chat_id, text):
             log.warning(f"Onboarding voice 3 failed for {chat_id}: {e}")
             bot.send_message(chat_id, f"🎤 {voice3}")
 
-        # Short instructions in their language — hardcoded, no Claude
         INSTRUCTIONS = {
             "English":    "Pick a topic below — I'll speak German, you respond however you can.\nTap *übersetzen* anytime for a translation. 🇩🇪",
-            "Русский":    "Выбери тему ниже — я говорю по-немецки, отвечай как получится.\nНажми *übersetzen* в любой момент для перевода. 🇩🇪",
-            "Українська": "Обери тему нижче — я говорю по-німецьки, відповідай як виходить.\nНатисни *übersetzen* у будь-який момент для перекладу. 🇩🇪",
-            "Türkçe":     "Aşağıdan bir konu seç — ben Almanca konuşacağım, nasıl yapabilirsen öyle yanıtla.\nÇeviri için istediğin zaman *übersetzen*'e bas. 🇩🇪",
-            "Arabic":     "اختر موضوعًا أدناه — سأتحدث بالألمانية، أجب كيفما استطعت.\nاضغط *übersetzen* في أي وقت للترجمة. 🇩🇪",
-            "Español":    "Elige un tema abajo — yo hablo alemán, responde como puedas.\nToca *übersetzen* cuando quieras para una traducción. 🇩🇪",
-            "Français":   "Choisis un sujet ci-dessous — je parle allemand, réponds comme tu peux.\nAppuie sur *übersetzen* à tout moment pour une traduction. 🇩🇪",
-            "Polski":     "Wybierz temat poniżej — mówię po niemiecku, odpowiadaj jak potrafisz.\nNaciśnij *übersetzen* w dowolnym momencie, aby przetłumaczyć. 🇩🇪",
+            "Русский":    "Выбери тему ниже — я говорю по-немецки, отвечай как получится.\nНажми *übersetzen* для перевода в любой момент. 🇩🇪",
+            "Українська": "Обери тему нижче — я говорю по-німецьки, відповідай як виходить.\nНатисни *übersetzen* для перекладу. 🇩🇪",
+            "Türkçe":     "Aşağıdan bir konu seç — ben Almanca konuşacağım, nasıl yapabilirsen öyle yanıtla.\nÇeviri için *übersetzen*'e bas. 🇩🇪",
+            "Arabic":     "اختر موضوعًا أدناه — سأتحدث بالألمانية، أجب كيفما استطعت.\nاضغط *übersetzen* للترجمة. 🇩🇪",
+            "Español":    "Elige un tema abajo — yo hablo alemán, responde como puedas.\nToca *übersetzen* para traducir cuando quieras. 🇩🇪",
+            "Français":   "Choisis un sujet ci-dessous — je parle allemand, réponds comme tu peux.\nAppuie sur *übersetzen* pour traduire. 🇩🇪",
+            "Polski":     "Wybierz temat poniżej — mówię po niemiecku, odpowiadaj jak potrafisz.\nNaciśnij *übersetzen* aby przetłumaczyć. 🇩🇪",
         }
         instruction = INSTRUCTIONS.get(lang, INSTRUCTIONS["English"])
         time.sleep(0.5)
@@ -3759,18 +3766,16 @@ def handle_onboarding(chat_id, text):
         time.sleep(0.5)
         send_topic_buttons(chat_id)
 
-    # ── Legacy steps (kept for users mid-flow on old version) ─────────────────
-    elif step in ("gender", "intro_reply"):
-        # Just move them forward gracefully with a voice
-        lang = user_data.get(str(chat_id), {}).get("native_language", "English")
+    # ── Legacy steps — push forward gracefully ────────────────────────────────
+    elif step in ("gender", "intro_reply", "native_language_old"):
+        user_state[chat_id] = {"mode": "menu"}
         voice_fwd = "Cool! Dann lass uns loslegen!"
         bot.send_chat_action(chat_id, "record_audio")
         try:
             audio = text_to_speech_stream(voice_fwd, chat_id)
             bot.send_voice(chat_id, audio)
         except Exception as e:
-            log.warning(f"Legacy step voice failed for {chat_id}: {e}")
-        user_state[chat_id] = {"mode": "menu"}
+            log.warning(f"Legacy step fwd voice failed for {chat_id}: {e}")
         time.sleep(0.5)
         send_topic_buttons(chat_id)
 
@@ -5303,91 +5308,6 @@ def handle_feedback_message(chat_id: int, text: str):
     )
 
 
-@bot.message_handler(commands=['refer', 'invite', 'freund'])
-def handle_refer(message):
-    """Referral system — share the bot, earn bonus days."""
-    chat_id = message.chat.id
-    ensure_user(chat_id)
-    if _require_onboarding(chat_id): return
-
-    uid      = str(chat_id)
-    name     = user_data.get(uid, {}).get("name", "")
-    lang     = user_data.get(uid, {}).get("native_language", "English")
-    ref_link = f"https://t.me/germandude_bot?start=ref_{chat_id}"
-    ref_cnt  = user_data.get(uid, {}).get("referral_count", 0)
-    ref_bonus= user_data.get(uid, {}).get("referral_bonus_days", 0)
-
-    REFER_MSG = {
-        "English":    (
-            f"🤝 *Invite a friend — get rewarded!*\n\n"
-            f"Share your personal link. For every friend who starts the bot:\n"
-            f"👉 You get *3 days Premium free*\n"
-            f"👉 Your friend gets *1 day Premium free* on signup\n\n"
-            f"Your link:\n`{ref_link}`\n\n"
-            f"📊 Friends invited so far: *{ref_cnt}*\n"
-            f"🎁 Bonus days earned: *{ref_bonus}*"
-        ),
-        "Русский":    (
-            f"🤝 *Пригласи друга — получи бонус!*\n\n"
-            f"Поделись своей ссылкой. За каждого друга, который запустит бота:\n"
-            f"👉 Ты получаешь *3 дня Premium бесплатно*\n"
-            f"👉 Твой друг получает *1 день Premium* при регистрации\n\n"
-            f"Твоя ссылка:\n`{ref_link}`\n\n"
-            f"📊 Приглашено друзей: *{ref_cnt}*\n"
-            f"🎁 Заработано бонусных дней: *{ref_bonus}*"
-        ),
-        "Українська": (
-            f"🤝 *Запроси друга — отримай бонус!*\n\n"
-            f"Поділись своїм посиланням. За кожного друга, який запустить бота:\n"
-            f"👉 Ти отримуєш *3 дні Premium безкоштовно*\n"
-            f"👉 Твій друг отримує *1 день Premium* при реєстрації\n\n"
-            f"Твоє посилання:\n`{ref_link}`\n\n"
-            f"📊 Запрошено друзів: *{ref_cnt}*\n"
-            f"🎁 Зароблено бонусних днів: *{ref_bonus}*"
-        ),
-        "Türkçe":     (
-            f"🤝 *Arkadaşını davet et — ödül kazan!*\n\n"
-            f"Kişisel bağlantını paylaş. Botu başlatan her arkadaşın için:\n"
-            f"👉 *3 gün ücretsiz Premium* kazanırsın\n"
-            f"👉 Arkadaşın kayıt olduğunda *1 gün Premium* alır\n\n"
-            f"Bağlantın:\n`{ref_link}`\n\n"
-            f"📊 Davet edilen arkadaşlar: *{ref_cnt}*\n"
-            f"🎁 Kazanılan bonus günler: *{ref_bonus}*"
-        ),
-    }
-    msg = REFER_MSG.get(lang, REFER_MSG["English"])
-    bot.send_message(chat_id, msg, parse_mode="Markdown")
-
-
-def _process_referral(new_chat_id: int, referrer_id: int):
-    """Credit referral bonus to referrer and give welcome bonus to new user."""
-    try:
-        r_uid = str(referrer_id)
-        n_uid = str(new_chat_id)
-        if r_uid not in user_data or n_uid not in user_data:
-            return
-        if user_data[n_uid].get("referred_by"):
-            return  # already credited
-
-        # Mark new user as referred
-        user_data[n_uid]["referred_by"] = referrer_id
-
-        # Give referrer 3 bonus days
-        user_data[r_uid]["referral_count"] = user_data[r_uid].get("referral_count", 0) + 1
-        user_data[r_uid]["referral_bonus_days"] = user_data[r_uid].get("referral_bonus_days", 0) + 3
-
-        save_users(user_data)
-
-        # Notify referrer
-        r_name = user_data[r_uid].get("name", "")
-        bot.send_message(referrer_id,
-            f"🎉 {'*' + r_name + '*' if r_name else 'Hey'}! Ein Freund hat gerade über deinen Link gestartet.\n"
-            f"Du hast *3 Tage Premium* verdient — danke! 🙌",
-            parse_mode="Markdown")
-    except Exception as e:
-        log.warning(f"Referral processing failed: {e}")
-
-
 @bot.message_handler(commands=['danke'])
 def danke_cmd(message):
     chat_id = message.chat.id
@@ -5443,13 +5363,7 @@ def handle_adminstats(message):
     # Stufe 1 — Joined (= alle)
     f_joined = total
 
-    # Onboarding step breakdown (new voice-first flow)
-    ob_step_name  = sum(1 for u in users.values() if u.get("onboarding_step") == "name")
-    ob_step_lang  = sum(1 for u in users.values() if u.get("onboarding_step") == "native_language")
-    ob_step_done  = sum(1 for u in users.values() if u.get("onboarding_step") == "done")
-    ob_no_step    = sum(1 for u in users.values() if not u.get("onboarding_step"))
-
-    # Stufe 2 — Onboarding komplett
+    # Stufe 2 — Onboarding komplett (Name + Sprache + Ziel gesetzt)
     f_onboarded = sum(1 for u in users.values()
                       if u.get("native_language") and u.get("level"))
 
@@ -5464,13 +5378,6 @@ def handle_adminstats(message):
 
     # Stufe 6 — Konvertiert (Premium oder Plus)
     f_converted = n_premium + n_plus
-
-    # Referrals
-    n_referred   = sum(1 for u in users.values() if u.get("referred_by"))
-    n_referrers  = sum(1 for u in users.values() if u.get("referral_count", 0) > 0)
-    top_referrer = max(users.values(), key=lambda u: u.get("referral_count", 0), default={})
-    top_ref_name = top_referrer.get("name", "–") if top_referrer.get("referral_count", 0) > 0 else "–"
-    top_ref_cnt  = top_referrer.get("referral_count", 0)
 
     def pct(a, b):
         return f"{a/b*100:.0f}%" if b else "–"
@@ -5542,22 +5449,11 @@ def handle_adminstats(message):
         f"   Paywall gesehen:   {f_paywall}",
         f"   Konvertiert:       {f_converted} ({pct(f_converted, f_paywall)})",
         "",
-        "🔬 *Onboarding-Schritte (wo hängen sie?)*",
-        f"   Kein Start:         {ob_no_step}  (nie /start fertig)",
-        f"   Hängt bei Name:     {ob_step_name}  (Voice gehört, nicht geantwortet)",
-        f"   Hängt bei Sprache:  {ob_step_lang}  (Name gegeben, kein Sprach-Klick)",
-        f"   Fertig:             {ob_step_done}",
-        "",
         "⚠️ *Größte Dropouts*",
         f"   Beim Onboarding:    -{drop_onboarding}",
         f"   Vor 1. Gespräch:    -{drop_first_conv}",
         f"   Nach 1. Gespräch:   -{drop_retention}  ← Einmal & weg",
         f"   An der Paywall:     -{drop_paywall}",
-        "",
-        "🤝 *Community & Referrals*",
-        f"   Über Referral joined: {n_referred}",
-        f"   Aktive Referrer:      {n_referrers}",
-        f"   Top Referrer:         {top_ref_name} ({top_ref_cnt}×)",
         "",
         "📅 *Aktivität*",
         f"   Heute aktiv:    {active_1d}",
