@@ -1870,7 +1870,7 @@ def get_gem_system_prompt_hint(gem) -> str:
         f"Nicht erzwungen — nur wenn es sich organisch ergibt."
     )
 
-SPEED_MAP = {"A1": 0.8, "A2": 0.85, "B1": 0.95, "B2": 1.0, "C1": 1.05}
+SPEED_MAP = {"A1": 0.95, "A2": 1.0, "B1": 1.08, "B2": 1.14, "C1": 1.2}
 
 MAX_TURNS = {"A1": 5, "A2": 5, "B1": 8, "B2": 8, "C1": 10}
 
@@ -1915,7 +1915,7 @@ def text_to_speech_stream(text, chat_id=None):
     level = user_data.get(str(chat_id), {}).get("level", "B1") if chat_id else "B1"
     speed = get_speed(level)
     voice = user_voice.get(chat_id, "alloy") if chat_id else "alloy"
-    text = clean_for_tts(text)
+    text  = clean_for_tts(text)
     if not text or len(text.strip()) < 2:
         log.warning(f"TTS: text became empty after cleaning for {chat_id}")
         raise ValueError("Empty text after cleaning")
@@ -1923,8 +1923,13 @@ def text_to_speech_stream(text, chat_id=None):
         response = openai_client.audio.speech.create(
             model="gpt-4o-mini-tts",
             voice=voice,
-            input=text[:4000],  # API limit safety
-            speed=speed
+            input=text[:4000],
+            speed=speed,
+            instructions=(
+                "Sprich wie ein echter Berliner — natürlich, flüssig, mit echtem Tempo. "
+                "Nicht zu langsam, nicht roboterhaft. Freundlich und direkt. "
+                "Natürliche Pausen nur an Satzgrenzen, kein künstliches Dehnen."
+            )
         )
         audio_file = BytesIO(response.read())
         audio_file.name = "voice.ogg"
