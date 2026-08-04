@@ -98,6 +98,7 @@ def onboarding_complete(chat_id) -> bool:
     uid  = str(chat_id)
     user = user_data.get(uid, {})
     return bool(
+        user.get("name") and
         user.get("native_language") and
         user.get("level")
     )
@@ -3493,14 +3494,21 @@ def handle_code(message):
 def _grant_referral_days(referrer_id: int, new_user_id: int):
     """Give the referrer 3 extra trial days when their friend joins."""
     uid  = str(referrer_id)
+    nuid = str(new_user_id)
     if uid not in user_data:
         return
     user = user_data[uid]
     # Only reward once per referred friend
     refs = user.setdefault("referrals_rewarded", [])
-    if str(new_user_id) in refs:
+    if nuid in refs:
         return
-    refs.append(str(new_user_id))
+    refs.append(nuid)
+
+    # Track for stats
+    user_data[uid]["referral_count"]      = user_data[uid].get("referral_count", 0) + 1
+    user_data[uid]["referral_bonus_days"] = user_data[uid].get("referral_bonus_days", 0) + 3
+    if nuid in user_data:
+        user_data[nuid]["referred_by"] = referrer_id
 
     # Extend trial: push trial_start back by 3 days (or activate if none)
     trial_start = user.get("trial_start")
@@ -3575,35 +3583,21 @@ def start(message):
         send_topic_buttons(chat_id)
         return
 
-    # New user — full onboarding — language first
-    user_state[chat_id] = {"mode": "onboarding", "step": "native_language"}
+    # New user — voice-first onboarding
+    user_state[chat_id] = {"mode": "onboarding", "step": "name"}
+    user_data[str(chat_id)]["onboarding_step"] = "name"
     test_state.pop(chat_id, None)
     user_step.pop(chat_id, None)
+    save_users(user_data)
 
-    bot.send_message(chat_id,
-        "🇩🇪 Hallo! Ich bin dein Deutscher Kumpel.\n"
-        "Ich helfe dir, Deutsch zu sprechen — mit echten Gesprächen, jeden Tag.\n\n"
-        "🌍 Was ist deine Muttersprache?\n"
-        "What's your native language?\n"
-        "Какой твой родной язык?\n"
-        "Яка твоя рідна мова?\n"
-        "لغتك الأم هي؟\n"
-        "Ana dilin ne?\n\n"
-        "👇 Tippe einfach — oder wähle hier:",
-        reply_markup=ReplyKeyboardRemove())
-
-    markup = InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        InlineKeyboardButton("🇬🇧 English",    callback_data="lang:English"),
-        InlineKeyboardButton("🇷🇺 Русский",    callback_data="lang:Русский"),
-        InlineKeyboardButton("🇺🇦 Українська", callback_data="lang:Українська"),
-        InlineKeyboardButton("🇹🇷 Türkçe",     callback_data="lang:Türkçe"),
-        InlineKeyboardButton("🇸🇦 العربية",    callback_data="lang:Arabic"),
-        InlineKeyboardButton("🇪🇸 Español",    callback_data="lang:Español"),
-        InlineKeyboardButton("🇫🇷 Français",   callback_data="lang:Français"),
-        InlineKeyboardButton("🇵🇱 Polski",     callback_data="lang:Polski"),
-    )
-    bot.send_message(chat_id, "​", reply_markup=markup)  # invisible char keeps message minimal
+    voice1 = "Hey! Ich bin dein German Dude! Wie heißt du?"
+    bot.send_chat_action(chat_id, "record_audio")
+    try:
+        audio = text_to_speech_stream(voice1, chat_id)
+        bot.send_voice(chat_id, audio)
+    except Exception as e:
+        log.warning(f"Onboarding voice 1 failed for {chat_id}: {e}")
+        bot.send_message(chat_id, f"🎤 {voice1}")
 
 # GOAL SELECTION
 def send_goal_selection(chat_id):
@@ -3689,207 +3683,95 @@ GENDER_MAP = {
 }
 
 def handle_onboarding(chat_id, text):
-    state = user_state[chat_id]
+    state = user_state.get(chat_id, {})
     step  = state.get("step")
 
-    if step == "native_language":
-        lang = text.strip()
-        user_data[str(chat_id)]["native_language"] = lang
-        save_users(user_data)
-        state["step"] = "name"
-
-        # Ask for name in their language
-        try:
-            resp = claude.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=80,
-                system="You are a friendly bot. Reply with exactly one sentence only, no quotes, no extra text.",
-                messages=[{"role": "user", "content": (
-                    f"Write exactly 1 short friendly question in {lang} asking the user their name "
-                    f"(tell them this is what the bot will call them). "
-                    f"Informal tone. End with a 😊 emoji."
-                )}]
-            )
-            name_question = resp.content[0].text.strip()
-        except Exception:
-            name_question = "What's your name? 😊"
-
-        bot.send_message(chat_id, name_question, reply_markup=ReplyKeyboardRemove())
-
-    elif step == "name":
-        name = text.strip()
+    # ── Step 1: Name ──────────────────────────────────────────────────────────
+    if step == "name":
+        name = text.strip() or "du"
         user_data[str(chat_id)]["name"] = name
+        user_data[str(chat_id)]["onboarding_step"] = "native_language"
         save_users(user_data)
-        lang = user_data[str(chat_id)].get("native_language", "English")
-        state["step"] = "gender"
+        state["step"] = "native_language"
 
-        # Ask for gender in their language
+        voice2 = (
+            "Meine Muttersprache ist Deutsch — ahahaha, das hörst du auch, oder? "
+            "Was ist deine Muttersprache?"
+        )
+        bot.send_chat_action(chat_id, "record_audio")
         try:
-            resp = claude.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=80,
-                system="You are a friendly bot. Reply with exactly one sentence only, no quotes, no extra text.",
-                messages=[{"role": "user", "content": (
-                    f"Write exactly 1 short friendly sentence in {lang} greeting {name} "
-                    f"and asking them to choose their gender using the buttons below. "
-                    f"Informal tone. Use 1 emoji."
-                )}]
-            )
-            gender_question = resp.content[0].text.strip()
-        except Exception:
-            gender_question = f"Nice to meet you, {name}! 👋 What's your gender?"
+            audio = text_to_speech_stream(voice2, chat_id)
+            bot.send_voice(chat_id, audio)
+        except Exception as e:
+            log.warning(f"Onboarding voice 2 failed for {chat_id}: {e}")
+            bot.send_message(chat_id, f"🎤 {voice2}")
 
-        send_gender_buttons(chat_id, question=gender_question)
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            InlineKeyboardButton("🇬🇧 English",    callback_data="lang:English"),
+            InlineKeyboardButton("🇷🇺 Русский",    callback_data="lang:Русский"),
+            InlineKeyboardButton("🇺🇦 Українська", callback_data="lang:Українська"),
+            InlineKeyboardButton("🇹🇷 Türkçe",     callback_data="lang:Türkçe"),
+            InlineKeyboardButton("🇸🇦 العربية",    callback_data="lang:Arabic"),
+            InlineKeyboardButton("🇪🇸 Español",    callback_data="lang:Español"),
+            InlineKeyboardButton("🇫🇷 Français",   callback_data="lang:Français"),
+            InlineKeyboardButton("🇵🇱 Polski",     callback_data="lang:Polski"),
+        )
+        bot.send_message(chat_id, "👇", reply_markup=markup)
 
-    elif step == "gender":
-        if text.strip() not in GENDER_MAP:
-            bot.send_message(chat_id, "👇 Please tap one of the buttons!")
-            return
-        gender = GENDER_MAP[text.strip()]
-        user_data[str(chat_id)]["gender"] = gender
+    # ── Step 2: Native Language ────────────────────────────────────────────────
+    elif step == "native_language":
+        lang = text.strip()
+        if not lang:
+            lang = "English"
+        user_data[str(chat_id)]["native_language"] = lang
+        user_data[str(chat_id)]["onboarding_step"] = "done"
         save_users(user_data)
 
-        lang = user_data[str(chat_id)].get("native_language", "English")
         name = user_data[str(chat_id)].get("name", "")
         name_part = f", {name}" if name else ""
 
-        # Hardcoded native-quality pitches for top 8 languages
-        # Claude Haiku makes morphology errors in inflected languages (Russian etc.) — don't use it for these
-        PITCHES = {
-            "English": (
-                f"You know the feeling{name_part}? You\'ve been learning German — but the moment "
-                f"a German starts talking, your mind goes blank. 😅\n\n"
-                f"Now you\'ve got me — a real German friend, 24/7 in your pocket.\n"
-                f"No pressure, no judgment. We just talk.\n\n"
-                f"📅 In 4 weeks: the panic fades, simple replies start flowing naturally.\n"
-                f"📅 In 3 months: Ämter, colleagues, friends — you handle it all with ease.\n"
-                f"📅 In 1 year: Germans will ask where you learned to speak so well. 😄\n\n"
-                f"Pick a topic — let\'s go. 👇"
-            ),
-            "Русский": (
-                f"Знакомо{name_part}? Ты учишь немецкий — а как только немец заговорил, "
-                f"всё вылетело из головы. 😅\n\n"
-                f"Теперь у тебя есть я — настоящий немецкий друг, 24/7 в кармане.\n"
-                f"Без давления, без осуждения. Просто разговариваем.\n\n"
-                f"📅 Через 4 недели: паника проходит, простые фразы приходят сами.\n"
-                f"📅 Через 3 месяца: Amt, коллеги, друзья — ты справляешься со всем.\n"
-                f"📅 Через год: немцы сами спросят, где ты так хорошо выучил язык. 😄\n\n"
-                f"Выбери тему — начнём. 👇"
-            ),
-            "Українська": (
-                f"Знайоме{name_part}? Ти вчиш німецьку — а щойно хтось заговорив, "
-                f"усе вилетіло з голови. 😅\n\n"
-                f"Тепер у тебе є я — справжній німецький друг, 24/7 у кишені.\n"
-                f"Без тиску, без осуду. Просто розмовляємо.\n\n"
-                f"📅 Через 4 тижні: паніка зникає, прості фрази приходять самі.\n"
-                f"📅 Через 3 місяці: Amt, колеги, друзі — ти з усім справляєшся.\n"
-                f"📅 Через рік: німці самі питатимуть, де ти так добре вивчив мову. 😄\n\n"
-                f"Обери тему — починаємо. 👇"
-            ),
-            "Türkçe": (
-                f"Tanıdık geldi mi{name_part}? Almanca öğreniyorsun — ama biri konuşmaya "
-                f"başlayınca her şey uçup gidiyor. 😅\n\n"
-                f"Artık 24/7 cebinde gerçek bir Alman arkadaşın var.\n"
-                f"Baskı yok, yargılama yok. Sadece konuşuyoruz.\n\n"
-                f"📅 4 haftada: panik geçiyor, basit cümleler kendiliğinden geliyor.\n"
-                f"📅 3 ayda: Amt, iş arkadaşları, dostlar — hepsinin altından kalkıyorsun.\n"
-                f"📅 1 yılda: Almanlar sana nereden bu kadar iyi öğrendin diye soracak. 😄\n\n"
-                f"Bir konu seç — başlayalım. 👇"
-            ),
-            "Arabic": (
-                f"تعرف هذا الإحساس{name_part}؟ تتعلم الألمانية — لكن بمجرد أن يتكلم أحد، "
-                f"يختفي كل شيء من رأسك. 😅\n\n"
-                f"الآن معك أنا — صديق ألماني حقيقي، 24/7 في جيبك.\n"
-                f"بدون ضغط، بدون حكم. نتكلم فقط.\n\n"
-                f"📅 خلال 4 أسابيع: يختفي الذعر، تجيء الردود البسيطة بشكل طبيعي.\n"
-                f"📅 خلال 3 أشهر: الدوائر الحكومية، الزملاء، الأصدقاء — تتعامل مع الجميع.\n"
-                f"📅 خلال سنة: سيسألك الألمان أين تعلمت اللغة بهذا المستوى. 😄\n\n"
-                f"اختر موضوعاً — لنبدأ. 👇"
-            ),
-            "Español": (
-                f"¿Te suena familiar{name_part}? Estás aprendiendo alemán — pero en cuanto "
-                f"alguien habla, se te va todo. 😅\n\n"
-                f"Ahora tienes a tu lado a un amigo alemán de verdad, 24/7 en tu bolsillo.\n"
-                f"Sin presión, sin juicios. Solo hablamos.\n\n"
-                f"📅 En 4 semanas: el pánico desaparece, las frases simples salen solas.\n"
-                f"📅 En 3 meses: Amt, compañeros, amigos — te manejas con todo.\n"
-                f"📅 En 1 año: los alemanes te preguntarán dónde aprendiste tan bien. 😄\n\n"
-                f"Elige un tema — empecemos. 👇"
-            ),
-            "Français": (
-                f"Tu connais ce sentiment{name_part} ? Tu apprends l\'allemand — mais dès "
-                f"qu\'un Allemand parle, tout disparaît. 😅\n\n"
-                f"Maintenant tu as moi — un vrai ami allemand, 24/7 dans ta poche.\n"
-                f"Sans pression, sans jugement. On parle, c\'est tout.\n\n"
-                f"📅 En 4 semaines : la panique s\'en va, les réponses simples viennent naturellement.\n"
-                f"📅 En 3 mois : l\'Amt, les collègues, les amis — tu gères tout.\n"
-                f"📅 En 1 an : les Allemands te demanderont où tu as si bien appris. 😄\n\n"
-                f"Choisis un sujet — on commence. 👇"
-            ),
-            "Polski": (
-                f"Znasz to uczucie{name_part}? Uczysz się niemieckiego — ale jak tylko ktoś "
-                f"zaczyna mówić, wszystko ulatuje z głowy. 😅\n\n"
-                f"Teraz masz mnie — prawdziwego niemieckiego przyjaciela, 24/7 w kieszeni.\n"
-                f"Bez presji, bez oceniania. Po prostu rozmawiamy.\n\n"
-                f"📅 Za 4 tygodnie: panika mija, proste odpowiedzi przychodzą same.\n"
-                f"📅 Za 3 miesiące: Amt, współpracownicy, znajomi — dajesz radę ze wszystkim.\n"
-                f"📅 Za rok: Niemcy sami zapytają, gdzie tak dobrze nauczyłeś się języka. 😄\n\n"
-                f"Wybierz temat — zaczynamy. 👇"
-            ),
-        }
-
-        if lang in PITCHES:
-            pitch_msg = PITCHES[lang]
-        else:
-            # Claude fallback for other languages — stronger prompt to avoid morphology errors
-            try:
-                pitch_resp = claude.messages.create(
-                    model="claude-haiku-4-5-20251001",
-                    max_tokens=250,
-                    system=(
-                        "You are a native speaker of the requested language. "
-                        "Write ONLY the message text. No quotes, no preamble. "
-                        "Use only words and grammar that a native speaker would naturally use. "
-                        "If unsure about any word form, choose a simpler expression instead."
-                    ),
-                    messages=[{"role": "user", "content": (
-                        f"Write a short message in {lang} to {name or 'the user'} (informal). "
-                        f"Max 10 lines, 3 emojis max. Cover:\n"
-                        f"1. Pain: knows German but freezes when a German speaks\n"
-                        f"2. Solution: real German friend in pocket, 24/7, no pressure, no judgment\n"
-                        f"3. Timeline: 4 weeks (panic gone), 3 months (handles Amt/work/friends), 1 year (native-level)\n"
-                        f"4. Short action line to pick a topic\n\n"
-                        f"CRITICAL: Use only simple, correct {lang}. No unusual word forms. Keep it natural."
-                    )}]
-                )
-                pitch_msg = pitch_resp.content[0].text.strip()
-            except Exception:
-                pitch_msg = PITCHES["English"]  # safe English fallback
-
-        # Send pitch then drop straight into the bot — no voice gate
-        bot.send_message(chat_id, pitch_msg, reply_markup=ReplyKeyboardRemove())
-        user_state[chat_id] = {"mode": "menu"}
-        time.sleep(0.8)
-        send_topic_buttons(chat_id)
-
-    elif step == "intro_reply":
-        # User replied to NPC intro — any response counts
-        name = user_data[str(chat_id)].get("name", "")
-        closing_text = (
-            f"Freut mich, dich kennenzulernen{', ' + name if name else ''}! "
-            f"Dann lass uns doch Deutsch SPRECHEN!"
-        )
-        user_state[chat_id] = {"mode": "menu"}
-
+        voice3 = f"Cool{name_part}! Dann lass uns loslegen!"
         bot.send_chat_action(chat_id, "record_audio")
         try:
-            audio = text_to_speech_stream(closing_text, chat_id)
+            audio = text_to_speech_stream(voice3, chat_id)
             bot.send_voice(chat_id, audio)
         except Exception as e:
-            log.warning(f"Onboarding closing voice failed for {chat_id}: {e}")
-            bot.send_message(chat_id, f"😄 {closing_text}")
+            log.warning(f"Onboarding voice 3 failed for {chat_id}: {e}")
+            bot.send_message(chat_id, f"🎤 {voice3}")
 
-        time.sleep(0.8)
+        # Short instructions in their language — hardcoded, no Claude
+        INSTRUCTIONS = {
+            "English":    "Pick a topic below — I'll speak German, you respond however you can.\nTap *übersetzen* anytime for a translation. 🇩🇪",
+            "Русский":    "Выбери тему ниже — я говорю по-немецки, отвечай как получится.\nНажми *übersetzen* в любой момент для перевода. 🇩🇪",
+            "Українська": "Обери тему нижче — я говорю по-німецьки, відповідай як виходить.\nНатисни *übersetzen* у будь-який момент для перекладу. 🇩🇪",
+            "Türkçe":     "Aşağıdan bir konu seç — ben Almanca konuşacağım, nasıl yapabilirsen öyle yanıtla.\nÇeviri için istediğin zaman *übersetzen*'e bas. 🇩🇪",
+            "Arabic":     "اختر موضوعًا أدناه — سأتحدث بالألمانية، أجب كيفما استطعت.\nاضغط *übersetzen* في أي وقت للترجمة. 🇩🇪",
+            "Español":    "Elige un tema abajo — yo hablo alemán, responde como puedas.\nToca *übersetzen* cuando quieras para una traducción. 🇩🇪",
+            "Français":   "Choisis un sujet ci-dessous — je parle allemand, réponds comme tu peux.\nAppuie sur *übersetzen* à tout moment pour une traduction. 🇩🇪",
+            "Polski":     "Wybierz temat poniżej — mówię po niemiecku, odpowiadaj jak potrafisz.\nNaciśnij *übersetzen* w dowolnym momencie, aby przetłumaczyć. 🇩🇪",
+        }
+        instruction = INSTRUCTIONS.get(lang, INSTRUCTIONS["English"])
+        time.sleep(0.5)
+        bot.send_message(chat_id, instruction, parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
+
+        user_state[chat_id] = {"mode": "menu"}
+        time.sleep(0.5)
+        send_topic_buttons(chat_id)
+
+    # ── Legacy steps (kept for users mid-flow on old version) ─────────────────
+    elif step in ("gender", "intro_reply"):
+        # Just move them forward gracefully with a voice
+        lang = user_data.get(str(chat_id), {}).get("native_language", "English")
+        voice_fwd = "Cool! Dann lass uns loslegen!"
+        bot.send_chat_action(chat_id, "record_audio")
+        try:
+            audio = text_to_speech_stream(voice_fwd, chat_id)
+            bot.send_voice(chat_id, audio)
+        except Exception as e:
+            log.warning(f"Legacy step voice failed for {chat_id}: {e}")
+        user_state[chat_id] = {"mode": "menu"}
+        time.sleep(0.5)
         send_topic_buttons(chat_id)
 
 def send_voice_intro(chat_id):
@@ -5421,6 +5303,91 @@ def handle_feedback_message(chat_id: int, text: str):
     )
 
 
+@bot.message_handler(commands=['refer', 'invite', 'freund'])
+def handle_refer(message):
+    """Referral system — share the bot, earn bonus days."""
+    chat_id = message.chat.id
+    ensure_user(chat_id)
+    if _require_onboarding(chat_id): return
+
+    uid      = str(chat_id)
+    name     = user_data.get(uid, {}).get("name", "")
+    lang     = user_data.get(uid, {}).get("native_language", "English")
+    ref_link = f"https://t.me/germandude_bot?start=ref_{chat_id}"
+    ref_cnt  = user_data.get(uid, {}).get("referral_count", 0)
+    ref_bonus= user_data.get(uid, {}).get("referral_bonus_days", 0)
+
+    REFER_MSG = {
+        "English":    (
+            f"🤝 *Invite a friend — get rewarded!*\n\n"
+            f"Share your personal link. For every friend who starts the bot:\n"
+            f"👉 You get *3 days Premium free*\n"
+            f"👉 Your friend gets *1 day Premium free* on signup\n\n"
+            f"Your link:\n`{ref_link}`\n\n"
+            f"📊 Friends invited so far: *{ref_cnt}*\n"
+            f"🎁 Bonus days earned: *{ref_bonus}*"
+        ),
+        "Русский":    (
+            f"🤝 *Пригласи друга — получи бонус!*\n\n"
+            f"Поделись своей ссылкой. За каждого друга, который запустит бота:\n"
+            f"👉 Ты получаешь *3 дня Premium бесплатно*\n"
+            f"👉 Твой друг получает *1 день Premium* при регистрации\n\n"
+            f"Твоя ссылка:\n`{ref_link}`\n\n"
+            f"📊 Приглашено друзей: *{ref_cnt}*\n"
+            f"🎁 Заработано бонусных дней: *{ref_bonus}*"
+        ),
+        "Українська": (
+            f"🤝 *Запроси друга — отримай бонус!*\n\n"
+            f"Поділись своїм посиланням. За кожного друга, який запустить бота:\n"
+            f"👉 Ти отримуєш *3 дні Premium безкоштовно*\n"
+            f"👉 Твій друг отримує *1 день Premium* при реєстрації\n\n"
+            f"Твоє посилання:\n`{ref_link}`\n\n"
+            f"📊 Запрошено друзів: *{ref_cnt}*\n"
+            f"🎁 Зароблено бонусних днів: *{ref_bonus}*"
+        ),
+        "Türkçe":     (
+            f"🤝 *Arkadaşını davet et — ödül kazan!*\n\n"
+            f"Kişisel bağlantını paylaş. Botu başlatan her arkadaşın için:\n"
+            f"👉 *3 gün ücretsiz Premium* kazanırsın\n"
+            f"👉 Arkadaşın kayıt olduğunda *1 gün Premium* alır\n\n"
+            f"Bağlantın:\n`{ref_link}`\n\n"
+            f"📊 Davet edilen arkadaşlar: *{ref_cnt}*\n"
+            f"🎁 Kazanılan bonus günler: *{ref_bonus}*"
+        ),
+    }
+    msg = REFER_MSG.get(lang, REFER_MSG["English"])
+    bot.send_message(chat_id, msg, parse_mode="Markdown")
+
+
+def _process_referral(new_chat_id: int, referrer_id: int):
+    """Credit referral bonus to referrer and give welcome bonus to new user."""
+    try:
+        r_uid = str(referrer_id)
+        n_uid = str(new_chat_id)
+        if r_uid not in user_data or n_uid not in user_data:
+            return
+        if user_data[n_uid].get("referred_by"):
+            return  # already credited
+
+        # Mark new user as referred
+        user_data[n_uid]["referred_by"] = referrer_id
+
+        # Give referrer 3 bonus days
+        user_data[r_uid]["referral_count"] = user_data[r_uid].get("referral_count", 0) + 1
+        user_data[r_uid]["referral_bonus_days"] = user_data[r_uid].get("referral_bonus_days", 0) + 3
+
+        save_users(user_data)
+
+        # Notify referrer
+        r_name = user_data[r_uid].get("name", "")
+        bot.send_message(referrer_id,
+            f"🎉 {'*' + r_name + '*' if r_name else 'Hey'}! Ein Freund hat gerade über deinen Link gestartet.\n"
+            f"Du hast *3 Tage Premium* verdient — danke! 🙌",
+            parse_mode="Markdown")
+    except Exception as e:
+        log.warning(f"Referral processing failed: {e}")
+
+
 @bot.message_handler(commands=['danke'])
 def danke_cmd(message):
     chat_id = message.chat.id
@@ -5476,9 +5443,15 @@ def handle_adminstats(message):
     # Stufe 1 — Joined (= alle)
     f_joined = total
 
-    # Stufe 2 — Onboarding komplett (Name + Sprache + Ziel gesetzt)
+    # Onboarding step breakdown (new voice-first flow)
+    ob_step_name  = sum(1 for u in users.values() if u.get("onboarding_step") == "name")
+    ob_step_lang  = sum(1 for u in users.values() if u.get("onboarding_step") == "native_language")
+    ob_step_done  = sum(1 for u in users.values() if u.get("onboarding_step") == "done")
+    ob_no_step    = sum(1 for u in users.values() if not u.get("onboarding_step"))
+
+    # Stufe 2 — Onboarding komplett
     f_onboarded = sum(1 for u in users.values()
-                      if u.get("name") and u.get("native_language") and u.get("goal"))
+                      if u.get("native_language") and u.get("level"))
 
     # Stufe 3 — Mindestens 1 Gespräch geführt
     f_talked = sum(1 for u in users.values() if u.get("conversations_started", 0) >= 1)
@@ -5491,6 +5464,13 @@ def handle_adminstats(message):
 
     # Stufe 6 — Konvertiert (Premium oder Plus)
     f_converted = n_premium + n_plus
+
+    # Referrals
+    n_referred   = sum(1 for u in users.values() if u.get("referred_by"))
+    n_referrers  = sum(1 for u in users.values() if u.get("referral_count", 0) > 0)
+    top_referrer = max(users.values(), key=lambda u: u.get("referral_count", 0), default={})
+    top_ref_name = top_referrer.get("name", "–") if top_referrer.get("referral_count", 0) > 0 else "–"
+    top_ref_cnt  = top_referrer.get("referral_count", 0)
 
     def pct(a, b):
         return f"{a/b*100:.0f}%" if b else "–"
@@ -5562,11 +5542,22 @@ def handle_adminstats(message):
         f"   Paywall gesehen:   {f_paywall}",
         f"   Konvertiert:       {f_converted} ({pct(f_converted, f_paywall)})",
         "",
+        "🔬 *Onboarding-Schritte (wo hängen sie?)*",
+        f"   Kein Start:         {ob_no_step}  (nie /start fertig)",
+        f"   Hängt bei Name:     {ob_step_name}  (Voice gehört, nicht geantwortet)",
+        f"   Hängt bei Sprache:  {ob_step_lang}  (Name gegeben, kein Sprach-Klick)",
+        f"   Fertig:             {ob_step_done}",
+        "",
         "⚠️ *Größte Dropouts*",
         f"   Beim Onboarding:    -{drop_onboarding}",
         f"   Vor 1. Gespräch:    -{drop_first_conv}",
         f"   Nach 1. Gespräch:   -{drop_retention}  ← Einmal & weg",
         f"   An der Paywall:     -{drop_paywall}",
+        "",
+        "🤝 *Community & Referrals*",
+        f"   Über Referral joined: {n_referred}",
+        f"   Aktive Referrer:      {n_referrers}",
+        f"   Top Referrer:         {top_ref_name} ({top_ref_cnt}×)",
         "",
         "📅 *Aktivität*",
         f"   Heute aktiv:    {active_1d}",
