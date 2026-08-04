@@ -94,14 +94,8 @@ ALL_GOALS = [
 ]
 
 def onboarding_complete(chat_id) -> bool:
-    """True if user has completed onboarding (name + language + test)."""
-    uid  = str(chat_id)
-    user = user_data.get(uid, {})
-    return bool(
-        user.get("name") and
-        user.get("native_language") and
-        user.get("level")
-    )
+    """True once user has given their name (first reply to bot)."""
+    return bool(user_data.get(str(chat_id), {}).get("name"))
 
 
 def _require_onboarding(chat_id) -> bool:
@@ -140,7 +134,7 @@ def ensure_user(chat_id):
         user_data[uid] = {
             "name": None, "gender": None, "native_language": None,
             "goal": None, "level": "A2", "scenario_streak": 0,
-            "weak_points": [], "errors": [], "test_errors": [],
+            "weak_points": [], "errors": [], "test_errors": [], "user_story": [],
             "user_progress": {g: [] for g in ALL_GOALS},
             "user_stats": {"xp": 0, "level": 1, "streak": 0, "last_active": now, "total_scenarios": 0},
             "trial_start": None, "premium": False, "trial_code_used": None,
@@ -156,6 +150,7 @@ def ensure_user(chat_id):
         user_data[uid].setdefault("user_progress", {g: [] for g in ALL_GOALS})
         user_data[uid].setdefault("scenario_streak", 0)
         user_data[uid].setdefault("weak_points", [])
+        user_data[uid].setdefault("user_story", [])
         user_data[uid].setdefault("errors", [])
         user_data[uid].setdefault("test_errors", [])
         user_data[uid].setdefault("achievements", [])
@@ -937,6 +932,17 @@ def build_system_prompt(chat_id, scenario):
 
     # Native language note for GPT
     lang_note = f"Die Muttersprache des Lernenden ist: {native_language}." if native_language else ""
+
+    user_story = user_data.get(str(chat_id), {}).get("user_story", [])
+    if user_story:
+        story_facts = "\n".join(f"- {f}" for f in user_story[-30:])
+        story_note = (
+            f"\nWAS DU ÜBER {name.upper() or 'DEN USER'} WEISST (aus früheren Gesprächen):\n"
+            f"{story_facts}\n"
+            f"Nutze es natürlich — nicht aufzählen, sondern einweben wenn passend."
+        )
+    else:
+        story_note = ""
     formality  = resolve_formality(goal, context)
     voice      = persona["voice"]
     mode       = get_dynamic_mode(session_state.get(chat_id, {"struggle": 0, "success": 0}))
@@ -1065,6 +1071,11 @@ Du bist ein echter Mensch in dieser Rolle, kein KI-Assistent.
 {gem_hint}
 VERBOTEN — ABSOLUT: Fang NIEMALS mit "Hmm", "Also", "Nun", "Tja", "Na ja", "Okay so", "Ah", "Oh", "Wow" oder KI-typischen Füllwörtern an. ERSTE WORT muss ein echtes Wort sein — kein Filler. Starte direkt wie ein echter Mensch.
 
+MEHRERE KURZE NACHRICHTEN (OPTIONAL):
+Du kannst deine Antwort in 2–3 kurze Teile aufteilen, getrennt durch |||
+NUR bei spontanen Reaktionen: "Haha! 😄 ||| Das kenne ich. ||| Was ist passiert?"
+Maximum 3 Teile. Jeder Teil max. 1 kurzer Satz. Nicht bei jedem Turn.
+
 ANREDE & GESCHLECHT:
 {gender_note}
 Formelle Anrede des Lernenden: {formal_address}
@@ -1074,6 +1085,7 @@ In informellen Szenarien (Freunde, Party, Gym etc.) nutze einfach "{name}".
 MUTTERSPRACHE:
 {lang_note}
 Du antwortest IMMER auf Deutsch — unabhängig davon, in welcher Sprache der Lernende schreibt oder spricht.
+{story_note}
 
 {human_style}
 """
@@ -1871,7 +1883,7 @@ def get_gem_system_prompt_hint(gem) -> str:
         f"Nicht erzwungen — nur wenn es sich organisch ergibt."
     )
 
-SPEED_MAP = {"A1": 0.8, "A2": 0.85, "B1": 0.95, "B2": 1.0, "C1": 1.05}
+SPEED_MAP = {"A1": 0.95, "A2": 1.0, "B1": 1.08, "B2": 1.14, "C1": 1.2}
 
 MAX_TURNS = {"A1": 5, "A2": 5, "B1": 8, "B2": 8, "C1": 10}
 
@@ -1924,8 +1936,15 @@ def text_to_speech_stream(text, chat_id=None):
         response = openai_client.audio.speech.create(
             model="gpt-4o-mini-tts",
             voice=voice,
-            input=text[:4000],  # API limit safety
-            speed=speed
+            input=text[:4000],
+            speed=speed,
+            instructions=(
+                "Sprich wie ein echter Berliner — natürlich, flüssig, mit echtem Tempo. "
+                "Nicht zu langsam, nicht roboterhaft. Freundlich und direkt. "
+                "Natürliche Pausen nur an Satzgrenzen, kein künstliches Dehnen. "
+                "Englische Lehnwörter wie 'cool', 'okay', 'sorry', 'wow', 'job', 'team', 'check', 'nice' "
+                "werden englisch ausgesprochen — nicht eingedeutscht."
+            )
         )
         audio_file = BytesIO(response.read())
         audio_file.name = "voice.ogg"
@@ -1953,10 +1972,23 @@ def send_reply(chat_id, text, voice=True):
     level = user_data.get(str(chat_id), {}).get("level", "B1") if chat_id else "B1"
     text = humanize_text(text, level)
 
+    # ── Split-voice: multiple short messages like a real human ────────────────
+    parts = [p.strip() for p in text.split("|||") if p.strip()]
+    if len(parts) > 1 and voice:
+        for part in parts[:-1]:
+            bot.send_chat_action(chat_id, "record_audio")
+            try:
+                audio = text_to_speech_stream(part, chat_id)
+                bot.send_voice(chat_id, audio)
+            except Exception as e:
+                log.warning(f"Split voice part failed for {chat_id}: {e}")
+                bot.send_message(chat_id, part)
+            time.sleep(random.uniform(0.6, 1.2))
+        text = parts[-1]
+
     # Store last bot text for übersetzen button
     last_bot_text[chat_id] = text
 
-    # Text-only mode: user sent a text message, bot replies with text + translate button
     translate_markup = InlineKeyboardMarkup()
     translate_markup.add(translate_btn(chat_id))
     if not voice:
@@ -1981,7 +2013,6 @@ def send_reply(chat_id, text, voice=True):
                 "🔇 Sprachnachrichten deaktiviert. Bitte aktiviere sie in Telegram-Einstellungen.",
                 reply_markup=markup)
         else:
-            # TTS failed — send as text with buttons
             bot.send_message(chat_id, f"💬 {text}", reply_markup=markup)
 
 def send_chat_reply(chat_id, text):
@@ -2303,18 +2334,56 @@ def _extract_friend_memory(chat_id):
                      if l.strip() and len(l.strip()) > 5]
         if new_facts:
             existing = user_data[uid].get("friend_memory", [])
-            # Deduplicate roughly
             combined = existing + [f for f in new_facts if f not in existing]
-            user_data[uid]["friend_memory"] = combined[-50:]  # keep last 50 facts
+            user_data[uid]["friend_memory"] = combined[-50:]
             save_users(user_data)
             log.info(f"Friend memory updated for {chat_id}: +{len(new_facts)} facts")
     except Exception as e:
         log.warning(f"Friend memory extraction failed: {e}")
 
 
+def _extract_user_story(chat_id, history_snapshot=None):
+    """Extract personal facts from ANY session — persists cross-modal in user_story."""
+    uid  = str(chat_id)
+    mem  = history_snapshot or user_memory.get(chat_id, [])
+    conv = [m for m in mem if m.get("role") in ("user", "assistant")][-20:]
+    if not conv:
+        return
+    conv_text = "\n".join(
+        f"{'User' if m['role']=='user' else 'Dude'}: {m['content']}" for m in conv
+    )
+    try:
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=250,
+            system=(
+                "Extrahiere aus diesem Gespräch konkrete persönliche Fakten über den User. "
+                "NUR was er/sie wirklich erwähnt hat — keine Vermutungen. "
+                "Format: eine kurze Zeile pro Fakt. "
+                "Beispiele: 'Arbeitet als Ingenieurin bei Bosch', 'Hat Rückenschmerzen seit zwei Wochen', "
+                "'Sucht 2-Zimmer-Wohnung in Prenzlauer Berg', 'Kind heißt Emma, 4 Jahre alt', "
+                "'Bewerbungsgespräch bei Siemens nächste Woche'. "
+                "Wenn nichts Persönliches erzählt wurde: gar nichts ausgeben."
+            ),
+            messages=[{"role": "user", "content": f"Gespräch:\n{conv_text}"}]
+        )
+        new_facts = [l.strip().lstrip("-•*").strip()
+                     for l in resp.content[0].text.strip().splitlines()
+                     if l.strip() and len(l.strip()) > 8]
+        if new_facts:
+            existing = user_data[uid].get("user_story", [])
+            combined = existing + [f for f in new_facts if f not in existing]
+            user_data[uid]["user_story"] = combined[-80:]
+            save_users(user_data)
+            log.info(f"User story updated for {chat_id}: +{len(new_facts)} facts")
+    except Exception as e:
+        log.warning(f"User story extraction failed for {chat_id}: {e}")
+
+
 def _quatschen_end_with_xp(chat_id):
     """Award XP and show share button after Quatschen session ends."""
-    _extract_friend_memory(chat_id)  # Save what we learned this session
+    _extract_friend_memory(chat_id)
+    _extract_user_story(chat_id)
     turns = turn_counter.get(chat_id, 0)
     xp_gain, bonus_msg = calculate_xp(turns, "normal")
     new_streak, lost_streak = update_streak(chat_id)
@@ -3576,35 +3645,33 @@ def start(message):
         send_topic_buttons(chat_id)
         return
 
-    # New user — full onboarding — language first
-    user_state[chat_id] = {"mode": "onboarding", "step": "native_language"}
+    # New user — conversational opener, voice + text
+    user_state[chat_id] = {"mode": "onboarding", "step": "name"}
+    user_data[str(chat_id)]["onboarding_step"]       = "name"
+    user_data[str(chat_id)]["onboarding_started_at"] = datetime.now().isoformat()
     test_state.pop(chat_id, None)
     user_step.pop(chat_id, None)
+    save_users(user_data)
 
-    bot.send_message(chat_id,
-        "🇩🇪 Hallo! Ich bin dein Deutscher Kumpel.\n"
-        "Ich helfe dir, Deutsch zu sprechen — mit echten Gesprächen, jeden Tag.\n\n"
-        "🌍 Was ist deine Muttersprache?\n"
-        "What's your native language?\n"
-        "Какой твой родной язык?\n"
-        "Яка твоя рідна мова?\n"
-        "لغتك الأم هي؟\n"
-        "Ana dilin ne?\n\n"
-        "👇 Tippe einfach — oder wähle hier:",
-        reply_markup=ReplyKeyboardRemove())
-
-    markup = InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        InlineKeyboardButton("🇬🇧 English",    callback_data="lang:English"),
-        InlineKeyboardButton("🇷🇺 Русский",    callback_data="lang:Русский"),
-        InlineKeyboardButton("🇺🇦 Українська", callback_data="lang:Українська"),
-        InlineKeyboardButton("🇹🇷 Türkçe",     callback_data="lang:Türkçe"),
-        InlineKeyboardButton("🇸🇦 العربية",    callback_data="lang:Arabic"),
-        InlineKeyboardButton("🇪🇸 Español",    callback_data="lang:Español"),
-        InlineKeyboardButton("🇫🇷 Français",   callback_data="lang:Français"),
-        InlineKeyboardButton("🇵🇱 Polski",     callback_data="lang:Polski"),
+    greeting_voice = (
+        "Hey! Ich bin dein German Dude — dein Berliner Kumpel. "
+        "Ich helfe dir, in Deutschland klarzukommen und dich sicher zu fühlen — "
+        "beim Arzt, auf dem Amt, im Job oder einfach im Alltag. "
+        "Und wie heißt du?"
     )
-    bot.send_message(chat_id, "​", reply_markup=markup)  # invisible char keeps message minimal
+    greeting_text = (
+        "Hey! Ich bin dein German Dude — dein Berliner Kumpel. 🇩🇪\n\n"
+        "Ich helfe dir, in Deutschland klarzukommen und dich sicher zu fühlen — "
+        "beim Arzt, auf dem Amt, im Job oder einfach im Alltag.\n\n"
+        "Und wie heißt du?"
+    )
+    bot.send_chat_action(chat_id, "record_audio")
+    try:
+        audio = text_to_speech_stream(greeting_voice, chat_id)
+        bot.send_voice(chat_id, audio)
+    except Exception as e:
+        log.warning(f"Onboarding greeting voice failed for {chat_id}: {e}")
+    bot.send_message(chat_id, greeting_text, reply_markup=ReplyKeyboardRemove())
 
 # GOAL SELECTION
 def send_goal_selection(chat_id):
@@ -3644,287 +3711,147 @@ GOAL_MAP = {
 
 # Ordered topic list for topic-selection buttons (index = callback key)
 TOPIC_LIST = [
-    ("🧍 Selbstpräsentation",      "Selbstpräsentation"),
-    ("🧑‍🤝‍🧑 Freunde & Beziehungen", "Freunde / Beziehungen"),
-    ("🏢 Amt & Arzt",              "Soziales (Ämter, Ärzte)"),
-    ("🎉 Freizeit",                "Unterhaltung (Club, Kino etc)"),
-    ("🍽️ Einkauf & Restaurant",    "Einkauf & Restaurants"),
+    ("🏥 Arzt / Apotheke",        "Soziales (Ämter, Ärzte)"),
+    ("🏛️ Bürgeramt / Jobcenter",  "Soziales (Ämter, Ärzte)"),
+    ("💼 Vorstellungsgespräch",    "Job"),
+    ("🏠 Vermieter / WG",         "Soziales (Ämter, Ärzte)"),
+    ("📞 Telefonat",               "Am Telefon"),
+    ("🛒 Einkauf / Restaurant",    "Einkauf & Restaurants"),
+    ("👋 Kennenlernen",            "Selbstpräsentation"),
+    ("☕ Freunde / Dates",         "Freunde / Beziehungen"),
     ("✈️ Reisen",                  "Tourismus & Reisen"),
-    ("🏋️ Sport & Hobbys",          "Sport & Hobbys"),
-    ("📞 Telefon",                 "Am Telefon"),
-    ("💼 Job",                     "Job"),
-    ("🗣️ Quatschen",               "Quatschen"),
+    ("💬 Einfach quatschen",       "Quatschen"),
 ]
 
+FREE_TIER_TRANSLATIONS = {
+    "English":    "💡 _1 free conversation daily — no subscription needed._",
+    "Русский":    "💡 _1 разговор бесплатно каждый день — без подписки._",
+    "Українська": "💡 _1 розмова безкоштовно щодня — без підписки._",
+    "Türkçe":     "💡 _Günlük 1 ücretsiz sohbet — abonelik gerekmez._",
+    "Arabic":     "💡 _محادثة مجانية واحدة يومياً — بدون اشتراك._",
+    "Español":    "💡 _1 conversación gratuita al día — sin suscripción._",
+    "Français":   "💡 _1 conversation gratuite par jour — sans abonnement._",
+    "Polski":     "💡 _1 bezpłatna rozmowa dziennie — bez subskrypcji._",
+}
+
 def send_topic_buttons(chat_id):
+    lang   = user_data.get(str(chat_id), {}).get("native_language", "English")
     markup = InlineKeyboardMarkup(row_width=2)
     buttons = [
         InlineKeyboardButton(label, callback_data=f"topic:{i}")
         for i, (label, _) in enumerate(TOPIC_LIST)
     ]
     markup.add(*buttons)
-    bot.send_message(chat_id, "🎯 Welches Thema willst du heute üben?", reply_markup=markup)
+    free_de  = "💡 _1 Gespräch täglich kostenlos — kein Abo nötig._"
+    free_nat = FREE_TIER_TRANSLATIONS.get(lang, "")
+    note     = f"{free_de}\n{free_nat}" if free_nat and lang != "English" else free_de
+    bot.send_message(chat_id,
+        f"Was steht heute an? 👇\n\n{note}",
+        parse_mode="Markdown",
+        reply_markup=markup)
 
-def send_goal_buttons(chat_id):
-    markup = ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row(KeyboardButton("🧍‍♂️ Über dich"), KeyboardButton("🧑‍🤝‍🧑 Freunde"))
-    markup.row(KeyboardButton("🏢 Amt & Arzt"),  KeyboardButton("🎉 Freizeit"))
-    markup.row(KeyboardButton("🍽 Restaurant"),   KeyboardButton("✈️ Reisen"))
-    markup.row(KeyboardButton("🏋️ Hobbys"),       KeyboardButton("📞 Telefon"))
-    markup.row(KeyboardButton("💼 Job"))
-    bot.send_message(chat_id, "👉 Wofür brauchst du Deutsch?", reply_markup=markup)
 
-def send_gender_buttons(chat_id, question="👇 Select your gender:"):
-    markup = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.row(
-        KeyboardButton("👨 Male"),
-        KeyboardButton("👩 Female"),
-        KeyboardButton("🌈 Other")
-    )
-    bot.send_message(chat_id, question, reply_markup=markup)
-
-GENDER_MAP = {
-    "👨 Male":   "männlich",
-    "👩 Female": "weiblich",
-    "🌈 Other":  "divers",
+COUNTRY_TO_LANG = {
+    "russland": "Русский", "russia": "Русский", "рос": "Русский", "russ": "Русский",
+    "ukraine": "Українська", "ukraina": "Українська", "україна": "Українська",
+    "türkei": "Türkçe", "turkey": "Türkçe", "türkiye": "Türkçe",
+    "syrien": "Arabic", "irak": "Arabic", "ägypten": "Arabic", "saudi": "Arabic",
+    "marokko": "Arabic", "tunesien": "Arabic", "algerien": "Arabic",
+    "spanien": "Español", "spain": "Español", "mexiko": "Español", "argentinien": "Español",
+    "frankreich": "Français", "france": "Français",
+    "polen": "Polski", "poland": "Polski",
+    "england": "English", "uk": "English", "usa": "English", "australien": "English",
+    "indien": "English", "kasachstan": "Русский", "usbekistan": "Русский",
 }
 
+def _detect_lang_from_origin(text: str) -> str:
+    t = text.lower().strip()
+    for key, lang in COUNTRY_TO_LANG.items():
+        if key in t:
+            return lang
+    return None
+
+
 def handle_onboarding(chat_id, text):
-    state = user_state[chat_id]
+    state = user_state.get(chat_id, {})
     step  = state.get("step")
 
-    if step == "native_language":
-        lang = text.strip()
-        user_data[str(chat_id)]["native_language"] = lang
-        save_users(user_data)
-        state["step"] = "name"
+    LANG_NORM = {
+        "english": "English", "englisch": "English", "английский": "English",
+        "русский": "Русский", "russian": "Русский", "рус": "Русский",
+        "украинский": "Українська", "українська": "Українська", "ukrainian": "Українська",
+        "türkçe": "Türkçe", "turkish": "Türkçe", "türkisch": "Türkçe",
+        "arabic": "Arabic", "arabisch": "Arabic", "арабский": "Arabic",
+        "español": "Español", "spanish": "Español", "spanisch": "Español",
+        "français": "Français", "french": "Français", "französisch": "Français",
+        "polski": "Polski", "polish": "Polski", "polnisch": "Polski",
+    }
 
-        # Ask for name in their language
-        try:
-            resp = claude.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=80,
-                system="You are a friendly bot. Reply with exactly one sentence only, no quotes, no extra text.",
-                messages=[{"role": "user", "content": (
-                    f"Write exactly 1 short friendly question in {lang} asking the user their name "
-                    f"(tell them this is what the bot will call them). "
-                    f"Informal tone. End with a 😊 emoji."
-                )}]
-            )
-            name_question = resp.content[0].text.strip()
-        except Exception:
-            name_question = "What's your name? 😊"
-
-        bot.send_message(chat_id, name_question, reply_markup=ReplyKeyboardRemove())
-
-    elif step == "name":
-        name = text.strip()
-        user_data[str(chat_id)]["name"] = name
-        save_users(user_data)
-        lang = user_data[str(chat_id)].get("native_language", "English")
-        state["step"] = "gender"
-
-        # Ask for gender in their language
-        try:
-            resp = claude.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=80,
-                system="You are a friendly bot. Reply with exactly one sentence only, no quotes, no extra text.",
-                messages=[{"role": "user", "content": (
-                    f"Write exactly 1 short friendly sentence in {lang} greeting {name} "
-                    f"and asking them to choose their gender using the buttons below. "
-                    f"Informal tone. Use 1 emoji."
-                )}]
-            )
-            gender_question = resp.content[0].text.strip()
-        except Exception:
-            gender_question = f"Nice to meet you, {name}! 👋 What's your gender?"
-
-        send_gender_buttons(chat_id, question=gender_question)
-
-    elif step == "gender":
-        if text.strip() not in GENDER_MAP:
-            bot.send_message(chat_id, "👇 Please tap one of the buttons!")
-            return
-        gender = GENDER_MAP[text.strip()]
-        user_data[str(chat_id)]["gender"] = gender
-        save_users(user_data)
-
-        lang = user_data[str(chat_id)].get("native_language", "English")
-        name = user_data[str(chat_id)].get("name", "")
-        name_part = f", {name}" if name else ""
-
-        # Hardcoded native-quality pitches for top 8 languages
-        # Claude Haiku makes morphology errors in inflected languages (Russian etc.) — don't use it for these
-        PITCHES = {
-            "English": (
-                f"You know the feeling{name_part}? You\'ve been learning German — but the moment "
-                f"a German starts talking, your mind goes blank. 😅\n\n"
-                f"Now you\'ve got me — a real German friend, 24/7 in your pocket.\n"
-                f"No pressure, no judgment. We just talk.\n\n"
-                f"📅 In 4 weeks: the panic fades, simple replies start flowing naturally.\n"
-                f"📅 In 3 months: Ämter, colleagues, friends — you handle it all with ease.\n"
-                f"📅 In 1 year: Germans will ask where you learned to speak so well. 😄\n\n"
-                f"Pick a topic — let\'s go. 👇"
-            ),
-            "Русский": (
-                f"Знакомо{name_part}? Ты учишь немецкий — а как только немец заговорил, "
-                f"всё вылетело из головы. 😅\n\n"
-                f"Теперь у тебя есть я — настоящий немецкий друг, 24/7 в кармане.\n"
-                f"Без давления, без осуждения. Просто разговариваем.\n\n"
-                f"📅 Через 4 недели: паника проходит, простые фразы приходят сами.\n"
-                f"📅 Через 3 месяца: Amt, коллеги, друзья — ты справляешься со всем.\n"
-                f"📅 Через год: немцы сами спросят, где ты так хорошо выучил язык. 😄\n\n"
-                f"Выбери тему — начнём. 👇"
-            ),
-            "Українська": (
-                f"Знайоме{name_part}? Ти вчиш німецьку — а щойно хтось заговорив, "
-                f"усе вилетіло з голови. 😅\n\n"
-                f"Тепер у тебе є я — справжній німецький друг, 24/7 у кишені.\n"
-                f"Без тиску, без осуду. Просто розмовляємо.\n\n"
-                f"📅 Через 4 тижні: паніка зникає, прості фрази приходять самі.\n"
-                f"📅 Через 3 місяці: Amt, колеги, друзі — ти з усім справляєшся.\n"
-                f"📅 Через рік: німці самі питатимуть, де ти так добре вивчив мову. 😄\n\n"
-                f"Обери тему — починаємо. 👇"
-            ),
-            "Türkçe": (
-                f"Tanıdık geldi mi{name_part}? Almanca öğreniyorsun — ama biri konuşmaya "
-                f"başlayınca her şey uçup gidiyor. 😅\n\n"
-                f"Artık 24/7 cebinde gerçek bir Alman arkadaşın var.\n"
-                f"Baskı yok, yargılama yok. Sadece konuşuyoruz.\n\n"
-                f"📅 4 haftada: panik geçiyor, basit cümleler kendiliğinden geliyor.\n"
-                f"📅 3 ayda: Amt, iş arkadaşları, dostlar — hepsinin altından kalkıyorsun.\n"
-                f"📅 1 yılda: Almanlar sana nereden bu kadar iyi öğrendin diye soracak. 😄\n\n"
-                f"Bir konu seç — başlayalım. 👇"
-            ),
-            "Arabic": (
-                f"تعرف هذا الإحساس{name_part}؟ تتعلم الألمانية — لكن بمجرد أن يتكلم أحد، "
-                f"يختفي كل شيء من رأسك. 😅\n\n"
-                f"الآن معك أنا — صديق ألماني حقيقي، 24/7 في جيبك.\n"
-                f"بدون ضغط، بدون حكم. نتكلم فقط.\n\n"
-                f"📅 خلال 4 أسابيع: يختفي الذعر، تجيء الردود البسيطة بشكل طبيعي.\n"
-                f"📅 خلال 3 أشهر: الدوائر الحكومية، الزملاء، الأصدقاء — تتعامل مع الجميع.\n"
-                f"📅 خلال سنة: سيسألك الألمان أين تعلمت اللغة بهذا المستوى. 😄\n\n"
-                f"اختر موضوعاً — لنبدأ. 👇"
-            ),
-            "Español": (
-                f"¿Te suena familiar{name_part}? Estás aprendiendo alemán — pero en cuanto "
-                f"alguien habla, se te va todo. 😅\n\n"
-                f"Ahora tienes a tu lado a un amigo alemán de verdad, 24/7 en tu bolsillo.\n"
-                f"Sin presión, sin juicios. Solo hablamos.\n\n"
-                f"📅 En 4 semanas: el pánico desaparece, las frases simples salen solas.\n"
-                f"📅 En 3 meses: Amt, compañeros, amigos — te manejas con todo.\n"
-                f"📅 En 1 año: los alemanes te preguntarán dónde aprendiste tan bien. 😄\n\n"
-                f"Elige un tema — empecemos. 👇"
-            ),
-            "Français": (
-                f"Tu connais ce sentiment{name_part} ? Tu apprends l\'allemand — mais dès "
-                f"qu\'un Allemand parle, tout disparaît. 😅\n\n"
-                f"Maintenant tu as moi — un vrai ami allemand, 24/7 dans ta poche.\n"
-                f"Sans pression, sans jugement. On parle, c\'est tout.\n\n"
-                f"📅 En 4 semaines : la panique s\'en va, les réponses simples viennent naturellement.\n"
-                f"📅 En 3 mois : l\'Amt, les collègues, les amis — tu gères tout.\n"
-                f"📅 En 1 an : les Allemands te demanderont où tu as si bien appris. 😄\n\n"
-                f"Choisis un sujet — on commence. 👇"
-            ),
-            "Polski": (
-                f"Znasz to uczucie{name_part}? Uczysz się niemieckiego — ale jak tylko ktoś "
-                f"zaczyna mówić, wszystko ulatuje z głowy. 😅\n\n"
-                f"Teraz masz mnie — prawdziwego niemieckiego przyjaciela, 24/7 w kieszeni.\n"
-                f"Bez presji, bez oceniania. Po prostu rozmawiamy.\n\n"
-                f"📅 Za 4 tygodnie: panika mija, proste odpowiedzi przychodzą same.\n"
-                f"📅 Za 3 miesiące: Amt, współpracownicy, znajomi — dajesz radę ze wszystkim.\n"
-                f"📅 Za rok: Niemcy sami zapytają, gdzie tak dobrze nauczyłeś się języka. 😄\n\n"
-                f"Wybierz temat — zaczynamy. 👇"
-            ),
-        }
-
-        if lang in PITCHES:
-            pitch_msg = PITCHES[lang]
-        else:
-            # Claude fallback for other languages — stronger prompt to avoid morphology errors
+    # ── Step 1: Name ──────────────────────────────────────────────────────────
+    if step == "name":
+        name = text.strip() or "du"
+        now  = datetime.now()
+        started = user_data[str(chat_id)].get("onboarding_started_at")
+        if started:
             try:
-                pitch_resp = claude.messages.create(
-                    model="claude-haiku-4-5-20251001",
-                    max_tokens=250,
-                    system=(
-                        "You are a native speaker of the requested language. "
-                        "Write ONLY the message text. No quotes, no preamble. "
-                        "Use only words and grammar that a native speaker would naturally use. "
-                        "If unsure about any word form, choose a simpler expression instead."
-                    ),
-                    messages=[{"role": "user", "content": (
-                        f"Write a short message in {lang} to {name or 'the user'} (informal). "
-                        f"Max 10 lines, 3 emojis max. Cover:\n"
-                        f"1. Pain: knows German but freezes when a German speaks\n"
-                        f"2. Solution: real German friend in pocket, 24/7, no pressure, no judgment\n"
-                        f"3. Timeline: 4 weeks (panic gone), 3 months (handles Amt/work/friends), 1 year (native-level)\n"
-                        f"4. Short action line to pick a topic\n\n"
-                        f"CRITICAL: Use only simple, correct {lang}. No unusual word forms. Keep it natural."
-                    )}]
-                )
-                pitch_msg = pitch_resp.content[0].text.strip()
+                delta = (now - datetime.fromisoformat(started)).total_seconds()
+                user_data[str(chat_id)]["time_to_first_reply"] = round(delta)
             except Exception:
-                pitch_msg = PITCHES["English"]  # safe English fallback
+                pass
+        user_data[str(chat_id)]["name"]           = name
+        user_data[str(chat_id)]["first_reply_at"] = now.isoformat()
+        user_data[str(chat_id)]["onboarding_step"] = "origin"
+        save_users(user_data)
+        state["step"] = "origin"
 
-        # Transition texts in native language — sets up the NPC intro
-        TRANSITIONS = {
-            "English":    "Stand by — I'm sending you a message right now. Just write back! 💬",
-            "Русский":    "Сейчас напишу тебе. Просто ответь мне! 💬",
-            "Українська": "Зараз напишу тобі. Просто відповідай! 💬",
-            "Türkçe":     "Sana hemen mesaj gönderiyorum. Sadece yanıtla! 💬",
-            "Arabic":     "سأرسل لك رسالة الآن. فقط ردّ عليّ! 💬",
-            "Español":    "Te mando un mensaje ahora mismo. ¡Solo responde! 💬",
-            "Français":   "Je t'envoie un message tout de suite. Réponds juste ! 💬",
-            "Polski":     "Zaraz piszę do Ciebie. Po prostu odpowiedz! 💬",
-        }
-        transition = TRANSITIONS.get(lang, "I'm sending you a message — just write back! 💬")
-
-        # Send pitch + transition
-        bot.send_message(chat_id, pitch_msg, reply_markup=ReplyKeyboardRemove())
-        time.sleep(1.2)
-        bot.send_message(chat_id, transition)
-
-        # NPC voice intro — always in German, sets the scene
-        npc_intro_text = (
-            "Hey! Ich bin dein Deutscher Kumpel. "
-            "Ich komme aus Berlin — geboren und aufgewachsen hier. "
-            "Wie heißt du denn? Und woher kommst du?"
-        )
-        time.sleep(1.5)
+        q_voice = f"{name}! Schöner Name. Woher kommst du denn?"
         bot.send_chat_action(chat_id, "record_audio")
         try:
-            audio = text_to_speech_stream(npc_intro_text, chat_id)
-            markup_intro = InlineKeyboardMarkup()
-            markup_intro.add(translate_btn(chat_id))
-            last_bot_text[chat_id] = npc_intro_text
-            bot.send_voice(chat_id, audio, reply_markup=markup_intro)
-        except Exception as e:
-            log.warning(f"NPC intro voice failed for {chat_id}: {e}")
-            bot.send_message(chat_id, f"🎤 {npc_intro_text}")
-
-        # Wait for user reply in handle_onboarding → step "intro_reply"
-        user_state[chat_id] = {"mode": "onboarding", "step": "intro_reply"}
-
-    elif step == "intro_reply":
-        # User replied to NPC intro — any response counts
-        name = user_data[str(chat_id)].get("name", "")
-        closing_text = (
-            f"Freut mich, dich kennenzulernen{', ' + name if name else ''}! "
-            f"Dann lass uns doch Deutsch SPRECHEN!"
-        )
-        user_state[chat_id] = {"mode": "menu"}
-
-        bot.send_chat_action(chat_id, "record_audio")
-        try:
-            audio = text_to_speech_stream(closing_text, chat_id)
+            audio = text_to_speech_stream(q_voice, chat_id)
             bot.send_voice(chat_id, audio)
         except Exception as e:
-            log.warning(f"Onboarding closing voice failed for {chat_id}: {e}")
-            bot.send_message(chat_id, f"😄 {closing_text}")
+            log.warning(f"Onboarding step2 voice failed for {chat_id}: {e}")
+        bot.send_message(chat_id, q_voice)
 
-        time.sleep(0.8)
+    # ── Step 2: Origin → detect language → topics ─────────────────────────────
+    elif step == "origin":
+        origin = text.strip()
+        lang   = _detect_lang_from_origin(origin) or "English"
+        user_data[str(chat_id)]["native_language"]  = lang
+        user_data[str(chat_id)]["origin"]           = origin
+        user_data[str(chat_id)]["onboarding_step"]  = "done"
+        save_users(user_data)
+
+        cool_voice = "Cool! Was steht heute an?"
+        bot.send_chat_action(chat_id, "record_audio")
+        try:
+            audio = text_to_speech_stream(cool_voice, chat_id)
+            bot.send_voice(chat_id, audio)
+        except Exception as e:
+            log.warning(f"Onboarding step3 voice failed for {chat_id}: {e}")
+
+        user_state[chat_id] = {"mode": "menu"}
+        time.sleep(0.4)
         send_topic_buttons(chat_id)
+
+    # ── Legacy steps ─────────────────────────────────────────────────────────
+    elif step in ("native_language", "gender", "intro_reply", "first_reply"):
+        raw  = text.strip()
+        lang = LANG_NORM.get(raw.lower(), raw) if raw else "English"
+        if step == "native_language":
+            user_data[str(chat_id)]["native_language"] = lang
+        user_data[str(chat_id)]["onboarding_step"] = "done"
+        save_users(user_data)
+        user_state[chat_id] = {"mode": "menu"}
+        send_topic_buttons(chat_id)
+
+    else:
+        user_data[str(chat_id)]["onboarding_step"] = "done"
+        save_users(user_data)
+        user_state[chat_id] = {"mode": "menu"}
+        send_topic_buttons(chat_id)
+
+
 
 def send_voice_intro(chat_id):
     bot.send_message(chat_id,
@@ -4001,6 +3928,20 @@ def handle_topic_callback(call):
         return
 
     bot.answer_callback_query(call.id)
+
+    # ── time_to_first_german ──────────────────────────────────────────────────
+    uid = str(chat_id)
+    if not user_data.get(uid, {}).get("first_german_at"):
+        now     = datetime.now()
+        started = user_data.get(uid, {}).get("onboarding_started_at")
+        user_data[uid]["first_german_at"] = now.isoformat()
+        if started:
+            try:
+                delta = (now - datetime.fromisoformat(started)).total_seconds()
+                user_data[uid]["time_to_first_german"] = round(delta)
+                save_users(user_data)
+            except Exception:
+                pass
 
     # Paywall check
     if not is_premium(chat_id):
@@ -5512,7 +5453,7 @@ def handle_adminstats(message):
 
     # Stufe 2 — Onboarding komplett (Name + Sprache + Ziel gesetzt)
     f_onboarded = sum(1 for u in users.values()
-                      if u.get("name") and u.get("native_language") and u.get("goal"))
+                      if u.get("name"))
 
     # Stufe 3 — Mindestens 1 Gespräch geführt
     f_talked = sum(1 for u in users.values() if u.get("conversations_started", 0) >= 1)
@@ -6470,6 +6411,11 @@ def end_conversation(chat_id):
         generate_feedback(chat_id, history_snapshot)
     except Exception as e:
         log.warning(f"generate_feedback failed for {chat_id}: {e}")
+
+    try:
+        _extract_user_story(chat_id, history_snapshot)
+    except Exception as e:
+        log.warning(f"User story extraction failed: {e}")
 
     # ── Error analysis + exercises (GPT) ─────────────────────────────────────
     bot.send_chat_action(chat_id, "typing")
@@ -7503,41 +7449,30 @@ Nur diese Zeilen, nichts sonst.""",
         return
 
     if data.startswith("lang:"):
-        # Language quick-tap during onboarding
+        # Legacy: no longer shown in new flow, handle gracefully
         bot.answer_callback_query(call.id)
-        if user_state.get(chat_id, {}).get("step") == "native_language":
-            lang = data[5:]
-            try:
-                bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
-            except Exception:
-                pass
-            handle_onboarding(chat_id, lang)
         return
 
     if data == "restart_onboarding":
         bot.answer_callback_query(call.id)
         ensure_user(chat_id)
-        user_state[chat_id] = {"mode": "onboarding", "step": "native_language"}
-        bot.send_message(chat_id,
-            "🌍 Was ist deine Muttersprache?\n"
-            "What's your native language?\n"
-            "Какой твой родной язык?\n"
-            "Яка твоя рідна мова?\n"
-            "لغتك الأم هي؟\n"
-            "Ana dilin ne?\n\n"
-            "👇 Tippe einfach — oder wähle hier:")
-        markup = InlineKeyboardMarkup(row_width=2)
-        markup.add(
-            InlineKeyboardButton("🇬🇧 English",    callback_data="lang:English"),
-            InlineKeyboardButton("🇷🇺 Русский",    callback_data="lang:Русский"),
-            InlineKeyboardButton("🇺🇦 Українська", callback_data="lang:Українська"),
-            InlineKeyboardButton("🇹🇷 Türkçe",     callback_data="lang:Türkçe"),
-            InlineKeyboardButton("🇸🇦 العربية",    callback_data="lang:Arabic"),
-            InlineKeyboardButton("🇪🇸 Español",    callback_data="lang:Español"),
-            InlineKeyboardButton("🇫🇷 Français",   callback_data="lang:Français"),
-            InlineKeyboardButton("🇵🇱 Polski",     callback_data="lang:Polski"),
+        user_state[chat_id] = {"mode": "onboarding", "step": "name"}
+        user_data[str(chat_id)]["onboarding_step"]       = "name"
+        user_data[str(chat_id)]["onboarding_started_at"] = datetime.now().isoformat()
+        save_users(user_data)
+        greeting_voice = (
+            "Hey! Ich bin dein German Dude — dein Berliner Kumpel. "
+            "Ich helfe dir, in Deutschland klarzukommen. Und wie heißt du?"
         )
-        bot.send_message(chat_id, "​", reply_markup=markup)
+        bot.send_chat_action(chat_id, "record_audio")
+        try:
+            audio = text_to_speech_stream(greeting_voice, chat_id)
+            bot.send_voice(chat_id, audio)
+        except Exception:
+            pass
+        bot.send_message(chat_id,
+            "Hey! Ich bin dein German Dude — dein Berliner Kumpel. 🇩🇪\n\n"
+            "Und wie heißt du?")
         return
 
     if data == "start_chat":
@@ -7891,114 +7826,6 @@ def handle_test_voice_push(message):
     send_voice_push(message.chat.id)
 
 
-# ── TEXT PUSH — free user re-engagement ──────────────────────────────────────
-# Sent 3x/week (Mon, Wed, Fri) via Railway cron
-# Target: free users inactive 3-45 days, hasn't received push in last 2 days
-
-TEXT_PUSH_POOL = [
-    "na {name} 👋 wie war dein Tag? Lange nichts gehört! Ich hab gerade Feierabend und fahr jetzt nach Hause — und du?",
-    "heyy {name} 😄 gibt's was Neues bei dir? Schick mir mal kurz eine Voicenachricht, würd mich freuen!",
-    "{name}! Kurze Frage: hast du heute irgendwo Deutsch gesprochen? Erzähl mal 👂",
-    "hey {name} 👋 kleiner Check-in — Bürgeramt, Arzt, Supermarkt: wo hattest du zuletzt auf Deutsch Stress? Dann können wir das zusammen üben 💪",
-    "{name}!! ich hab heute jemanden getroffen der meinte, er lernt seit 2 Jahren Deutsch und traut sich immer noch nicht zu sprechen 😅 du kennst das sicher auch, oder? Magst du üben?",
-    "na {name}, alles gut? Ich sitz gerade in der U-Bahn und dacht: ich sollte mal wieder nach dir schauen 😄 was machst du gerade so?",
-    "hey {name}! Magst du kurz was auf Deutsch schreiben oder mir eine Sprachnachricht schicken? Einfach so — kein Druck 🙂",
-    "{name}, ich hab heute in der S-Bahn mitgehört wie zwei Leute über die Wohnung gechattet haben — voll interessant. Hast du grade auch irgendwas auf Lager? 😄",
-    "na {name} 🙋 lange nix! Wie läuft's so? Ich frag weil mir aufgefallen ist dass du ne Weile ruhig warst — alles okay?",
-    "hey {name}! Wusstest du, dass 5 Minuten Deutsch am Tag schon reichen um sich richtig zu verbessern? Ich wäre dabei 😊",
-]
-
-TEXT_PUSH_NO_NAME = [
-    "na du 👋 wie war dein Tag? Lange nichts gehört! Ich hab gerade Feierabend — fahr jetzt nach Hause. Und du?",
-    "heyy 😄 gibt's was Neues? Schick mir mal kurz eine Voicenachricht!",
-    "kurze Frage: hast du heute irgendwo Deutsch gesprochen? Erzähl mal 👂",
-    "hey 👋 kleiner Check-in — wo hattest du zuletzt auf Deutsch Stress? Können wir zusammen üben 💪",
-    "hey! Magst du kurz was auf Deutsch schreiben? Einfach so — kein Druck 🙂",
-]
-
-
-def _text_push_pick(chat_id: int) -> str:
-    uid  = str(chat_id)
-    name = user_data.get(uid, {}).get("name", "").strip()
-    if name:
-        return random.choice(TEXT_PUSH_POOL).format(name=name)
-    return random.choice(TEXT_PUSH_NO_NAME)
-
-
-def broadcast_text_pushes() -> dict:
-    """Send friendly text re-engagement messages to eligible free users."""
-    now    = datetime.now()
-    sent   = 0
-    skipped = 0
-
-    for uid, user in user_data.items():
-        # Only free users
-        if user.get("premium") or user.get("premium_plus"):
-            skipped += 1; continue
-
-        # Must have name (means they started onboarding)
-        if not user.get("name"):
-            skipped += 1; continue
-
-        # Inactive 3–45 days
-        last_active = user.get("last_active")
-        if not last_active:
-            skipped += 1; continue
-        try:
-            days_inactive = (now - datetime.fromisoformat(last_active)).days
-        except Exception:
-            skipped += 1; continue
-        if not (3 <= days_inactive <= 45):
-            skipped += 1; continue
-
-        # Don't send more than once every 2 days
-        last_push = user.get("last_text_push")
-        if last_push:
-            try:
-                if (now - datetime.fromisoformat(last_push)).days < 2:
-                    skipped += 1; continue
-            except Exception:
-                pass
-
-        # Send the push
-        try:
-            msg = _text_push_pick(int(uid))
-            bot.send_message(int(uid), msg)
-            user_data[uid]["last_text_push"] = now.isoformat()
-            sent += 1
-            log.info(f"Text push sent to {uid}")
-            time.sleep(0.05)   # gentle rate limiting
-        except Exception as e:
-            log.warning(f"Text push failed for {uid}: {e}")
-            skipped += 1
-
-    save_users(user_data)
-    log.info(f"Text push run: {sent} gesendet, {skipped} übersprungen")
-    return {"sent": sent, "skipped": skipped}
-
-
-@bot.message_handler(commands=["sendtextpushes"])
-def handle_send_text_pushes(message):
-    """Admin-only: manuell Text-Push-Run auslösen."""
-    if ADMIN_CHAT_ID and message.chat.id != ADMIN_CHAT_ID:
-        return
-    bot.send_message(message.chat.id, "📤 Starte Text-Push-Run...")
-    result = broadcast_text_pushes()
-    bot.send_message(message.chat.id,
-        f"✅ {result['sent']} Text Pushes gesendet\n"
-        f"⏭ {result['skipped']} übersprungen")
-
-
-@bot.message_handler(commands=["testtextpush"])
-def handle_test_text_push(message):
-    """Admin-only: Test-Text-Push an sich selbst."""
-    if ADMIN_CHAT_ID and message.chat.id != ADMIN_CHAT_ID:
-        return
-    msg = _text_push_pick(message.chat.id)
-    bot.send_message(message.chat.id, msg)
-    bot.send_message(message.chat.id, f"_(Das wäre der Push gewesen — kein Tracking)_", parse_mode="Markdown")
-
-
 @bot.message_handler(commands=["broadcastgems"])
 def handle_broadcast_gems(message):
     """Admin-only: manually trigger daily gem broadcast."""
@@ -8147,21 +7974,6 @@ def send_voice_pushes_endpoint():
         log.error(f"Voice push broadcast error: {e}")
         return jsonify({"error": str(e)}), 500
 
-
-@flask_app.route("/send_text_pushes", methods=["POST"])
-def send_text_pushes_endpoint():
-    """3x/Woche via Railway Cron (Mo, Mi, Fr ~18:00 Berlin).
-    Reaktiviert Free-User die 3-45 Tage inaktiv sind."""
-    auth = request.headers.get("X-Cron-Secret", "")
-    if auth != CRON_SECRET:
-        return jsonify({"error": "unauthorized"}), 401
-    try:
-        result = broadcast_text_pushes()
-        return jsonify({"ok": True, **result}), 200
-    except Exception as e:
-        log.error(f"Text push broadcast error: {e}")
-        return jsonify({"error": str(e)}), 500
-
 @flask_app.route("/stripe_webhook", methods=["POST"])
 def stripe_webhook():
     payload    = request.get_data()
@@ -8252,7 +8064,118 @@ def _run_flask():
     log.info(f"✅ Flask on port {port}")
     flask_app.run(host="0.0.0.0", port=port, use_reloader=False, threaded=True, debug=False)
 
+
+# ── TEXT PUSH — free user re-engagement ──────────────────────────────────────
+# Runs internally Mo/Mi/Fr ~18:00 Berlin — no Railway cron needed
+
+TEXT_PUSH_POOL = [
+    "na {name} 👋 wie war dein Tag? Lange nichts gehört! Ich hab gerade Feierabend und fahr nach Hause — und du?",
+    "heyy {name} 😄 gibt's was Neues bei dir? Schick mir mal kurz eine Voicenachricht, würd mich freuen!",
+    "{name}! Kurze Frage: hast du heute irgendwo Deutsch gesprochen? Erzähl mal 👂",
+    "hey {name} 👋 kleiner Check-in — Bürgeramt, Arzt, Supermarkt: wo hattest du zuletzt auf Deutsch Stress? Können wir zusammen üben 💪",
+    "{name}!! ich hab heute jemanden getroffen der meinte er lernt seit 2 Jahren Deutsch und traut sich immer noch nicht zu sprechen 😅 du kennst das sicher auch, oder?",
+    "na {name}, alles gut? Ich sitz gerade in der U-Bahn und dacht: ich sollte mal wieder nach dir schauen 😄 was machst du gerade so?",
+    "hey {name}! Magst du kurz was auf Deutsch schreiben oder mir eine Sprachnachricht schicken? Einfach so — kein Druck 🙂",
+    "{name}, ich hab heute in der S-Bahn mitgehört wie zwei Leute über die Wohnung gechattet haben — interessant. Hast du gerade auch irgendwas auf Lager? 😄",
+    "na {name} 🙋 lange nix! Wie läuft's so? Alles okay bei dir?",
+    "hey {name}! Wusstest du, dass 5 Minuten Deutsch am Tag schon richtig viel bringt? Ich wäre dabei 😊",
+]
+
+TEXT_PUSH_NO_NAME = [
+    "na 👋 wie war dein Tag? Lange nichts gehört! Ich hab gerade Feierabend — und du?",
+    "heyy 😄 gibt's was Neues? Schick mir mal kurz eine Voicenachricht!",
+    "kurze Frage: hast du heute irgendwo Deutsch gesprochen? Erzähl mal 👂",
+    "hey 👋 wo hattest du zuletzt auf Deutsch Stress? Können wir zusammen üben 💪",
+    "hey! Magst du kurz was auf Deutsch schreiben? Einfach so — kein Druck 🙂",
+]
+
+
+def _text_push_pick(chat_id: int) -> str:
+    uid  = str(chat_id)
+    name = user_data.get(uid, {}).get("name", "").strip()
+    if name:
+        return random.choice(TEXT_PUSH_POOL).format(name=name)
+    return random.choice(TEXT_PUSH_NO_NAME)
+
+
+def broadcast_text_pushes() -> dict:
+    """Friendly text re-engagement for free users inactive 3-45 days."""
+    now     = datetime.now()
+    sent    = 0
+    skipped = 0
+
+    for uid, user in user_data.items():
+        if user.get("premium") or user.get("premium_plus"):
+            skipped += 1; continue
+        if not user.get("name"):
+            skipped += 1; continue
+
+        last_active = user.get("last_active")
+        if not last_active:
+            skipped += 1; continue
+        try:
+            days_inactive = (now - datetime.fromisoformat(last_active)).days
+        except Exception:
+            skipped += 1; continue
+        if not (3 <= days_inactive <= 45):
+            skipped += 1; continue
+
+        # Max 1 push every 2 days
+        last_push = user.get("last_text_push")
+        if last_push:
+            try:
+                if (now - datetime.fromisoformat(last_push)).days < 2:
+                    skipped += 1; continue
+            except Exception:
+                pass
+
+        try:
+            msg = _text_push_pick(int(uid))
+            bot.send_message(int(uid), msg)
+            user_data[uid]["last_text_push"] = now.isoformat()
+            sent += 1
+            log.info(f"Text push → {uid}")
+            time.sleep(0.05)
+        except Exception as e:
+            log.warning(f"Text push failed for {uid}: {e}")
+            skipped += 1
+
+    save_users(user_data)
+    log.info(f"Text push run: {sent} sent, {skipped} skipped")
+    return {"sent": sent, "skipped": skipped}
+
+
+@bot.message_handler(commands=["sendtextpushes"])
+def handle_send_text_pushes(message):
+    if ADMIN_CHAT_ID and message.chat.id != ADMIN_CHAT_ID: return
+    bot.send_message(message.chat.id, "📤 Starte Text-Push-Run...")
+    result = broadcast_text_pushes()
+    bot.send_message(message.chat.id,
+        f"✅ {result['sent']} gesendet\n⏭ {result['skipped']} übersprungen")
+
+
+@bot.message_handler(commands=["testtextpush"])
+def handle_test_text_push(message):
+    if ADMIN_CHAT_ID and message.chat.id != ADMIN_CHAT_ID: return
+    msg = _text_push_pick(message.chat.id)
+    bot.send_message(message.chat.id, msg)
+    bot.send_message(message.chat.id,
+        "_(Vorschau — kein Tracking, nicht wirklich gesendet)_",
+        parse_mode="Markdown")
+
+
+@flask_app.route("/send_text_pushes", methods=["POST"])
+def send_text_pushes_endpoint():
+    auth = request.headers.get("X-Cron-Secret", "")
+    if auth != CRON_SECRET:
+        return jsonify({"error": "unauthorized"}), 401
+    result = broadcast_text_pushes()
+    return jsonify({"ok": True, **result}), 200
+
+
+# ── Startup ───────────────────────────────────────────────────────────────────
 _flask_thread = threading.Thread(target=_run_flask, daemon=True)
 _flask_thread.start()
+
 log.info("✅ Bot polling started")
 bot.infinity_polling(timeout=60, long_polling_timeout=60)
