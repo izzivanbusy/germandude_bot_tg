@@ -755,6 +755,81 @@ PERSONAS = {
             "attitude": "neutral, korrekt"
         }
     },
+    "Arzt / Apotheke": {
+        "role": "Arzt oder Apotheker/in",
+        "tone": "professionell, empathisch",
+        "formality": "SIE",
+        "emotion": "ruhig, fürsorglich",
+        "energy": "konzentriert",
+        "behavior": "fragt nach Symptomen und Beschwerden, gibt klare Informationen",
+        "dynamic": "führt Gespräch, stellt Diagnose-Fragen",
+        "voice": {
+            "style": "klar, beruhigend, medizinisch aber menschlich",
+            "pace": "ruhig, bedächtig",
+            "expressions": "Ich verstehe, Das klingt nach..., Seit wann haben Sie..., Haben Sie...",
+            "attitude": "fürsorglich, professionell, nicht überheblich"
+        }
+    },
+    "Bürgeramt / Jobcenter": {
+        "role": "Sachbearbeiter/in",
+        "tone": "sachlich, bürokratisch, unter leichtem Zeitdruck",
+        "formality": "SIE",
+        "emotion": "neutral bis leicht ungeduldig",
+        "energy": "fokussiert, effizient",
+        "behavior": "fragt nach Dokumenten und Daten, arbeitet strukturiert ab",
+        "dynamic": "führt Gespräch, erwartet klare Antworten",
+        "voice": {
+            "style": "sachlich, direkt, präzise",
+            "pace": "zügig, strukturiert",
+            "expressions": "Haben Sie Ihren Ausweis dabei?, Bitte tragen Sie hier ein, Einen Moment..., Das geht leider nicht ohne...",
+            "attitude": "korrekt, distanziert, aber nicht unfreundlich"
+        }
+    },
+    "Vorstellungsgespräch": {
+        "role": "HR Manager oder Teamleiter/in",
+        "tone": "professionell, einladend, leicht bewertend",
+        "formality": "SIE",
+        "emotion": "freundlich aber aufmerksam",
+        "energy": "kontrolliert, fokussiert",
+        "behavior": "stellt Kompetenz- und Motivationsfragen, hört aufmerksam zu",
+        "dynamic": "führt Gespräch, gibt auch Infos über die Stelle",
+        "voice": {
+            "style": "strukturiert, freundlich, professionell",
+            "pace": "moderat, bewusst",
+            "expressions": "Könnten Sie uns erzählen..., Interessant, Was motiviert Sie..., Wie gehen Sie mit... um?",
+            "attitude": "offen aber kritisch prüfend, wertschätzend"
+        }
+    },
+    "Vermieter / WG": {
+        "role": "Vermieter/in oder WG-Mitglied",
+        "tone": "reserviert bis offen je nach Situation",
+        "formality": "AUTO",
+        "emotion": "abwartend, prüfend",
+        "energy": "ruhig",
+        "behavior": "stellt Fragen zur Person und Situation, prüft Eignung",
+        "dynamic": "führt Gespräch, entscheidet am Ende",
+        "voice": {
+            "style": "direkt, bodenständig, manchmal skeptisch",
+            "pace": "bedächtig, überlegt",
+            "expressions": "Und was machen Sie beruflich?, Wie lange suchen Sie schon?, Das müsste ich noch prüfen, Haben Sie eine Schufa?",
+            "attitude": "vorsichtig aber nicht unfreundlich, geschäftsmäßig"
+        }
+    },
+    "Kennenlernen": {
+        "role": "Neuer Bekannter",
+        "tone": "offen, neugierig, aufgeschlossen",
+        "formality": "DU",
+        "emotion": "freundlich, leicht aufgeregt",
+        "energy": "aktiv",
+        "behavior": "stellt persönliche Fragen, erzählt auch von sich",
+        "dynamic": "beidseitig, entspannt",
+        "voice": {
+            "style": "warm, spontan, natürlich",
+            "pace": "locker, lebhaft",
+            "expressions": "echt?, cool, das kenn ich auch, woher kommst du, was machst du so?",
+            "attitude": "offen, sympathisch, unvoreingenommen"
+        }
+    },
     "Unterhaltung (Club, Kino etc)": {
         "role": "Fremder / Bekannter",
         "tone": "locker, smalltalk",
@@ -846,19 +921,26 @@ PERSONAS = {
         }
     },
 }
-
 def resolve_formality(goal, scenario_text):
-    text = scenario_text.lower()
-    if any(x in text for x in [
-        "arzt", "amt", "behörde", "kellner", "restaurant",
-        "termin", "interview", "manager", "sachbearbeiter"
-    ]):
+    # Specific goals always SIE
+    if goal in ("Arzt / Apotheke", "Bürgeramt / Jobcenter",
+                "Vorstellungsgespräch", "Am Telefon", "Tourismus & Reisen",
+                "Einkauf & Restaurants"):
         return "SIE"
-    if any(x in text for x in [
-        "freund", "party", "date", "tinder", "kollege", "bier", "kneipe"
-    ]):
+    # Specific goals always DU
+    if goal in ("Freunde / Beziehungen", "Kennenlernen",
+                "Sport & Hobbys", "Unterhaltung (Club, Kino etc)"):
         return "DU"
-    return PERSONAS[goal]["formality"]
+    # Context-based override for AUTO goals
+    text = scenario_text.lower()
+    if any(x in text for x in ["arzt", "amt", "behörde", "jobcenter", "sachbearbeiter",
+                                "vermieter", "interview", "bewerbung", "kellner", "rezeption"]):
+        return "SIE"
+    if any(x in text for x in ["freund", "party", "date", "tinder", "kollege",
+                                "nachbar", "bier", "kneipe", "wg"]):
+        return "DU"
+    # Fall back to persona default
+    return PERSONAS.get(goal, PERSONAS["Einkauf & Restaurants"])["formality"]
 
 def enforce_style(text, formality):
     if formality == "SIE":
@@ -900,12 +982,9 @@ def build_system_prompt(chat_id, scenario):
     # Support new-format persona (per-scenario) or fall back to global PERSONAS
     if "persona" in scenario:
         sp = scenario["persona"]
-        persona = PERSONAS.get(goal, PERSONAS["Einkauf & Restaurants"]).copy()
-        persona["role"] = sp.get("name", persona["role"])
-        if sp.get("tone") == "casual":
-            persona["formality"] = "DU"
+        persona = PERSONAS.get(goal, PERSONAS["Soziales (Ämter, Ärzte)"])
     else:
-        persona = PERSONAS.get(goal, PERSONAS["Einkauf & Restaurants"])
+        persona = PERSONAS.get(goal, PERSONAS["Soziales (Ämter, Ärzte)"])
 
     context    = _scenario_context(scenario)
     name            = user.get("name", "")
@@ -3623,16 +3702,16 @@ GOAL_MAP = {
 
 # Ordered topic list for topic-selection buttons (index = callback key)
 TOPIC_LIST = [
-    ("🧍 Selbstpräsentation",      "Selbstpräsentation"),
-    ("🧑‍🤝‍🧑 Freunde & Beziehungen", "Freunde / Beziehungen"),
-    ("🏢 Amt & Arzt",              "Soziales (Ämter, Ärzte)"),
-    ("🎉 Freizeit",                "Unterhaltung (Club, Kino etc)"),
-    ("🍽️ Einkauf & Restaurant",    "Einkauf & Restaurants"),
+    ("🏥 Arzt / Apotheke",        "Arzt / Apotheke"),
+    ("🏛️ Bürgeramt / Jobcenter",  "Bürgeramt / Jobcenter"),
+    ("💼 Vorstellungsgespräch",    "Vorstellungsgespräch"),
+    ("🏠 Vermieter / WG",         "Vermieter / WG"),
+    ("📞 Telefonat",               "Am Telefon"),
+    ("🛒 Einkauf / Restaurant",    "Einkauf & Restaurants"),
+    ("👋 Kennenlernen",            "Kennenlernen"),
+    ("☕ Freunde / Dates",         "Freunde / Beziehungen"),
     ("✈️ Reisen",                  "Tourismus & Reisen"),
-    ("🏋️ Sport & Hobbys",          "Sport & Hobbys"),
-    ("📞 Telefon",                 "Am Telefon"),
-    ("💼 Job",                     "Job"),
-    ("🗣️ Quatschen",               "Quatschen"),
+    ("💬 Einfach quatschen",       "Quatschen"),
 ]
 
 def send_topic_buttons(chat_id):
