@@ -91,14 +91,8 @@ ALL_GOALS = [
 ]
 
 def onboarding_complete(chat_id) -> bool:
-    """True if user has completed onboarding (name + language + test)."""
-    uid  = str(chat_id)
-    user = user_data.get(uid, {})
-    return bool(
-        user.get("name") and
-        user.get("native_language") and
-        user.get("level")
-    )
+    """True once user has given their name (first reply to bot)."""
+    return bool(user_data.get(str(chat_id), {}).get("name"))
 
 
 def _require_onboarding(chat_id) -> bool:
@@ -5483,7 +5477,7 @@ def handle_adminstats(message):
 
     # Stufe 2 — Onboarding komplett (Name + Sprache + Ziel gesetzt)
     f_onboarded = sum(1 for u in users.values()
-                      if u.get("name") and u.get("native_language") and u.get("goal"))
+                      if u.get("name"))
 
     # Stufe 3 — Mindestens 1 Gespräch geführt
     f_talked = sum(1 for u in users.values() if u.get("conversations_started", 0) >= 1)
