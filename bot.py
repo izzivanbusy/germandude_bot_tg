@@ -5193,12 +5193,6 @@ def menu_cmd(message):
     if not is_premium(message.chat.id): send_paywall(message.chat.id); return
     show_menu(message.chat.id)
 
-@bot.message_handler(commands=['level'])
-def level_cmd(message):
-    ensure_user(message.chat.id)
-    if _require_onboarding(message.chat.id): return
-    send_my_progress(message.chat.id)
-
 @bot.message_handler(commands=['errors'])
 def errors_cmd(message):
     ensure_user(message.chat.id)
