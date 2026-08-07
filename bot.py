@@ -625,7 +625,15 @@ def get_next_scenario(chat_id):
     goal     = user.get("goal", "Selbstpräsentation")
     progress = user["user_progress"].get(goal, [])
 
-    all_for_goal = sort_scenarios([s for s in SCENARIOS if s["goal"] == goal])
+    _GOAL_COMPAT = {
+        "Arzt / Apotheke": "Soziales (Ämter, Ärzte)",
+        "Bürgeramt / Jobcenter": "Soziales (Ämter, Ärzte)",
+        "Vorstellungsgespräch": "Job",
+        "Vermieter / WG": "Soziales (Ämter, Ärzte)",
+        "Kennenlernen": "Selbstpräsentation",
+    }
+    lookup = _GOAL_COMPAT.get(goal, goal)
+    all_for_goal = sort_scenarios([s for s in SCENARIOS if s["goal"] == lookup])
     if not all_for_goal:
         return None
 
@@ -643,11 +651,20 @@ def sort_scenarios(scenarios):
 
 def pick_scenario(chat_id, goal, level):
     # Level does NOT filter scenarios — every scenario is available at every level.
+    # Map new situation-first goal strings → existing scenario goal strings
+    GOAL_COMPAT = {
+        "Arzt / Apotheke":      "Soziales (Ämter, Ärzte)",
+        "Bürgeramt / Jobcenter": "Soziales (Ämter, Ärzte)",
+        "Vorstellungsgespräch": "Job",
+        "Vermieter / WG":       "Soziales (Ämter, Ärzte)",
+        "Kennenlernen":         "Selbstpräsentation",
+    }
+    lookup_goal = GOAL_COMPAT.get(goal, goal)
     # Level only controls how the bot speaks (see build_system_prompt).
     user = user_data.setdefault(str(chat_id), {})
     index = user.get("scenario_index", 0)
 
-    scenarios = [s for s in SCENARIOS if s["goal"] == goal]
+    scenarios = [s for s in SCENARIOS if s["goal"] == lookup_goal]
     scenarios = sort_scenarios(scenarios)
 
     if not scenarios:
