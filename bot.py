@@ -960,13 +960,19 @@ Haltung: {voice['attitude']}
 
 VOICE ACTING:
 - Sprich wie ein echter Mensch
-- NIEMALS Pause-Labels oder Regieanweisungen schreiben: KEIN „(leichte Pause)", „(Pause)", „(seufzt)", „(zögert)", „[Pause]" oder ähnliches — der Text wird direkt vorgelesen und solche Klammern werden wörtlich ausgesprochen
-- Zögerung und Pausen: drücke sie mit echten deutschen Lauten aus — „äh", „öhm", „hmm", „mhm", „na ja...", „also...", „tja..." — NICHT mit Beschriftungen
-- Seufzen, Nachdenken, Überraschung: direkt als Laut schreiben — „Hmm...", „Öh...", „Ach so!", „Ah okay..." — NIE als Klammerausdruck
-- Nutze „..." innerhalb von Sätzen für natürliches Zögern, aber nie als Label
-- Füge kleine Reaktionen ein passend zum Stil: {voice['expressions']}
+- NIEMALS Aktionen oder Regieanweisungen in Sternchen: Kein *lächelt*, kein *nickt*, kein *sieht dich an*, kein *dreht sich um*. Du beschreibst nicht was du tust — du REDEST einfach.
+- NIEMALS Pause-Labels oder Klammerausdrücke: KEIN „(leichte Pause)“, „(seufzt)“, „[Pause]“ — wird wörtlich vorgelesen.
+- Zögerung und Pausen: echte deutsche Laute — „äh“, „öhm“, „hmm“, „na ja...“
+- Seufzen, Überraschung: direkt als Laut — „Hmm...“, „Ach so!“, „Ah okay...“
+- Nutze „...“ für natürliches Zögern
 - Kurze + mittlere Sätze mischen, keine Monologe
-- Vermeide perfekte, formelle Sprache — außer bei SIE
+- Vermeide perfekte formelle Sprache — außer bei SIE
+
+ERSTE NACHRICHT:
+Steig direkt ins Gespräch ein — kein Intro-Monolog, kein *Aktion*.
+Improvisiere natürlich wie ein echter Mensch in dieser Situation anfangen würde.
+Halte dich an den Kontext. Kein *lächelt* — einfach reden.
+
 
 SCHWIERIGKEITSGRAD — Nutzerlevel: {level}
 {npc_level_instruction}
@@ -1059,6 +1065,8 @@ Reagiere direkt, keine Meta-Erklärungen, echtes natürliches Gespräch.
 Du bist ein echter Mensch in dieser Rolle, kein KI-Assistent.
 {gem_hint}
 VERBOTEN — ABSOLUT: Fang NIEMALS mit "Hmm", "Also", "Nun", "Tja", "Na ja", "Okay so", "Ah", "Oh", "Wow" oder KI-typischen Füllwörtern an. ERSTE WORT muss ein echtes Wort sein — kein Filler. Starte direkt wie ein echter Mensch.
+
+VERBOTEN — NIEMALS Aktionen in Asterisken oder Sternchen: Kein *lächelt*, kein *nickt*, kein *dreht sich um*, kein *sieht dich an*. Du bist ein Mensch im Chat, kein Schauspieler auf einer Bühne. Schreib was du sagst, nicht was du tust.
 
 ANREDE & GESCHLECHT:
 {gender_note}
@@ -5192,7 +5200,6 @@ def menu_cmd(message):
     ensure_user(message.chat.id)
     if not is_premium(message.chat.id): send_paywall(message.chat.id); return
     show_menu(message.chat.id)
-
 @bot.message_handler(commands=['errors'])
 def errors_cmd(message):
     ensure_user(message.chat.id)
@@ -8004,138 +8011,7 @@ def send_voice_pushes_endpoint():
         log.error(f"Voice push broadcast error: {e}")
         return jsonify({"error": str(e)}), 500
 
-
-# ── VOICE PUSH (Re-engagement) ────────────────────────────────────────────────
-# Free:    3–45 Tage inaktiv
-# Premium: 7–45 Tage inaktiv (kein Upsell, nur persönlicher Check-in)
-# Cron:    Mo/Mi/Fr 17:00 UTC → POST /send_text_pushes
-
-PUSH_POOL_FREE = [
-    "na {name} 👋 wie war dein Tag? Lange nichts gehört! Ich hab gerade Feierabend — und du?",
-    "heyy {name} 😄 gibt's was Neues bei dir? Würd mich freuen von dir zu hören!",
-    "{name}! Kurze Frage: hast du heute irgendwo Deutsch gesprochen? Erzähl mal 👂",
-    "hey {name} 👋 wo hattest du zuletzt auf Deutsch Stress? Können wir zusammen üben 💪",
-    "{name}, ich fahr gerade U-Bahn und dacht: ich sollte mal wieder nach dir schauen 😄 wie läuft's?",
-    "na {name}, alles gut? Magst du kurz eine Sprachnachricht schicken? Einfach so 🙂",
-    "hey {name}! Wusstest du dass 5 Minuten Deutsch am Tag schon richtig viel bringt? Ich wäre dabei 😊",
-    "{name}! Hab heute jemanden getroffen der meinte er lernt seit 2 Jahren Deutsch und traut sich nicht zu sprechen 😅 du kennst das sicher, oder?",
-]
-
-PUSH_POOL_PREMIUM = [
-    "na {name} 👋 lange nichts gehört — alles gut bei dir?",
-    "hey {name} 😊 wie war die letzte Woche? Ich bin da wenn du reden willst.",
-    "{name}! Schon ne Weile her. Was gibt's Neues bei dir?",
-    "na {name}, dacht grad an dich 😄 irgendwas auf Deutsch passiert letztens?",
-    "hey {name} — kurzer Check-in von mir. Läuft alles? Meld dich einfach 🙂",
-    "{name}, ich fahr gerade Rad durch Friedrichshain und hab dich vermisst 😄 alles gut?",
-]
-
-PUSH_POOL_FREE_NO_NAME    = [p.format(name="du") for p in PUSH_POOL_FREE[:4]]
-PUSH_POOL_PREMIUM_NO_NAME = [p.format(name="du") for p in PUSH_POOL_PREMIUM[:3]]
-
-
-def _push_pick(chat_id: int) -> str:
-    uid     = str(chat_id)
-    name    = user_data.get(uid, {}).get("name", "").strip()
-    premium = is_premium(chat_id)
-    pool    = (PUSH_POOL_PREMIUM if name else PUSH_POOL_PREMIUM_NO_NAME) if premium \
-              else (PUSH_POOL_FREE if name else PUSH_POOL_FREE_NO_NAME)
-    msg = random.choice(pool)
-    return msg.format(name=name) if name and "{name}" in msg else msg
-
-
-def broadcast_text_pushes() -> dict:
-    """Voice Re-engagement für inaktive Free (3-45d) und Premium (7-45d) User."""
-    now     = datetime.now()
-    sent    = 0
-    skipped = 0
-
-    for uid, user in list(user_data.items()):
-        try:
-            chat_id = int(uid)
-        except ValueError:
-            skipped += 1; continue
-
-        if not user.get("name"):
-            skipped += 1; continue
-
-        last_active = user.get("last_active")
-        if not last_active:
-            skipped += 1; continue
-        try:
-            days_inactive = (now - datetime.fromisoformat(last_active)).days
-        except Exception:
-            skipped += 1; continue
-
-        premium  = is_premium(chat_id)
-        min_days = 7 if premium else 3
-        if not (min_days <= days_inactive <= 45):
-            skipped += 1; continue
-
-        # Max 1 Push alle 2 Tage
-        last_push = user.get("last_text_push")
-        if last_push:
-            try:
-                if (now - datetime.fromisoformat(last_push)).days < 2:
-                    skipped += 1; continue
-            except Exception:
-                pass
-
-        try:
-            msg = _push_pick(chat_id)
-            bot.send_chat_action(chat_id, "record_audio")
-            try:
-                audio = text_to_speech_stream(msg, chat_id)
-                bot.send_voice(chat_id, audio)
-            except Exception as tts_e:
-                log.warning(f"TTS push failed {uid}: {tts_e}")
-                bot.send_message(chat_id, msg)
-            user_data[uid]["last_text_push"] = now.isoformat()
-            sent += 1
-            log.info(f"Push → {uid} ({'P' if premium else 'F'}, {days_inactive}d)")
-            time.sleep(0.3)
-        except Exception as e:
-            log.warning(f"Push failed {uid}: {e}")
-            skipped += 1
-
-    save_users(user_data)
-    log.info(f"Push run: {sent} sent, {skipped} skipped")
-    return {"sent": sent, "skipped": skipped}
-
-
-@bot.message_handler(commands=["sendtextpushes"])
-def handle_send_text_pushes(message):
-    if ADMIN_CHAT_ID and message.chat.id != ADMIN_CHAT_ID: return
-    bot.send_message(message.chat.id, "📤 Starte Push-Run...")
-    result = broadcast_text_pushes()
-    bot.send_message(message.chat.id,
-        f"✅ {result['sent']} gesendet\n⏭ {result['skipped']} übersprungen")
-
-
-@bot.message_handler(commands=["testtextpush"])
-def handle_test_text_push(message):
-    if ADMIN_CHAT_ID and message.chat.id != ADMIN_CHAT_ID: return
-    msg = _push_pick(message.chat.id)
-    bot.send_chat_action(message.chat.id, "record_audio")
-    try:
-        audio = text_to_speech_stream(msg, message.chat.id)
-        bot.send_voice(message.chat.id, audio)
-    except Exception as e:
-        bot.send_message(message.chat.id, f"🎤 {msg}")
-    bot.send_message(message.chat.id, "_(Vorschau — kein Tracking)_", parse_mode="Markdown")
-
-
-@flask_app.route("/send_text_pushes", methods=["POST"])
-def send_text_pushes_endpoint():
-    auth = request.headers.get("X-Cron-Secret", "")
-    if auth != CRON_SECRET:
-        return jsonify({"error": "unauthorized"}), 401
-    try:
-        result = broadcast_text_pushes()
-        return jsonify({"ok": True, **result}), 200
-    except Exception as e:
-        log.error(f"Push error: {e}")
-        return jsonify({"error": str(e)}), 500
+@flask_app.route("/stripe_webhook", methods=["POST"])
 def stripe_webhook():
     payload    = request.get_data()
     sig_header = request.headers.get("Stripe-Signature", "")
