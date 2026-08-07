@@ -2813,29 +2813,38 @@ def increment_daily_convo(chat_id: int) -> int:
     return count + 1
 
 def has_free_convos_remaining(chat_id: int) -> bool:
-    return get_daily_convo_count(chat_id) < FREE_DAILY_LIMIT
+    """Bulletproof — returns True on any error so users are never wrongly blocked."""
+    try:
+        return get_daily_convo_count(chat_id) < FREE_DAILY_LIMIT
+    except Exception as e:
+        log.warning(f"has_free_convos_remaining error for {chat_id}: {e}")
+        return True  # On error: always let them in
 
 def gate_scenario(chat_id: int) -> bool:
-    """Gate für Szenarien. Premium/Plus → immer rein. Free → 1/Tag."""
-    if is_premium(chat_id):
-        return True
-    if has_free_convos_remaining(chat_id):
-        return True
-    send_daily_limit_paywall(chat_id)
-    return False
+    """Gate für Szenarien. Premium → immer rein. Free → 1/Tag. Fehler → rein."""
+    try:
+        if is_premium(chat_id):
+            return True
+        if has_free_convos_remaining(chat_id):
+            return True
+        send_daily_limit_paywall(chat_id)
+        return False
+    except Exception as e:
+        log.error(f"gate_scenario error for {chat_id}: {e}")
+        return True  # Never block due to system error
 
 def gate_quatschen(chat_id: int) -> bool:
-    """Gate für Quatschen-Modus.
-    Plus → immer rein. Regular Premium → Upgrade-Prompt. Free → 1/Tag."""
-    if is_premium_plus(chat_id):
-        return True
-    if is_premium(chat_id):  # Premium aber kein Plus
-        send_quatschen_upgrade_prompt(chat_id)
+    """Gate für Quatschen. Premium → immer rein. Free → 1/Tag. Fehler → rein."""
+    try:
+        if is_premium(chat_id):
+            return True
+        if has_free_convos_remaining(chat_id):
+            return True
+        send_daily_limit_paywall(chat_id)
         return False
-    if has_free_convos_remaining(chat_id):
+    except Exception as e:
+        log.error(f"gate_quatschen error for {chat_id}: {e}")
         return True
-    send_daily_limit_paywall(chat_id)
-    return False
 
 def send_daily_limit_paywall(chat_id: int):
     """Paywall nach 1 kostenlosem Gespräch."""
