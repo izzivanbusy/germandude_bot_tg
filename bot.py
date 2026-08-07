@@ -2813,38 +2813,29 @@ def increment_daily_convo(chat_id: int) -> int:
     return count + 1
 
 def has_free_convos_remaining(chat_id: int) -> bool:
-    """Bulletproof — returns True on any error so users are never wrongly blocked."""
-    try:
-        return get_daily_convo_count(chat_id) < FREE_DAILY_LIMIT
-    except Exception as e:
-        log.warning(f"has_free_convos_remaining error for {chat_id}: {e}")
-        return True  # On error: always let them in
+    return get_daily_convo_count(chat_id) < FREE_DAILY_LIMIT
 
 def gate_scenario(chat_id: int) -> bool:
-    """Gate für Szenarien. Premium → immer rein. Free → 1/Tag. Fehler → rein."""
-    try:
-        if is_premium(chat_id):
-            return True
-        if has_free_convos_remaining(chat_id):
-            return True
-        send_daily_limit_paywall(chat_id)
-        return False
-    except Exception as e:
-        log.error(f"gate_scenario error for {chat_id}: {e}")
-        return True  # Never block due to system error
+    """Gate für Szenarien. Premium/Plus → immer rein. Free → 1/Tag."""
+    if is_premium(chat_id):
+        return True
+    if has_free_convos_remaining(chat_id):
+        return True
+    send_daily_limit_paywall(chat_id)
+    return False
 
 def gate_quatschen(chat_id: int) -> bool:
-    """Gate für Quatschen. Premium → immer rein. Free → 1/Tag. Fehler → rein."""
-    try:
-        if is_premium(chat_id):
-            return True
-        if has_free_convos_remaining(chat_id):
-            return True
-        send_daily_limit_paywall(chat_id)
-        return False
-    except Exception as e:
-        log.error(f"gate_quatschen error for {chat_id}: {e}")
+    """Gate für Quatschen-Modus.
+    Plus → immer rein. Regular Premium → Upgrade-Prompt. Free → 1/Tag."""
+    if is_premium_plus(chat_id):
         return True
+    if is_premium(chat_id):  # Premium aber kein Plus
+        send_quatschen_upgrade_prompt(chat_id)
+        return False
+    if has_free_convos_remaining(chat_id):
+        return True
+    send_daily_limit_paywall(chat_id)
+    return False
 
 def send_daily_limit_paywall(chat_id: int):
     """Paywall nach 1 kostenlosem Gespräch."""
@@ -3982,14 +3973,26 @@ def handle_topic_callback(call):
 
     bot.answer_callback_query(call.id)
 
-    # Gate: Premium → immer rein. Free → 1 Gespräch/Tag. Sonst → Paywall.
-    if not gate_scenario(chat_id):
+    # Paywall check
+    if not is_premium(chat_id):
+        send_paywall(chat_id)
         return
 
-    # Quatschen — für alle Premium-User (gate_scenario hat already gecheckt)
+    # Special mode: Quatschen — Premium Plus only
     if goal == "Quatschen":
-        if not is_premium(chat_id):
-            send_daily_limit_paywall(chat_id)
+        if not is_premium_plus(chat_id):
+            qtext = (
+                "👑 Quatsch Modus ist Teil von Premium Plus.\n\n"
+                "Kein Skript, kein Thema, kein Druck — einfach reden.\n"
+                "Finanzamt-Brief? Kündigung? Oder einfach schlechter Tag?\n"
+                "Dein Kumpel hört zu. 24/7, nie urteilend.\n\n"
+                "🎓 Premium — €25/Monat oder 2000 Stars."
+            )
+            last_bot_text[chat_id] = qtext
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("🎓 Premium holen", callback_data="pay_plus"))
+            markup.add(translate_btn(chat_id))
+            bot.send_message(chat_id, qtext, reply_markup=markup)
             return
         user_data[str(chat_id)]["goal"] = goal
         save_users(user_data)
@@ -8007,77 +8010,48 @@ def send_voice_pushes_endpoint():
         log.error(f"Voice push broadcast error: {e}")
         return jsonify({"error": str(e)}), 500
 
-@flask_app.route("/send_voice_pushes", methods=["POST"])
-def send_voice_pushes_endpoint():
-    """Alle 15-30 Min via Railway Cron aufrufen. Prüft fällige Slots und sendet sie."""
-    auth = request.headers.get("X-Cron-Secret", "")
-    if auth != CRON_SECRET:
-        return jsonify({"error": "unauthorized"}), 401
-    try:
-        result = broadcast_voice_pushes()
-        return jsonify({"ok": True, **result}), 200
-    except Exception as e:
-        log.error(f"Voice push broadcast error: {e}")
-        return jsonify({"error": str(e)}), 500
 
+# ── VOICE PUSH (Re-engagement) ────────────────────────────────────────────────
+# Free:    3–45 Tage inaktiv
+# Premium: 7–45 Tage inaktiv (kein Upsell, nur persönlicher Check-in)
+# Cron:    Mo/Mi/Fr 17:00 UTC → POST /send_text_pushes
 
-# ── TEXT PUSH — Re-engagement für Free + Premium ─────────────────────────────
-# Free:    3–45 Tage inaktiv → Felix meldet sich
-# Premium: 7–45 Tage inaktiv → Felix meldet sich, wärmer/persönlicher (kein Upsell)
-# Cron:    Mo/Mi/Fr ~18:00 via cron-job.org → POST /send_text_pushes
-
-TEXT_PUSH_FREE = [
-    "na {name} 👋 wie war dein Tag? Lange nichts gehört! Ich hab gerade Feierabend und fahr nach Hause — und du?",
-    "heyy {name} 😄 gibt's was Neues bei dir? Schick mir mal kurz eine Voicenachricht, würd mich freuen!",
+PUSH_POOL_FREE = [
+    "na {name} 👋 wie war dein Tag? Lange nichts gehört! Ich hab gerade Feierabend — und du?",
+    "heyy {name} 😄 gibt's was Neues bei dir? Würd mich freuen von dir zu hören!",
     "{name}! Kurze Frage: hast du heute irgendwo Deutsch gesprochen? Erzähl mal 👂",
-    "hey {name} 👋 kleiner Check-in — Bürgeramt, Arzt, Supermarkt: wo hattest du zuletzt auf Deutsch Stress? Können wir zusammen üben 💪",
-    "{name}!! ich hab heute jemanden getroffen der meinte er lernt seit 2 Jahren Deutsch und traut sich immer noch nicht zu sprechen 😅 du kennst das sicher auch, oder?",
-    "na {name}, alles gut? Ich sitz gerade in der U-Bahn und dacht: ich sollte mal wieder nach dir schauen 😄",
-    "hey {name}! Magst du kurz was auf Deutsch schreiben oder mir eine Sprachnachricht schicken? Einfach so — kein Druck 🙂",
-    "na {name} 🙋 lange nix! Wie läuft's so? Alles okay bei dir?",
-    "hey {name}! Wusstest du, dass 5 Minuten Deutsch am Tag schon richtig viel bringt? Ich wäre dabei 😊",
-    "{name}, ich hab heute in der S-Bahn mitgehört wie zwei Leute über eine Wohnung gechattet haben — interessant. Hast du gerade auch irgendwas auf Lager? 😄",
+    "hey {name} 👋 wo hattest du zuletzt auf Deutsch Stress? Können wir zusammen üben 💪",
+    "{name}, ich fahr gerade U-Bahn und dacht: ich sollte mal wieder nach dir schauen 😄 wie läuft's?",
+    "na {name}, alles gut? Magst du kurz eine Sprachnachricht schicken? Einfach so 🙂",
+    "hey {name}! Wusstest du dass 5 Minuten Deutsch am Tag schon richtig viel bringt? Ich wäre dabei 😊",
+    "{name}! Hab heute jemanden getroffen der meinte er lernt seit 2 Jahren Deutsch und traut sich nicht zu sprechen 😅 du kennst das sicher, oder?",
 ]
 
-TEXT_PUSH_PREMIUM = [
-    "na {name} 👋 lange nichts gehört — alles gut bei dir? Ich frag mich gerade wie's so läuft.",
-    "hey {name} 😊 ich hab dich eine Weile nicht gesehen. Gibt's was Neues? Ich bin da wenn du reden willst.",
-    "{name}! Schon ne Weile her. Wie war die letzte Woche so für dich?",
-    "na {name}, dacht grad an dich 😄 irgendetwas auf Deutsch passiert letztens das du mir erzählen willst?",
-    "hey {name} 👋 kurzer Check-in von mir — läuft alles? Meld dich einfach wenn du Lust hast zu quatschen.",
-    "{name}, ich fahr gerade Rad durch Friedrichshain und hab dich vermisst 😄 alles gut bei dir?",
-    "hey {name}! Keine Pflicht — aber wenn du heute Lust hast, einfach schreiben. Ich bin da 🙂",
+PUSH_POOL_PREMIUM = [
+    "na {name} 👋 lange nichts gehört — alles gut bei dir?",
+    "hey {name} 😊 wie war die letzte Woche? Ich bin da wenn du reden willst.",
+    "{name}! Schon ne Weile her. Was gibt's Neues bei dir?",
+    "na {name}, dacht grad an dich 😄 irgendwas auf Deutsch passiert letztens?",
+    "hey {name} — kurzer Check-in von mir. Läuft alles? Meld dich einfach 🙂",
+    "{name}, ich fahr gerade Rad durch Friedrichshain und hab dich vermisst 😄 alles gut?",
 ]
 
-TEXT_PUSH_NO_NAME_FREE = [
-    "na 👋 wie war dein Tag? Lange nichts gehört! Ich hab gerade Feierabend — und du?",
-    "heyy 😄 gibt's was Neues? Schick mir mal kurz eine Voicenachricht!",
-    "kurze Frage: hast du heute irgendwo Deutsch gesprochen? Erzähl mal 👂",
-    "hey 👋 wo hattest du zuletzt auf Deutsch Stress? Können wir zusammen üben 💪",
-    "hey! Magst du kurz was auf Deutsch schreiben? Einfach so — kein Druck 🙂",
-]
-
-TEXT_PUSH_NO_NAME_PREMIUM = [
-    "na 👋 lange nichts gehört — alles gut? Ich bin da wenn du reden willst.",
-    "hey 😊 wie war die letzte Woche? Meld dich einfach wenn du Lust hast.",
-    "kurzer Check-in von mir — läuft alles? 🙂",
-]
+PUSH_POOL_FREE_NO_NAME    = [p.format(name="du") for p in PUSH_POOL_FREE[:4]]
+PUSH_POOL_PREMIUM_NO_NAME = [p.format(name="du") for p in PUSH_POOL_PREMIUM[:3]]
 
 
-def _text_push_pick(chat_id: int) -> str:
-    uid      = str(chat_id)
-    name     = user_data.get(uid, {}).get("name", "").strip()
-    premium  = is_premium(chat_id)
-    if premium:
-        pool = TEXT_PUSH_PREMIUM if name else TEXT_PUSH_NO_NAME_PREMIUM
-    else:
-        pool = TEXT_PUSH_FREE if name else TEXT_PUSH_NO_NAME_FREE
+def _push_pick(chat_id: int) -> str:
+    uid     = str(chat_id)
+    name    = user_data.get(uid, {}).get("name", "").strip()
+    premium = is_premium(chat_id)
+    pool    = (PUSH_POOL_PREMIUM if name else PUSH_POOL_PREMIUM_NO_NAME) if premium \
+              else (PUSH_POOL_FREE if name else PUSH_POOL_FREE_NO_NAME)
     msg = random.choice(pool)
-    return msg.format(name=name) if name else msg
+    return msg.format(name=name) if name and "{name}" in msg else msg
 
 
 def broadcast_text_pushes() -> dict:
-    """Text-Push für inaktive Free (3-45 Tage) und Premium (7-45 Tage) User."""
+    """Voice Re-engagement für inaktive Free (3-45d) und Premium (7-45d) User."""
     now     = datetime.now()
     sent    = 0
     skipped = 0
@@ -8099,8 +8073,7 @@ def broadcast_text_pushes() -> dict:
         except Exception:
             skipped += 1; continue
 
-        # Threshold: Free 3-45 Tage, Premium 7-45 Tage
-        premium = is_premium(chat_id)
+        premium  = is_premium(chat_id)
         min_days = 7 if premium else 3
         if not (min_days <= days_inactive <= 45):
             skipped += 1; continue
@@ -8115,32 +8088,31 @@ def broadcast_text_pushes() -> dict:
                 pass
 
         try:
-            msg = _text_push_pick(chat_id)
+            msg = _push_pick(chat_id)
             bot.send_chat_action(chat_id, "record_audio")
             try:
                 audio = text_to_speech_stream(msg, chat_id)
                 bot.send_voice(chat_id, audio)
             except Exception as tts_e:
-                log.warning(f"TTS failed for push {uid}, fallback to text: {tts_e}")
-                bot.send_message(chat_id, msg)  # Fallback: Text wenn TTS fehlschlägt
+                log.warning(f"TTS push failed {uid}: {tts_e}")
+                bot.send_message(chat_id, msg)
             user_data[uid]["last_text_push"] = now.isoformat()
             sent += 1
-            log.info(f"Voice push → {uid} ({'Premium' if premium else 'Free'}, {days_inactive}d inaktiv)")
-            time.sleep(0.3)  # etwas mehr Abstand wegen TTS-Requests
+            log.info(f"Push → {uid} ({'P' if premium else 'F'}, {days_inactive}d)")
+            time.sleep(0.3)
         except Exception as e:
-            log.warning(f"Text push failed for {uid}: {e}")
+            log.warning(f"Push failed {uid}: {e}")
             skipped += 1
 
     save_users(user_data)
-    log.info(f"Text push run: {sent} gesendet, {skipped} übersprungen")
+    log.info(f"Push run: {sent} sent, {skipped} skipped")
     return {"sent": sent, "skipped": skipped}
 
 
 @bot.message_handler(commands=["sendtextpushes"])
 def handle_send_text_pushes(message):
-    """Admin-only: manuell Text-Push-Run auslösen."""
     if ADMIN_CHAT_ID and message.chat.id != ADMIN_CHAT_ID: return
-    bot.send_message(message.chat.id, "📤 Starte Text-Push-Run...")
+    bot.send_message(message.chat.id, "📤 Starte Push-Run...")
     result = broadcast_text_pushes()
     bot.send_message(message.chat.id,
         f"✅ {result['sent']} gesendet\n⏭ {result['skipped']} übersprungen")
@@ -8148,22 +8120,19 @@ def handle_send_text_pushes(message):
 
 @bot.message_handler(commands=["testtextpush"])
 def handle_test_text_push(message):
-    """Admin-only: Vorschau Voice-Push an sich selbst."""
     if ADMIN_CHAT_ID and message.chat.id != ADMIN_CHAT_ID: return
-    msg = _text_push_pick(message.chat.id)
+    msg = _push_pick(message.chat.id)
     bot.send_chat_action(message.chat.id, "record_audio")
     try:
         audio = text_to_speech_stream(msg, message.chat.id)
         bot.send_voice(message.chat.id, audio)
     except Exception as e:
-        bot.send_message(message.chat.id, f"🎤 {msg}\n_(TTS fehlgeschlagen: {e})_", parse_mode="Markdown")
-    bot.send_message(message.chat.id,
-        "_(Vorschau — kein Tracking)_", parse_mode="Markdown")
+        bot.send_message(message.chat.id, f"🎤 {msg}")
+    bot.send_message(message.chat.id, "_(Vorschau — kein Tracking)_", parse_mode="Markdown")
 
 
 @flask_app.route("/send_text_pushes", methods=["POST"])
 def send_text_pushes_endpoint():
-    """Mo/Mi/Fr ~17:00 UTC via cron-job.org"""
     auth = request.headers.get("X-Cron-Secret", "")
     if auth != CRON_SECRET:
         return jsonify({"error": "unauthorized"}), 401
@@ -8171,7 +8140,7 @@ def send_text_pushes_endpoint():
         result = broadcast_text_pushes()
         return jsonify({"ok": True, **result}), 200
     except Exception as e:
-        log.error(f"Text push error: {e}")
+        log.error(f"Push error: {e}")
         return jsonify({"error": str(e)}), 500
 def stripe_webhook():
     payload    = request.get_data()
