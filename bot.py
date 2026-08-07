@@ -91,8 +91,14 @@ ALL_GOALS = [
 ]
 
 def onboarding_complete(chat_id) -> bool:
-    """True once user has given their name (first reply to bot)."""
-    return bool(user_data.get(str(chat_id), {}).get("name"))
+    """True if user has completed onboarding (name + language + test)."""
+    uid  = str(chat_id)
+    user = user_data.get(uid, {})
+    return bool(
+        user.get("name") and
+        user.get("native_language") and
+        user.get("level")
+    )
 
 
 def _require_onboarding(chat_id) -> bool:
@@ -3967,26 +3973,14 @@ def handle_topic_callback(call):
 
     bot.answer_callback_query(call.id)
 
-    # Paywall check
-    if not is_premium(chat_id):
-        send_paywall(chat_id)
+    # Gate: Premium → immer rein. Free → 1 Gespräch/Tag. Sonst → Paywall.
+    if not gate_scenario(chat_id):
         return
 
-    # Special mode: Quatschen — Premium Plus only
+    # Quatschen — für alle Premium-User (gate_scenario hat already gecheckt)
     if goal == "Quatschen":
-        if not is_premium_plus(chat_id):
-            qtext = (
-                "👑 Quatsch Modus ist Teil von Premium Plus.\n\n"
-                "Kein Skript, kein Thema, kein Druck — einfach reden.\n"
-                "Finanzamt-Brief? Kündigung? Oder einfach schlechter Tag?\n"
-                "Dein Kumpel hört zu. 24/7, nie urteilend.\n\n"
-                "🎓 Premium — €25/Monat oder 2000 Stars."
-            )
-            last_bot_text[chat_id] = qtext
-            markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("🎓 Premium holen", callback_data="pay_plus"))
-            markup.add(translate_btn(chat_id))
-            bot.send_message(chat_id, qtext, reply_markup=markup)
+        if not is_premium(chat_id):
+            send_daily_limit_paywall(chat_id)
             return
         user_data[str(chat_id)]["goal"] = goal
         save_users(user_data)
@@ -5477,7 +5471,7 @@ def handle_adminstats(message):
 
     # Stufe 2 — Onboarding komplett (Name + Sprache + Ziel gesetzt)
     f_onboarded = sum(1 for u in users.values()
-                      if u.get("name"))
+                      if u.get("name") and u.get("native_language") and u.get("goal"))
 
     # Stufe 3 — Mindestens 1 Gespräch geführt
     f_talked = sum(1 for u in users.values() if u.get("conversations_started", 0) >= 1)
