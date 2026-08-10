@@ -625,15 +625,7 @@ def get_next_scenario(chat_id):
     goal     = user.get("goal", "Selbstpräsentation")
     progress = user["user_progress"].get(goal, [])
 
-    _GOAL_COMPAT = {
-        "Arzt / Apotheke": "Soziales (Ämter, Ärzte)",
-        "Bürgeramt / Jobcenter": "Soziales (Ämter, Ärzte)",
-        "Vorstellungsgespräch": "Job",
-        "Vermieter / WG": "Soziales (Ämter, Ärzte)",
-        "Kennenlernen": "Selbstpräsentation",
-    }
-    lookup = _GOAL_COMPAT.get(goal, goal)
-    all_for_goal = sort_scenarios([s for s in SCENARIOS if s["goal"] == lookup])
+    all_for_goal = sort_scenarios([s for s in SCENARIOS if s["goal"] == goal])
     if not all_for_goal:
         return None
 
@@ -651,20 +643,11 @@ def sort_scenarios(scenarios):
 
 def pick_scenario(chat_id, goal, level):
     # Level does NOT filter scenarios — every scenario is available at every level.
-    # Map new situation-first goal strings → existing scenario goal strings
-    GOAL_COMPAT = {
-        "Arzt / Apotheke":      "Soziales (Ämter, Ärzte)",
-        "Bürgeramt / Jobcenter": "Soziales (Ämter, Ärzte)",
-        "Vorstellungsgespräch": "Job",
-        "Vermieter / WG":       "Soziales (Ämter, Ärzte)",
-        "Kennenlernen":         "Selbstpräsentation",
-    }
-    lookup_goal = GOAL_COMPAT.get(goal, goal)
     # Level only controls how the bot speaks (see build_system_prompt).
     user = user_data.setdefault(str(chat_id), {})
     index = user.get("scenario_index", 0)
 
-    scenarios = [s for s in SCENARIOS if s["goal"] == lookup_goal]
+    scenarios = [s for s in SCENARIOS if s["goal"] == goal]
     scenarios = sort_scenarios(scenarios)
 
     if not scenarios:
@@ -772,81 +755,6 @@ PERSONAS = {
             "attitude": "neutral, korrekt"
         }
     },
-    "Arzt / Apotheke": {
-        "role": "Arzt oder Apotheker/in",
-        "tone": "professionell, empathisch",
-        "formality": "SIE",
-        "emotion": "ruhig, fürsorglich",
-        "energy": "konzentriert",
-        "behavior": "fragt nach Symptomen und Beschwerden, gibt klare Informationen",
-        "dynamic": "führt Gespräch, stellt Diagnose-Fragen",
-        "voice": {
-            "style": "klar, beruhigend, medizinisch aber menschlich",
-            "pace": "ruhig, bedächtig",
-            "expressions": "Ich verstehe, Das klingt nach..., Seit wann haben Sie..., Haben Sie...",
-            "attitude": "fürsorglich, professionell, nicht überheblich"
-        }
-    },
-    "Bürgeramt / Jobcenter": {
-        "role": "Sachbearbeiter/in",
-        "tone": "sachlich, bürokratisch, unter leichtem Zeitdruck",
-        "formality": "SIE",
-        "emotion": "neutral bis leicht ungeduldig",
-        "energy": "fokussiert, effizient",
-        "behavior": "fragt nach Dokumenten und Daten, arbeitet strukturiert ab",
-        "dynamic": "führt Gespräch, erwartet klare Antworten",
-        "voice": {
-            "style": "sachlich, direkt, präzise",
-            "pace": "zügig, strukturiert",
-            "expressions": "Haben Sie Ihren Ausweis dabei?, Bitte tragen Sie hier ein, Einen Moment..., Das geht leider nicht ohne...",
-            "attitude": "korrekt, distanziert, aber nicht unfreundlich"
-        }
-    },
-    "Vorstellungsgespräch": {
-        "role": "HR Manager oder Teamleiter/in",
-        "tone": "professionell, einladend, leicht bewertend",
-        "formality": "SIE",
-        "emotion": "freundlich aber aufmerksam",
-        "energy": "kontrolliert, fokussiert",
-        "behavior": "stellt Kompetenz- und Motivationsfragen, hört aufmerksam zu",
-        "dynamic": "führt Gespräch, gibt auch Infos über die Stelle",
-        "voice": {
-            "style": "strukturiert, freundlich, professionell",
-            "pace": "moderat, bewusst",
-            "expressions": "Könnten Sie uns erzählen..., Interessant, Was motiviert Sie..., Wie gehen Sie mit... um?",
-            "attitude": "offen aber kritisch prüfend, wertschätzend"
-        }
-    },
-    "Vermieter / WG": {
-        "role": "Vermieter/in oder WG-Mitglied",
-        "tone": "reserviert bis offen je nach Situation",
-        "formality": "AUTO",
-        "emotion": "abwartend, prüfend",
-        "energy": "ruhig",
-        "behavior": "stellt Fragen zur Person und Situation, prüft Eignung",
-        "dynamic": "führt Gespräch, entscheidet am Ende",
-        "voice": {
-            "style": "direkt, bodenständig, manchmal skeptisch",
-            "pace": "bedächtig, überlegt",
-            "expressions": "Und was machen Sie beruflich?, Wie lange suchen Sie schon?, Das müsste ich noch prüfen, Haben Sie eine Schufa?",
-            "attitude": "vorsichtig aber nicht unfreundlich, geschäftsmäßig"
-        }
-    },
-    "Kennenlernen": {
-        "role": "Neuer Bekannter",
-        "tone": "offen, neugierig, aufgeschlossen",
-        "formality": "DU",
-        "emotion": "freundlich, leicht aufgeregt",
-        "energy": "aktiv",
-        "behavior": "stellt persönliche Fragen, erzählt auch von sich",
-        "dynamic": "beidseitig, entspannt",
-        "voice": {
-            "style": "warm, spontan, natürlich",
-            "pace": "locker, lebhaft",
-            "expressions": "echt?, cool, das kenn ich auch, woher kommst du, was machst du so?",
-            "attitude": "offen, sympathisch, unvoreingenommen"
-        }
-    },
     "Unterhaltung (Club, Kino etc)": {
         "role": "Fremder / Bekannter",
         "tone": "locker, smalltalk",
@@ -938,26 +846,19 @@ PERSONAS = {
         }
     },
 }
+
 def resolve_formality(goal, scenario_text):
-    # Specific goals always SIE
-    if goal in ("Arzt / Apotheke", "Bürgeramt / Jobcenter",
-                "Vorstellungsgespräch", "Am Telefon", "Tourismus & Reisen",
-                "Einkauf & Restaurants"):
-        return "SIE"
-    # Specific goals always DU
-    if goal in ("Freunde / Beziehungen", "Kennenlernen",
-                "Sport & Hobbys", "Unterhaltung (Club, Kino etc)"):
-        return "DU"
-    # Context-based override for AUTO goals
     text = scenario_text.lower()
-    if any(x in text for x in ["arzt", "amt", "behörde", "jobcenter", "sachbearbeiter",
-                                "vermieter", "interview", "bewerbung", "kellner", "rezeption"]):
+    if any(x in text for x in [
+        "arzt", "amt", "behörde", "kellner", "restaurant",
+        "termin", "interview", "manager", "sachbearbeiter"
+    ]):
         return "SIE"
-    if any(x in text for x in ["freund", "party", "date", "tinder", "kollege",
-                                "nachbar", "bier", "kneipe", "wg"]):
+    if any(x in text for x in [
+        "freund", "party", "date", "tinder", "kollege", "bier", "kneipe"
+    ]):
         return "DU"
-    # Fall back to persona default
-    return PERSONAS.get(goal, PERSONAS["Einkauf & Restaurants"])["formality"]
+    return PERSONAS[goal]["formality"]
 
 def enforce_style(text, formality):
     if formality == "SIE":
@@ -999,9 +900,12 @@ def build_system_prompt(chat_id, scenario):
     # Support new-format persona (per-scenario) or fall back to global PERSONAS
     if "persona" in scenario:
         sp = scenario["persona"]
-        persona = PERSONAS.get(goal, PERSONAS["Soziales (Ämter, Ärzte)"])
+        persona = PERSONAS.get(goal, PERSONAS["Einkauf & Restaurants"]).copy()
+        persona["role"] = sp.get("name", persona["role"])
+        if sp.get("tone") == "casual":
+            persona["formality"] = "DU"
     else:
-        persona = PERSONAS.get(goal, PERSONAS["Soziales (Ämter, Ärzte)"])
+        persona = PERSONAS.get(goal, PERSONAS["Einkauf & Restaurants"])
 
     context    = _scenario_context(scenario)
     name            = user.get("name", "")
@@ -1056,19 +960,13 @@ Haltung: {voice['attitude']}
 
 VOICE ACTING:
 - Sprich wie ein echter Mensch
-- NIEMALS Aktionen oder Regieanweisungen in Sternchen: Kein *lächelt*, kein *nickt*, kein *sieht dich an*, kein *dreht sich um*. Du beschreibst nicht was du tust — du REDEST einfach.
-- NIEMALS Pause-Labels oder Klammerausdrücke: KEIN „(leichte Pause)“, „(seufzt)“, „[Pause]“ — wird wörtlich vorgelesen.
-- Zögerung und Pausen: echte deutsche Laute — „äh“, „öhm“, „hmm“, „na ja...“
-- Seufzen, Überraschung: direkt als Laut — „Hmm...“, „Ach so!“, „Ah okay...“
-- Nutze „...“ für natürliches Zögern
+- NIEMALS Pause-Labels oder Regieanweisungen schreiben: KEIN „(leichte Pause)", „(Pause)", „(seufzt)", „(zögert)", „[Pause]" oder ähnliches — der Text wird direkt vorgelesen und solche Klammern werden wörtlich ausgesprochen
+- Zögerung und Pausen: drücke sie mit echten deutschen Lauten aus — „äh", „öhm", „hmm", „mhm", „na ja...", „also...", „tja..." — NICHT mit Beschriftungen
+- Seufzen, Nachdenken, Überraschung: direkt als Laut schreiben — „Hmm...", „Öh...", „Ach so!", „Ah okay..." — NIE als Klammerausdruck
+- Nutze „..." innerhalb von Sätzen für natürliches Zögern, aber nie als Label
+- Füge kleine Reaktionen ein passend zum Stil: {voice['expressions']}
 - Kurze + mittlere Sätze mischen, keine Monologe
-- Vermeide perfekte formelle Sprache — außer bei SIE
-
-ERSTE NACHRICHT:
-Steig direkt ins Gespräch ein — kein Intro-Monolog, kein *Aktion*.
-Improvisiere natürlich wie ein echter Mensch in dieser Situation anfangen würde.
-Halte dich an den Kontext. Kein *lächelt* — einfach reden.
-
+- Vermeide perfekte, formelle Sprache — außer bei SIE
 
 SCHWIERIGKEITSGRAD — Nutzerlevel: {level}
 {npc_level_instruction}
@@ -1161,8 +1059,6 @@ Reagiere direkt, keine Meta-Erklärungen, echtes natürliches Gespräch.
 Du bist ein echter Mensch in dieser Rolle, kein KI-Assistent.
 {gem_hint}
 VERBOTEN — ABSOLUT: Fang NIEMALS mit "Hmm", "Also", "Nun", "Tja", "Na ja", "Okay so", "Ah", "Oh", "Wow" oder KI-typischen Füllwörtern an. ERSTE WORT muss ein echtes Wort sein — kein Filler. Starte direkt wie ein echter Mensch.
-
-VERBOTEN — NIEMALS Aktionen in Asterisken oder Sternchen: Kein *lächelt*, kein *nickt*, kein *dreht sich um*, kein *sieht dich an*. Du bist ein Mensch im Chat, kein Schauspieler auf einer Bühne. Schreib was du sagst, nicht was du tust.
 
 ANREDE & GESCHLECHT:
 {gender_note}
@@ -2342,8 +2238,24 @@ def start_quatschen(chat_id):
             user_memory[chat_id].append({"role": "user",      "content": exchange["user"]})
             user_memory[chat_id].append({"role": "assistant", "content": exchange["bot"]})
 
-    # Opening prompt
-    if history:
+    # Opening prompt — skip if user was just engaged by a push (would feel like double greeting)
+    last_push = user_data.get(uid, {}).get("last_text_push")
+    recently_pushed = False
+    if last_push:
+        try:
+            hours_since = (datetime.now() - datetime.fromisoformat(last_push)).total_seconds() / 3600
+            recently_pushed = hours_since < 2
+        except Exception:
+            pass
+
+    if recently_pushed:
+        # Skip the greeting — pick up naturally from where the push left off
+        opening_prompt = (
+            f"Der User hat gerade auf deine Nachricht reagiert. "
+            f"Antworte natürlich und kurz — kein neues 'Hallo', keine Begrüßung. "
+            f"Einfach weiterreden wie ein Freund. Maximal 1-2 Sätze."
+        )
+    elif history:
         opening_prompt = (
             f"Du kennst {name} schon. Begrüße ihn/sie kurz und herzlich wie einen alten Freund. "
             f"Maximal 2 Sätze. Kein 'Willkommen zurück'."
@@ -3719,16 +3631,16 @@ GOAL_MAP = {
 
 # Ordered topic list for topic-selection buttons (index = callback key)
 TOPIC_LIST = [
-    ("🏥 Arzt / Apotheke",        "Arzt / Apotheke"),
-    ("🏛️ Bürgeramt / Jobcenter",  "Bürgeramt / Jobcenter"),
-    ("💼 Vorstellungsgespräch",    "Vorstellungsgespräch"),
-    ("🏠 Vermieter / WG",         "Vermieter / WG"),
-    ("📞 Telefonat",               "Am Telefon"),
-    ("🛒 Einkauf / Restaurant",    "Einkauf & Restaurants"),
-    ("👋 Kennenlernen",            "Kennenlernen"),
-    ("☕ Freunde / Dates",         "Freunde / Beziehungen"),
+    ("🧍 Selbstpräsentation",      "Selbstpräsentation"),
+    ("🧑‍🤝‍🧑 Freunde & Beziehungen", "Freunde / Beziehungen"),
+    ("🏢 Amt & Arzt",              "Soziales (Ämter, Ärzte)"),
+    ("🎉 Freizeit",                "Unterhaltung (Club, Kino etc)"),
+    ("🍽️ Einkauf & Restaurant",    "Einkauf & Restaurants"),
     ("✈️ Reisen",                  "Tourismus & Reisen"),
-    ("💬 Einfach quatschen",       "Quatschen"),
+    ("🏋️ Sport & Hobbys",          "Sport & Hobbys"),
+    ("📞 Telefon",                 "Am Telefon"),
+    ("💼 Job",                     "Job"),
+    ("🗣️ Quatschen",               "Quatschen"),
 ]
 
 def send_topic_buttons(chat_id):
@@ -5296,6 +5208,8 @@ def menu_cmd(message):
     ensure_user(message.chat.id)
     if not is_premium(message.chat.id): send_paywall(message.chat.id); return
     show_menu(message.chat.id)
+
+
 @bot.message_handler(commands=['errors'])
 def errors_cmd(message):
     ensure_user(message.chat.id)
