@@ -2238,22 +2238,6 @@ def start_quatschen(chat_id):
             user_memory[chat_id].append({"role": "user",      "content": exchange["user"]})
             user_memory[chat_id].append({"role": "assistant", "content": exchange["bot"]})
 
-    # Skip opening voice if a push was sent recently — the push IS the conversation opener.
-    # Clicking Quatschen after a push should not generate a duplicate greeting.
-    last_push = user_data.get(uid, {}).get("last_text_push")
-    recently_pushed = False
-    if last_push:
-        try:
-            hours_since = (datetime.now() - datetime.fromisoformat(last_push)).total_seconds() / 3600
-            recently_pushed = hours_since < 3
-        except Exception:
-            pass
-
-    if recently_pushed:
-        # Context is active — just confirm silently with a short text, no voice
-        bot.send_message(chat_id, "Ich bin da! Schreib mir einfach. 😊")
-        return
-
     # Opening prompt
     if history:
         opening_prompt = (
@@ -2279,6 +2263,8 @@ def start_quatschen(chat_id):
         opening = f"Hey{' ' + name if name else ''}! Na, wie geht's dir so? 😊"
 
     user_memory[chat_id].append({"role": "assistant", "content": opening})
+
+    # Send as voice
     send_reply(chat_id, opening, voice=True)
 
 def _extract_friend_memory(chat_id):
@@ -7612,15 +7598,6 @@ Nur diese Zeilen, nichts sonst.""",
         send_donation_stars_invoice(chat_id, stars)
         return
 
-    elif data == "voicepush_quatsch":
-        bot.answer_callback_query(call.id)
-        try:
-            bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
-        except Exception:
-            pass
-        start_quatschen(chat_id)
-        return
-
     else:
         bot.answer_callback_query(call.id)
 
@@ -7768,14 +7745,12 @@ def get_or_create_voice_push_schedule(chat_id: int) -> dict:
 def send_voice_push(chat_id: int):
     """Sendet eine personalisierte Voice-Push-Nachricht als echte Sprachnachricht."""
     text = _voice_push_pick_template(chat_id)
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🗣️ Jetzt quatschen", callback_data="voicepush_quatsch"))
     try:
         audio = text_to_speech_stream(text, chat_id)
-        bot.send_voice(chat_id, audio, reply_markup=markup)
+        bot.send_voice(chat_id, audio)
     except Exception as e:
         log.warning(f"Voice push TTS failed for {chat_id}, sende als Text: {e}")
-        bot.send_message(chat_id, f"🎤 {text}", reply_markup=markup)
+        bot.send_message(chat_id, f"🎤 {text}")
 
 
 def broadcast_voice_pushes() -> dict:
