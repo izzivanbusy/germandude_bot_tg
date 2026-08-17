@@ -1866,12 +1866,12 @@ def get_gem_system_prompt_hint(gem) -> str:
         f"Nicht erzwungen — nur wenn es sich organisch ergibt."
     )
 
-NPC_SPEED = 1.15   # Flat natural speed — Felix spricht wie ein echter Berliner
+SPEED_MAP = {"A1": 0.8, "A2": 0.85, "B1": 0.95, "B2": 1.0, "C1": 1.05}
 
 MAX_TURNS = {"A1": 5, "A2": 5, "B1": 8, "B2": 8, "C1": 10}
 
 def get_speed(level):
-    return NPC_SPEED
+    return SPEED_MAP.get(level, 0.95)
 
 def max_turns_for_level(level):
     return MAX_TURNS.get(level, 8)
@@ -1920,12 +1920,7 @@ def text_to_speech_stream(text, chat_id=None):
             model="gpt-4o-mini-tts",
             voice=voice,
             input=text[:4000],  # API limit safety
-            speed=speed,
-            instructions=(
-                "Sprich natürlich und flüssig — normales Berliner Gesprächstempo, "
-                "nicht zu langsam, nicht roboterhaft. Direkter, freundlicher Ton. "
-                "Anglizismen wie cool, okay, sorry, wow englisch aussprechen."
-            )
+            speed=speed
         )
         audio_file = BytesIO(response.read())
         audio_file.name = "voice.ogg"
@@ -2639,65 +2634,37 @@ def create_stripe_checkout(chat_id):
     return f"{STRIPE_PAYMENT_LINK}?client_reference_id={chat_id}"
 
 def send_paywall(chat_id):
-    uid = str(chat_id)
-    if uid in user_data:
-        user_data[uid]["paywall_hits"] = user_data[uid].get("paywall_hits", 0) + 1
-        save_users(user_data)
-    """Send paywall message with Stripe checkout button."""
+    """Freundliche Paywall — Felix-Stil, keine Corporate-Sprache."""
+    import random as _r
     uid  = str(chat_id)
     user = user_data.get(uid, {})
     name = user.get("name", "")
-    xp   = user.get("user_stats", {}).get("xp", 0)
-    streak = user.get("user_stats", {}).get("streak", 0)
+    name_part = f" {name}" if name else ""
+    if uid in user_data:
+        user_data[uid]["paywall_hits"] = user_data[uid].get("paywall_hits", 0) + 1
+        save_users(user_data)
 
     checkout_url = create_stripe_checkout(chat_id)
-
     ref_link  = BOT_LINK + f"?start=ref_{chat_id}"
-    share_msg = quote(
-        "Ich übe gerade Deutsch mit meinem deutschen Kumpel im Chat — probier's mal aus! 🇩🇪\n" + ref_link
-    )
+    share_msg = quote("Ich übe Deutsch mit German Dude Bot 🇩🇪\n" + ref_link)
     share_url = f"https://t.me/share/url?url={quote(ref_link)}&text={share_msg}"
 
-    discount_code = user_data.get(uid, {}).get("discount_code")
-    price_label   = "€20/Monat"
-    if discount_code and discount_code in DISCOUNT_CODES:
-        price_label = DISCOUNT_CODES[discount_code]["label"]
+    FELIX_BYE = [
+        f"Du{name_part}, ich muss jetzt kurz weg! 😅 Hab noch was Dringendes... Du kannst in der Zwischenzeit Premium holen — dann hab ich viel mehr Zeit für dich und muss nicht so viel nebenbei schuften 😄 Sonst quatschen wir morgen weiter! 👋",
+        f"Ey{name_part}, ich muss gleich los — sorry! 🏃 Mit Premium können wir so lange reden wie wir wollen. Bis morgen! 😊",
+        f"Ich muss kurz Pause machen{name_part} 😅 Mit Premium wären wir unbegrenzt connected. Bis später! 👋",
+        f"Hm{name_part}, ich muss jetzt wirklich abhauen 😄 Morgen reden wir weiter. Oder du holst dir Premium, dann hab ich immer Zeit für dich. 💪",
+    ]
+    text = _r.choice(FELIX_BYE)
+    last_bot_text[chat_id] = text
 
     markup = InlineKeyboardMarkup()
     if checkout_url:
-        markup.add(InlineKeyboardButton(
-            f"💳 Jetzt Premium — {price_label}",
-            url=checkout_url
-        ))
-    markup.add(InlineKeyboardButton(
-        "⭐ Mit Telegram Stars zahlen — 1500 Stars",
-        callback_data="pay_stars"
-    ))
-    markup.add(InlineKeyboardButton(
-        "🎁 Freunde einladen & 3 Tage gratis sichern",
-        url=share_url
-    ))
+        markup.add(InlineKeyboardButton("🎓 Premium — €25/Monat", url=checkout_url))
+    markup.add(InlineKeyboardButton("⭐ Mit Stars zahlen — 2000 Stars", callback_data="pay_stars"))
+    markup.add(InlineKeyboardButton("🎁 Freund einladen → 3 Tage gratis", url=share_url))
     markup.add(translate_btn(chat_id))
-
-    xp_streak_line = f"Du hast bereits *{xp} XP* gesammelt"
-    if streak > 1:
-        xp_streak_line += f" und einen *{streak}-Tage-Streak* aufgebaut"
-    xp_streak_line += " — schade, das jetzt zu unterbrechen.\n\n"
-
-    paywall_text = (
-        f"🔒 *Kein Zugang — Trial abgelaufen oder nicht aktiviert.*\n\n"
-        + xp_streak_line +
-        f"Mit *Premium* ({price_label}) bekommst du:\n"
-        f"✅ Unbegrenzte Gespräche & Szenarien\n"
-        f"✅ Alle Niveaus A1–C2\n"
-        f"✅ Voice-Nachrichten & Übersetzungen\n"
-        f"✅ XP-System, Achievements & Shadowing\n"
-        f"✅ Jederzeit kündbar\n\n"
-        f"_Hast du einen Code? Tippe:_ /freecode DEINCODE\n"
-        f"_Dein Streak und deine XP bleiben erhalten._"
-    )
-    last_bot_text[chat_id] = paywall_text
-    bot.send_message(chat_id, paywall_text, parse_mode="Markdown", reply_markup=markup)
+    bot.send_message(chat_id, text, reply_markup=markup)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2770,7 +2737,7 @@ def handle_upgrade(message):
         # ── Free → Premium oder Premium Plus ─────────────────────────────
         text = (
             f"💎 *Pläne & Preise*\n\n"
-            f"🎓 *Premium — €20/Monat*\n"
+            f"🎓 *Premium — €25/Monat*\n"
             f"Für alle die Deutsch wirklich lernen wollen.\n"
             f"{premium_values_str}\n\n"
             f"🎓 *Premium — €25/Monat*\n"
@@ -2779,8 +2746,8 @@ def handle_upgrade(message):
             "_Hast du einen Code? Tippe:_ /freecode DEINCODE"
         )
         if plus_checkout_url:
-            markup.add(InlineKeyboardButton("🎓 Premium — €20/Monat", url=plus_checkout_url))
-        markup.add(InlineKeyboardButton("⭐ Premium mit Stars — 1500 Stars", callback_data="pay_stars"))
+            markup.add(InlineKeyboardButton("🎓 Premium — €25/Monat", url=plus_checkout_url))
+        markup.add(InlineKeyboardButton("⭐ Premium mit Stars — 2000 Stars", callback_data="pay_stars"))
         markup.add(InlineKeyboardButton("🎓 Premium — €25/Monat", callback_data="pay_plus"))
         markup.add(InlineKeyboardButton("⭐ Plus mit Stars — 2000 Stars", callback_data="pay_stars_plus"))
 
@@ -2792,7 +2759,7 @@ def handle_upgrade(message):
 # ═══════════════════════════════════════════════════════════════════════════
 #  DAILY FREE TIER + TWO-TIER GATE SYSTEM
 #  Free: 3 Gespräche/Tag (Szenarien + Quatschen, gemeinsamer Pool)
-#  Premium (€20): Szenarien unlimitiert | Quatschen NICHT enthalten
+#  Premium (€25): Alles drin
 #  Premium (€25): Alles drin
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -2864,7 +2831,7 @@ def send_daily_limit_paywall(chat_id: int):
         f"{xp_line} — schad das jetzt zu stoppen.\n\n"
         "📅 *Morgen gibt's automatisch ein neues.* Versprochen.\n\n"
         "Oder jetzt upgraden:\n\n"
-        "🎓 *Premium — €20/Monat*\n"
+        "🎓 *Premium — €25/Monat*\n"
         "Unbegrenzte Gespräche & Übungen — alles was du zum Lernen brauchst.\n\n"
         "🎓 *Premium — €25/Monat*\n"
         "Nicht nur Deutsch lernen. In Deutschland ankommen.\n"
@@ -2874,7 +2841,7 @@ def send_daily_limit_paywall(chat_id: int):
     last_bot_text[chat_id] = text
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🎓 Premium — €25/Monat", callback_data="pay_plus"))
-    markup.add(InlineKeyboardButton("🎓 Premium — €20/Monat", url=checkout_url))
+    markup.add(InlineKeyboardButton("🎓 Premium — €25/Monat", url=checkout_url))
     markup.add(InlineKeyboardButton("⭐ Stars zahlen", callback_data="pay_stars"))
     markup.add(InlineKeyboardButton("🎁 Freunde einladen → 3 Tage gratis", url=share_url))
     markup.add(translate_btn(chat_id))
@@ -3978,14 +3945,13 @@ def handle_topic_callback(call):
 
     bot.answer_callback_query(call.id)
 
-    # Paywall check
-    if not is_premium(chat_id):
-        send_paywall(chat_id)
+    # Gate: Premium immer rein, Free 1/Tag, sonst → freundliche Paywall
+    if not gate_scenario(chat_id):
         return
 
-    # Special mode: Quatschen — Premium Plus only
+    # Quatschen: Premium only (free tier gets friendly paywall already handled above)
     if goal == "Quatschen":
-        if not is_premium_plus(chat_id):
+        if not is_premium(chat_id):
             qtext = (
                 "👑 Quatsch Modus ist Teil von Premium Plus.\n\n"
                 "Kein Skript, kein Thema, kein Druck — einfach reden.\n"
