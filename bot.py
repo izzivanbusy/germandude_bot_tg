@@ -1866,12 +1866,12 @@ def get_gem_system_prompt_hint(gem) -> str:
         f"Nicht erzwungen — nur wenn es sich organisch ergibt."
     )
 
-SPEED_MAP = {"A1": 0.8, "A2": 0.85, "B1": 0.95, "B2": 1.0, "C1": 1.05}
+NPC_SPEED = 1.15   # Flat natural speed — Felix spricht wie ein echter Berliner
 
 MAX_TURNS = {"A1": 5, "A2": 5, "B1": 8, "B2": 8, "C1": 10}
 
 def get_speed(level):
-    return SPEED_MAP.get(level, 0.95)
+    return NPC_SPEED
 
 def max_turns_for_level(level):
     return MAX_TURNS.get(level, 8)
@@ -1920,7 +1920,12 @@ def text_to_speech_stream(text, chat_id=None):
             model="gpt-4o-mini-tts",
             voice=voice,
             input=text[:4000],  # API limit safety
-            speed=speed
+            speed=speed,
+            instructions=(
+                "Sprich natürlich und flüssig — normales Berliner Gesprächstempo, "
+                "nicht zu langsam, nicht roboterhaft. Direkter, freundlicher Ton. "
+                "Anglizismen wie cool, okay, sorry, wow englisch aussprechen."
+            )
         )
         audio_file = BytesIO(response.read())
         audio_file.name = "voice.ogg"
@@ -7598,6 +7603,15 @@ Nur diese Zeilen, nichts sonst.""",
         send_donation_stars_invoice(chat_id, stars)
         return
 
+    elif data == "voicepush_quatsch":
+        bot.answer_callback_query(call.id)
+        try:
+            bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        except Exception:
+            pass
+        start_quatschen(chat_id)
+        return
+
     else:
         bot.answer_callback_query(call.id)
 
@@ -7745,12 +7759,14 @@ def get_or_create_voice_push_schedule(chat_id: int) -> dict:
 def send_voice_push(chat_id: int):
     """Sendet eine personalisierte Voice-Push-Nachricht als echte Sprachnachricht."""
     text = _voice_push_pick_template(chat_id)
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🗣️ Jetzt quatschen", callback_data="voicepush_quatsch"))
     try:
         audio = text_to_speech_stream(text, chat_id)
-        bot.send_voice(chat_id, audio)
+        bot.send_voice(chat_id, audio, reply_markup=markup)
     except Exception as e:
         log.warning(f"Voice push TTS failed for {chat_id}, sende als Text: {e}")
-        bot.send_message(chat_id, f"🎤 {text}")
+        bot.send_message(chat_id, f"🎤 {text}", reply_markup=markup)
 
 
 def broadcast_voice_pushes() -> dict:
