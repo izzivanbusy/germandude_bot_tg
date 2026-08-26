@@ -3974,13 +3974,14 @@ def handle_topic_callback(call):
 
     bot.answer_callback_query(call.id)
 
-    # Gate: Premium → immer rein. Free → 1 Gespräch/Tag. Sonst → freundliche Paywall.
-    if not gate_scenario(chat_id):
+    # Paywall check
+    if not is_premium(chat_id):
+        send_paywall(chat_id)
         return
 
-    # Quatschen: Premium only
+    # Special mode: Quatschen — Premium Plus only
     if goal == "Quatschen":
-        if not is_premium(chat_id):
+        if not is_premium_plus(chat_id):
             qtext = (
                 "👑 Quatsch Modus ist Teil von Premium Plus.\n\n"
                 "Kein Skript, kein Thema, kein Druck — einfach reden.\n"
@@ -5972,6 +5973,42 @@ def handle_translate(message):
         parse_mode="Markdown", reply_markup=InlineKeyboardMarkup())
 
 
+def _felix_freetext_reply(chat_id: int, text: str):
+    """Felix antwortet menschlich auf alles — nie 'Ich hab dich nicht verstanden'."""
+    uid  = str(chat_id)
+    name = user_data.get(uid, {}).get("name", "")
+    lang = user_data.get(uid, {}).get("native_language", "English")
+    user_story = user_data.get(uid, {}).get("user_story", [])
+    story_note = "\n".join(f"- {f}" for f in user_story[-10:]) if user_story else ""
+
+    try:
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=120,
+            system=(
+                f"Du bist Felix — ein echter Berliner Freund, kein Bot. "
+                f"Der User heißt {name or 'du'}. "
+                f"{'Was du über ihn weißt: ' + story_note if story_note else ''}\n\n"
+                f"Der User hat dir gerade etwas geschrieben. Antworte kurz, direkt und menschlich. "
+                f"Niemals: 'Ich hab dich nicht verstanden' oder 'Bitte nutze die Buttons'. "
+                f"Wenn er frustriert oder genervt ist — sei empathisch, nicht stur. "
+                f"Wenn er etwas Zufälliges schreibt — reagiere wie ein Freund. "
+                f"1-2 Sätze. Auf Deutsch. Kein Roboter-Ton."
+            ),
+            messages=[{"role": "user", "content": text}]
+        )
+        reply = resp.content[0].text.strip()
+    except Exception:
+        reply = f"Hey{' ' + name if name else ''}! Was ist los? 😄"
+
+    # Send as voice + text
+    send_reply(chat_id, reply, voice=True)
+
+    # After natural reply, offer topics subtly
+    time.sleep(0.5)
+    send_topic_buttons(chat_id)
+
+
 @bot.message_handler(func=lambda message: True)
 def handle(message):
     # Skip non-text messages — they have dedicated handlers
@@ -6029,7 +6066,8 @@ def handle(message):
         elif text == "7":
             restart_chat(chat_id)
         else:
-            show_menu(chat_id)
+            # User typed freely instead of clicking — Felix responds naturally
+            _felix_freetext_reply(chat_id, text)
         return
 
     if mode == "shadowing":
@@ -6795,7 +6833,7 @@ def handle_voice(message):
             if name:
                 handle_onboarding(chat_id, name)
             else:
-                bot.send_message(chat_id, "Ich hab dich nicht verstanden 😅 Wie heißt du?")
+                bot.send_message(chat_id, "Wie heißt du? 😊")
         elif state.get("step") == "intro_reply":
             # Any voice reply counts — trigger the closing
             handle_onboarding(chat_id, "_voice_reply_")
@@ -6814,7 +6852,7 @@ def handle_voice(message):
             )
             handle_answer(chat_id, answer)
         else:
-            bot.send_message(chat_id, "Ich hab dich nicht verstanden 😅 Sag bitte A, B oder C.")
+            bot.send_message(chat_id, "Tipp einfach A, B oder C 🙂")
         return
 
     # ── GEM EXERCISE CHECK ───────────────────────────────────────────────────
@@ -6825,7 +6863,7 @@ def handle_voice(message):
             bot.send_message(chat_id, f"_📝 Du hast gesagt: {user_text}_", parse_mode="Markdown")
             check_gem_exercise(chat_id, user_text, state["gem_text"])
         else:
-            bot.send_message(chat_id, "Ich hab dich nicht verstanden 😅 Versuch's nochmal!")
+            bot.send_message(chat_id, "Versuch's nochmal — A, B oder C 🙂")
         return
 
     # ── QUATSCHEN MODE ────────────────────────────────────────────────────────
@@ -6835,8 +6873,7 @@ def handle_voice(message):
             handle_quatschen_message(chat_id, user_text)
         else:
             bot.send_message(chat_id,
-                "Ich hab dich leider nicht verstanden 😅\n"
-                "Versuch es nochmal — sprich etwas lauter oder näher ans Mikro!")
+                "Nichts gehört 😅 Versuch es nochmal — etwas lauter oder näher ans Mikro!")
         return
 
     # ── CHAT MODE ─────────────────────────────────────────────────────────────
