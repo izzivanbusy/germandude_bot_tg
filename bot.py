@@ -3974,14 +3974,13 @@ def handle_topic_callback(call):
 
     bot.answer_callback_query(call.id)
 
-    # Paywall check
-    if not is_premium(chat_id):
-        send_paywall(chat_id)
+    # Gate: Premium → rein. Free → 1/Tag gratis. Sonst → freundliche Paywall.
+    if not gate_scenario(chat_id):
         return
 
-    # Special mode: Quatschen — Premium Plus only
+    # Quatschen: Premium only
     if goal == "Quatschen":
-        if not is_premium_plus(chat_id):
+        if not is_premium(chat_id):
             qtext = (
                 "👑 Quatsch Modus ist Teil von Premium Plus.\n\n"
                 "Kein Skript, kein Thema, kein Druck — einfach reden.\n"
