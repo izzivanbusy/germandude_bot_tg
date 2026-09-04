@@ -2000,14 +2000,20 @@ def get_translation(chat_id, text_to_translate):
     user = user_data.get(str(chat_id), {})
     native_lang = user.get("native_language") or "Englisch"
 
+    # Clean text: strip emoji-lines and existing translation labels
+    import re as _re
+    clean = _re.sub(r'^(English|Englisch|Русский|Türkçe|Arabic|Español|Français|Polski):\s*', '',
+                    text_to_translate, flags=_re.MULTILINE | _re.IGNORECASE).strip()
+
     response = claude.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=500,
+        max_tokens=600,
         system=(
-            f"You are a translator. Translate the following text into {native_lang}. "
-            f"Return ONLY the translation — no explanations, no comments, nothing else."
+            f"Output ONLY a {native_lang} translation of the text the user sends. "
+            f"Nothing else — no preamble, no explanation, no meta-commentary, no role description. "
+            f"Just the translated text. If you cannot translate, output the original text as-is."
         ),
-        messages=[{"role": "user", "content": text_to_translate}]
+        messages=[{"role": "user", "content": clean or text_to_translate}]
     )
     return response.content[0].text.strip()
 
@@ -3974,13 +3980,14 @@ def handle_topic_callback(call):
 
     bot.answer_callback_query(call.id)
 
-    # Gate: Premium → rein. Free → 1/Tag gratis. Sonst → freundliche Paywall.
-    if not gate_scenario(chat_id):
+    # Paywall check
+    if not is_premium(chat_id):
+        send_paywall(chat_id)
         return
 
-    # Quatschen: Premium only
+    # Special mode: Quatschen — Premium Plus only
     if goal == "Quatschen":
-        if not is_premium(chat_id):
+        if not is_premium_plus(chat_id):
             qtext = (
                 "👑 Quatsch Modus ist Teil von Premium Plus.\n\n"
                 "Kein Skript, kein Thema, kein Druck — einfach reden.\n"
