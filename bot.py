@@ -59,22 +59,18 @@ def _send_message_with_translate(chat_id, text, **kwargs):
 bot.send_message = _send_message_with_translate
 
 bot.set_my_commands([
-    BotCommand("info",         "So funktioniert der Bot ℹ️"),
-    BotCommand("start",        "Start"),
-    BotCommand("themen",       "Themen wählen 🎯"),
-    BotCommand("level",        "Mein Niveau"),
-    BotCommand("achievements", "Meine Erfolge 🏅"),
-    BotCommand("progress",     "Mein Fortschritt"),
-    BotCommand("errors",       "Meine Fehler"),
-    BotCommand("practice",     "Übungen"),
-    BotCommand("flashcards",   "Vokabelkarten 🃏"),
-    BotCommand("gem",          "German Gem 💎"),
-    BotCommand("share",        "Bot teilen 🤝"),
-    BotCommand("danke",        "Danke sagen 🙏"),
-    BotCommand("upgrade",      "Pläne & Preise 💎"),
-    BotCommand("restart",      "Chat neu starten"),
-    BotCommand("integration",  "Leben in Deutschland 🏛️"),
-    BotCommand("support",      "Support 🆘"),
+    BotCommand("info",        "So funktioniert der Bot ℹ️"),
+    BotCommand("start",       "Start"),
+    BotCommand("themen",      "Themen wählen 🎯"),
+    BotCommand("level",       "Mein Niveau"),
+    BotCommand("flashcards",  "Vokabelkarten 🃏"),
+    BotCommand("gem",         "German Gem 💎"),
+    BotCommand("share",       "Bot teilen 🤝"),
+    BotCommand("danke",       "Danke sagen 🙏"),
+    BotCommand("upgrade",     "Pläne & Preise 💎"),
+    BotCommand("restart",     "Chat neu starten"),
+    BotCommand("integration", "Leben in Deutschland 🏛️"),
+    BotCommand("support",     "Support 🆘"),
 ])
 
 # PERSISTENT STORAGE
@@ -99,14 +95,10 @@ ALL_GOALS = [
 ]
 
 def onboarding_complete(chat_id) -> bool:
-    """True if user has completed onboarding (name + language + test)."""
+    """True if user has completed onboarding (name given)."""
     uid  = str(chat_id)
     user = user_data.get(uid, {})
-    return bool(
-        user.get("name") and
-        user.get("native_language") and
-        user.get("level")
-    )
+    return bool(user.get("name"))
 
 
 def _require_onboarding(chat_id) -> bool:
@@ -2525,7 +2517,7 @@ if STRIPE_SECRET_KEY:
     stripe.api_key = STRIPE_SECRET_KEY
 
 DISCOUNT_CODES = {
-    "RABATT50": {"percent": 50, "price_eur": 10, "label": "€10/Monat (50% Rabatt)", "used_by": None},
+    "RABATT50": {"percent": 50, "price_eur": 12.50, "label": "€12.50/Monat (50% Rabatt)", "used_by": None},
 }
 
 def is_premium(chat_id):
@@ -2632,7 +2624,7 @@ def send_paywall(chat_id):
     share_url = f"https://t.me/share/url?url={quote(ref_link)}&text={share_msg}"
 
     discount_code = user_data.get(uid, {}).get("discount_code")
-    price_label   = "€20/Monat"
+    price_label   = "€25/Monat"
     if discount_code and discount_code in DISCOUNT_CODES:
         price_label = DISCOUNT_CODES[discount_code]["label"]
 
@@ -2719,14 +2711,14 @@ def handle_upgrade(message):
     else:
         # ── Free → Premium ────────────────────────────────────────────────
         text = (
-            f"💎 *Premium — €20/Monat*\n\n"
+            f"💎 *Premium — €25/Monat*\n\n"
             f"Für alle die Deutsch wirklich lernen wollen.\n\n"
             f"{premium_values_str}\n\n"
             "Kündbar jederzeit.\n\n"
             "_Hast du einen Code? Tippe:_ /freecode DEINCODE"
         )
         if checkout_url:
-            markup.add(InlineKeyboardButton("🎓 Premium — €20/Monat", url=checkout_url))
+            markup.add(InlineKeyboardButton("🎓 Premium — €25/Monat", url=checkout_url))
         markup.add(InlineKeyboardButton("⭐ Mit Stars — 1500 Stars", callback_data="pay_stars"))
 
     markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
@@ -2737,7 +2729,7 @@ def handle_upgrade(message):
 # ═══════════════════════════════════════════════════════════════════════════
 #  DAILY FREE TIER + GATE SYSTEM
 #  Free: 1 Gespräch/Tag (Szenarien + Quatschen, gemeinsamer Pool)
-#  Premium (€20): Alles unlimitiert inkl. Quatschen
+#  Premium (€25): Alles unlimitiert inkl. Quatschen
 # ═══════════════════════════════════════════════════════════════════════════
 
 FREE_DAILY_LIMIT = 1
@@ -2782,8 +2774,16 @@ def gate_quatschen(chat_id: int) -> bool:
     send_daily_limit_paywall(chat_id)
     return False
 
+DAILY_LIMIT_GOODBYE_POOL = [
+    "Das war heute schon — aber morgen bin ich wieder da. 📅",
+    "Für heute war's das. Morgen geht's weiter, ich freu mich drauf! 💪",
+    "Guter Einsatz heute! Ich bin morgen wieder hier. 🙌",
+    "So, das war's für heute. Schlaf gut — morgen üben wir weiter. 😄",
+    "Heute fertig, morgen fresh. Ich freu mich auf dich! ✌️",
+]
+
 def send_daily_limit_paywall(chat_id: int):
-    """Paywall nach 1 kostenlosem Gespräch."""
+    """Paywall nach 1 kostenlosem Gespräch — mit Felix goodbye pool."""
     uid    = str(chat_id)
     user   = user_data.get(uid, {})
     name   = user.get("name", "")
@@ -2795,16 +2795,19 @@ def send_daily_limit_paywall(chat_id: int):
     ref_link     = BOT_LINK + f"?start=ref_{chat_id}"
     share_msg    = quote("Ich übe Deutsch mit German Dude Bot 🇩🇪\n" + ref_link)
     share_url    = f"https://t.me/share/url?url={quote(ref_link)}&text={share_msg}"
+
+    goodbye_line = random.choice(DAILY_LIMIT_GOODBYE_POOL)
     xp_line = f"Du hast schon *{xp} XP*"
     if streak > 1:
         xp_line += f" und einen *{streak}-Tage-Streak*"
+
+    name_str = f", {name}" if name else ""
     text = (
-        f"🔒 Dein *kostenloses Gespräch* für heute ist genutzt"
-        f"{', ' + name if name else ''}!\n\n"
+        f"🔒 Dein *kostenloses Gespräch* für heute ist genutzt{name_str}!\n\n"
         f"{xp_line} — schad das jetzt zu stoppen.\n\n"
-        "📅 *Morgen gibt's automatisch ein neues.* Versprochen.\n\n"
+        f"{goodbye_line}\n\n"
         "Oder jetzt upgraden:\n\n"
-        "🎓 *Premium — €20/Monat*\n"
+        "🎓 *Premium — €25/Monat*\n"
         "Unbegrenzte Gespräche & Übungen — alles was du zum Lernen brauchst.\n"
         "Kündbar jederzeit.\n\n"
         "_Hast du einen Code? /freecode DEINCODE_"
@@ -2812,7 +2815,7 @@ def send_daily_limit_paywall(chat_id: int):
     last_bot_text[chat_id] = text
     markup = InlineKeyboardMarkup()
     if checkout_url:
-        markup.add(InlineKeyboardButton("🎓 Premium — €20/Monat", url=checkout_url))
+        markup.add(InlineKeyboardButton("🎓 Premium — €25/Monat", url=checkout_url))
     markup.add(InlineKeyboardButton("⭐ Mit Stars zahlen — 1500 Stars", callback_data="pay_stars"))
     markup.add(InlineKeyboardButton("🎁 Freunde einladen → 3 Tage gratis", url=share_url))
     markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
@@ -3551,14 +3554,45 @@ TOPIC_LIST = [
     ("🗣️ Quatschen",               "Quatschen"),
 ]
 
+FREE_TIER_TOPIC_MSG = {
+    "en":   "💬 Free: 1 conversation/day — pick your topic:",
+    "ru":   "💬 Бесплатно: 1 разговор/день — выбери тему:",
+    "uk":   "💬 Безплатно: 1 розмова/день — обери тему:",
+    "tr":   "💬 Ücretsiz: 1 konuşma/gün — konunu seç:",
+    "ar":   "💬 مجاني: محادثة واحدة/يوم — اختر موضوعك:",
+    "es":   "💬 Gratis: 1 conversación/día — elige tu tema:",
+    "fr":   "💬 Gratuit: 1 conversation/jour — choisis ton thème:",
+    "pl":   "💬 Bezpłatnie: 1 rozmowa/dzień — wybierz temat:",
+    "de":   "💬 Kostenlos: 1 Gespräch/Tag — wähl dein Thema:",
+    "pt":   "💬 Grátis: 1 conversa/dia — escolhe o teu tema:",
+    "it":   "💬 Gratis: 1 conversazione/giorno — scegli il tema:",
+    "ro":   "💬 Gratuit: 1 conversație/zi — alege subiectul:",
+    "zh":   "💬 免费：每天1次对话 — 选择你的主题：",
+    "vi":   "💬 Miễn phí: 1 cuộc trò chuyện/ngày — chọn chủ đề:",
+    "fa":   "💬 رایگان: ۱ مکالمه/روز — موضوع خود را انتخاب کنید:",
+    "hi":   "💬 मुफ़्त: 1 बातचीत/दिन — अपना विषय चुनें:",
+    "id":   "💬 Gratis: 1 percakapan/hari — pilih topikmu:",
+    "th":   "💬 ฟรี: 1 บทสนทนา/วัน — เลือกหัวข้อของคุณ:",
+}
+
 def send_topic_buttons(chat_id):
+    uid    = str(chat_id)
+    user   = user_data.get(uid, {})
     markup = InlineKeyboardMarkup(row_width=2)
     buttons = [
         InlineKeyboardButton(label, callback_data=f"topic:{i}")
         for i, (label, _) in enumerate(TOPIC_LIST)
     ]
     markup.add(*buttons)
-    bot.send_message(chat_id, "🎯 Welches Thema willst du heute üben?", reply_markup=markup)
+
+    if is_premium(chat_id):
+        header = "🎯 Was steht heute an?"
+    else:
+        lang = (user.get("native_language") or "de").lower()[:2]
+        free_hint = FREE_TIER_TOPIC_MSG.get(lang, FREE_TIER_TOPIC_MSG["en"])
+        header = f"🎯 Was steht heute an?\n\n{free_hint}"
+
+    bot.send_message(chat_id, header, reply_markup=markup)
 
 def send_goal_buttons(chat_id):
     markup = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -4983,7 +5017,7 @@ def info_cmd(message):
         "🔁 /restart — neues Gespräch starten\n\n"
         "💎 *Pläne:*\n"
         "🔓 Free: 1 Gespräch/Tag + tägliche Gems\n"
-        "🎓 Premium (€20/Mo): unlimitierte Gespräche, alle Szenarien & Quatschen\n"
+        "🎓 Premium (€25/Mo): unlimitierte Gespräche, alle Szenarien & Quatschen\n"
         "→ /upgrade für Details & Preise\n"
         + tier +
         "\n\nFragen? /support"
@@ -5223,9 +5257,8 @@ def handle_adminstats(message):
     # Stufe 1 — Joined (= alle)
     f_joined = total
 
-    # Stufe 2 — Onboarding komplett (Name + Sprache + Ziel gesetzt)
-    f_onboarded = sum(1 for u in users.values()
-                      if u.get("name") and u.get("native_language") and u.get("goal"))
+    # Stufe 2 — Onboarding komplett (Name gegeben)
+    f_onboarded = sum(1 for u in users.values() if u.get("name"))
 
     # Stufe 3 — Mindestens 1 Gespräch geführt
     f_talked = sum(1 for u in users.values() if u.get("conversations_started", 0) >= 1)
@@ -5322,7 +5355,7 @@ def handle_adminstats(message):
         f"   ⌀ Gespräche/User: {avg_convos}",
         "",
         "🎤 *Voice Pushes (diese Woche)*",
-        f"   Plus-User mit Schedule: {vp_scheduled}",
+        f"   Premium-User mit Schedule: {vp_scheduled}",
         f"   Pushes gesendet:        {vp_sent_week}",
         "",
         "🌍 *Top Sprachen*",
@@ -7354,7 +7387,7 @@ def send_discount_offers_endpoint():
                 f"🎁 Hey {name}!\n\n"
                 f"Du bist jetzt seit {days_since} Tagen dabei — und wir mögen dich.\n\n"
                 f"Deshalb bekommst du heute einmalig *50% Rabatt* auf Premium:\n"
-                f"Nur €10 statt €20 für 30 Tage vollen Zugang.\n\n"
+                f"Nur €12.50 statt €25 für 30 Tage vollen Zugang.\n\n"
                 f"Dein persönlicher Code: *RABATT50*\n"
                 f"👉 Tippe /premium und gib den Code auf der Zahlungsseite ein.\n\n"
                 f"⏰ Dieses Angebot gilt nur einmalig für dich!",
@@ -7397,6 +7430,81 @@ def send_gems_endpoint():
     except Exception as e:
         log.error(f"Gem broadcast error: {e}")
         return jsonify({"error": str(e)}), 500
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  TEXT PUSH — Re-engagement für inaktive Free-User (canon rule 17)
+#  Pool → broadcast_text_pushes() → /send_text_pushes Flask route
+# ═══════════════════════════════════════════════════════════════════════════
+
+TEXT_PUSH_POOL = [
+    "Hast du heute schon Deutsch geübt? Komm, ein kurzes Gespräch dauert 5 Minuten. 🇩🇪",
+    "Ich hab hier eine Aufgabe für dich: Beschreib mir deinen Tag in drei deutschen Sätzen. Los! 💬",
+    "Weißt du, was 'Fingerspitzengefühl' bedeutet? Frag mich — ich erklär's dir. 🤔",
+    "Schnelle Frage: Wie sagst du 'I'm running late' auf Deutsch? Schreib's mal! ⏱️",
+    "Ich frag mich wie's dir geht. Sag mir's auf Deutsch — ich bin neugierig. 😄",
+    "Überrasch mich heute: Beschreib mir deine Küche auf Deutsch. 🍳",
+    "Quick Check: Was heißt 'Vorfreude'? Tippe deine Antwort — kein Schummeln! 📚",
+    "Ein Gespräch heute — das reicht schon. Ich wart' auf dich. 🎤",
+    "Dein Deutsch rostet nicht wenn du übst. Ich bin hier wenn du Lust hast. 🔥",
+    "Guten Morgen! Wie war dein Abend auf Deutsch? Sag mir's. ☀️",
+]
+
+
+def broadcast_text_pushes() -> dict:
+    """Sendet Text-Pushes an inaktive User (2–7 Tage nicht aktiv, mind. 1 Gespräch)."""
+    users = load_users()
+    now   = datetime.now()
+    sent = skipped = 0
+
+    for uid, user in users.items():
+        # Nur User die schon mal geübt haben
+        if user.get("conversations_started", 0) < 1:
+            skipped += 1; continue
+
+        # Nur inaktiv 2–7 Tage
+        last_active = user.get("last_active")
+        if not last_active:
+            skipped += 1; continue
+        try:
+            days_inactive = (now - datetime.fromisoformat(last_active)).days
+        except Exception:
+            skipped += 1; continue
+
+        if not (2 <= days_inactive <= 7):
+            skipped += 1; continue
+
+        # Noch kein Push heute geschickt
+        last_push = user.get("last_text_push")
+        if last_push and last_push == now.strftime("%Y-%m-%d"):
+            skipped += 1; continue
+
+        msg = random.choice(TEXT_PUSH_POOL)
+        try:
+            bot.send_message(int(uid), msg)
+            user_data[uid]["last_text_push"] = now.strftime("%Y-%m-%d")
+            save_users(user_data)
+            sent += 1
+            log.info(f"Text push sent to {uid}")
+        except Exception as e:
+            log.warning(f"Text push failed for {uid}: {e}")
+            skipped += 1
+
+    return {"sent": sent, "skipped": skipped}
+
+
+@flask_app.route("/send_text_pushes", methods=["POST"])
+def send_text_pushes_endpoint():
+    """Täglich via Railway Cron aufrufen. Sendet Text-Pushes an inaktive Free-User."""
+    auth = request.headers.get("X-Cron-Secret", "")
+    if auth != CRON_SECRET:
+        return jsonify({"error": "unauthorized"}), 401
+    try:
+        result = broadcast_text_pushes()
+        return jsonify({"ok": True, **result}), 200
+    except Exception as e:
+        log.error(f"Text push broadcast error: {e}")
+        return jsonify({"error": str(e)}), 500
+
 
 @flask_app.route("/send_voice_pushes", methods=["POST"])
 def send_voice_pushes_endpoint():
