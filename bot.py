@@ -46,21 +46,29 @@ _orig_send_message = bot.send_message
 
 def _send_message_with_translate(chat_id, text, **kwargs):
     """Wrap bot.send_message to auto-inject übersetzen button on plain messages."""
+    # Store last bot text regardless
     if isinstance(text, str):
         last_bot_text[chat_id] = text
+    # Don't inject if message already has buttons or is a system/keyboard message
     if "reply_markup" not in kwargs or kwargs["reply_markup"] is None:
-        _auto_markup = InlineKeyboardMarkup()
-        _auto_markup.add(translate_btn(chat_id))
-        kwargs["reply_markup"] = _auto_markup
+        translate_btn = InlineKeyboardMarkup()
+        translate_btn.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
+        kwargs["reply_markup"] = translate_btn
     return _orig_send_message(chat_id, text, **kwargs)
 
 bot.send_message = _send_message_with_translate
 
 bot.set_my_commands([
-    BotCommand("info",         "Instruktion 📖"),
+    BotCommand("info",         "So funktioniert der Bot ℹ️"),
     BotCommand("start",        "Start"),
     BotCommand("themen",       "Themen wählen 🎯"),
+    BotCommand("level",        "Mein Niveau"),
+    BotCommand("achievements", "Meine Erfolge 🏅"),
+    BotCommand("progress",     "Mein Fortschritt"),
+    BotCommand("errors",       "Meine Fehler"),
+    BotCommand("practice",     "Übungen"),
     BotCommand("flashcards",   "Vokabelkarten 🃏"),
+    BotCommand("gem",          "German Gem 💎"),
     BotCommand("share",        "Bot teilen 🤝"),
     BotCommand("danke",        "Danke sagen 🙏"),
     BotCommand("upgrade",      "Pläne & Preise 💎"),
@@ -142,7 +150,7 @@ def ensure_user(chat_id):
             "user_stats": {"xp": 0, "level": 1, "streak": 0, "last_active": now, "total_scenarios": 0},
             "trial_start": None, "premium": False, "trial_code_used": None,
             "stripe_customer_id": None, "stripe_subscription_id": None,
-            
+            "premium_plus": False, "premium_plus_until": None,
             "daily_convos": {}, "voice_push": {},
             # Tracking fields
             "joined": now, "message_count": 0, "paywall_hits": 0,
@@ -172,6 +180,8 @@ def ensure_user(chat_id):
         user_data[uid].setdefault("features_used", {})
         user_data[uid].setdefault("conversations_started", 0)
         user_data[uid].setdefault("test_completed", False)
+        user_data[uid].setdefault("premium_plus", False)
+        user_data[uid].setdefault("premium_plus_until", None)
         user_data[uid].setdefault("daily_convos", {})
         user_data[uid].setdefault("voice_push", {})
     # Update activity on every interaction
@@ -1953,7 +1963,7 @@ def send_reply(chat_id, text, voice=True):
 
     # Text-only mode: user sent a text message, bot replies with text + translate button
     translate_markup = InlineKeyboardMarkup()
-    translate_markup.add(translate_btn(chat_id))
+    translate_markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data=f"translate_last"))
     if not voice:
         bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=translate_markup)
         return
@@ -1962,8 +1972,7 @@ def send_reply(chat_id, text, voice=True):
     pending_texts[text_key] = text
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("📄 Text anzeigen", callback_data=f"show_text:{text_key}"))
-    _flag = FLAG_MAP.get(user_data.get(str(chat_id), {}).get("native_language", ""), "🌍")
-    markup.add(InlineKeyboardButton(f"{_flag} übersetzen", callback_data=f"translate:{text_key}"))
+    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data=f"translate:{text_key}"))
 
     try:
         audio = text_to_speech_stream(text, chat_id)
@@ -2000,20 +2009,14 @@ def get_translation(chat_id, text_to_translate):
     user = user_data.get(str(chat_id), {})
     native_lang = user.get("native_language") or "Englisch"
 
-    # Clean text: strip emoji-lines and existing translation labels
-    import re as _re
-    clean = _re.sub(r'^(English|Englisch|Русский|Türkçe|Arabic|Español|Français|Polski):\s*', '',
-                    text_to_translate, flags=_re.MULTILINE | _re.IGNORECASE).strip()
-
     response = claude.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=600,
+        max_tokens=500,
         system=(
-            f"Output ONLY a {native_lang} translation of the text the user sends. "
-            f"Nothing else — no preamble, no explanation, no meta-commentary, no role description. "
-            f"Just the translated text. If you cannot translate, output the original text as-is."
+            f"You are a translator. Translate the following text into {native_lang}. "
+            f"Return ONLY the translation — no explanations, no comments, nothing else."
         ),
-        messages=[{"role": "user", "content": clean or text_to_translate}]
+        messages=[{"role": "user", "content": text_to_translate}]
     )
     return response.content[0].text.strip()
 
@@ -2502,36 +2505,6 @@ ACHIEVEMENT_DEFS = [
 #  PAYWALL / SUBSCRIPTION SYSTEM
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Language → flag emoji mapping for the translate button
-FLAG_MAP = {
-    "English":    "🇬🇧",
-    "Русский":    "🇷🇺",
-    "Українська": "🇺🇦",
-    "Türkçe":     "🇹🇷",
-    "Arabic":     "🇸🇦",
-    "Español":    "🇪🇸",
-    "Français":   "🇫🇷",
-    "Polski":     "🇵🇱",
-    "Deutsch":    "🇩🇪",
-    "Italiano":   "🇮🇹",
-    "Português":  "🇵🇹",
-    "中文":        "🇨🇳",
-    "日本語":       "🇯🇵",
-    "한국어":       "🇰🇷",
-    "हिंदी":       "🇮🇳",
-    "Română":     "🇷🇴",
-    "Čeština":    "🇨🇿",
-    "Magyar":     "🇭🇺",
-}
-
-def translate_btn(chat_id) -> InlineKeyboardButton:
-    """Returns a translate button with the user's language flag, falling back to 🌍."""
-    lang = user_data.get(str(chat_id), {}).get("native_language", "")
-    flag = FLAG_MAP.get(lang, "🌍")
-    label = f"{flag} übersetzen"
-    return InlineKeyboardButton(label, callback_data="translate_last")
-
-
 # Trial codes — add/remove here, or move to env var later
 # Format: { "CODE": days_granted }
 TRIAL_CODES = {
@@ -2576,9 +2549,33 @@ def is_premium(chat_id):
     return days_used < trial_days
 
 def is_premium_plus(chat_id):
-    """Removed tier — alias for is_premium()."""
-    return is_premium(chat_id)
-
+    """True wenn User Premium Plus hat (Szenarien + Quatschen unlimitiert).
+    is_premium() bleibt unverändert und deckt BEIDE Tiers ab."""
+    uid = str(chat_id)
+    try:
+        fresh = load_users()
+        if uid in fresh:
+            user_data[uid] = fresh[uid]
+    except Exception:
+        pass
+    user = user_data.get(uid, {})
+    if user.get("premium_plus"):
+        until = user.get("premium_plus_until")
+        if until:
+            if datetime.fromisoformat(until) > datetime.now():
+                return True
+            user_data[uid]["premium_plus"] = False
+            save_users(user_data)
+            return False
+        return True
+    if user.get("trial_plan") == "plus":
+        trial_start = user.get("trial_start")
+        if not trial_start:
+            return False
+        trial_days = TRIAL_CODES.get(user.get("trial_code_used", ""), 3)
+        days_used  = (datetime.now() - datetime.fromisoformat(trial_start)).days
+        return days_used < trial_days
+    return False
 
 def days_left_in_trial(chat_id):
     uid  = str(chat_id)
@@ -2678,7 +2675,9 @@ def send_paywall(chat_id):
         "🎁 Freunde einladen & 3 Tage gratis sichern",
         url=share_url
     ))
-    markup.add(translate_btn(chat_id))
+    markup.add(InlineKeyboardButton(
+        "🌍 übersetzen", callback_data="translate_last"
+    ))
 
     xp_streak_line = f"Du hast bereits *{xp} XP* gesammelt"
     if streak > 1:
@@ -2716,8 +2715,7 @@ PREMIUM_VALUES = [
 PREMIUM_PLUS_EXTRA_VALUES = [
     "✅ Alles aus Premium",
     "✅ Quatschen — kein Skript, kein Thema, kein Druck",
-    "✅ /integration — dein Helfer für alles in Deutschland",
-    "✅ Briefe, Verträge, Kündigung, Steuern, Mietrecht & mehr",
+    "✅ Finanzamt-Brief? Kündigung? Streit mit Vermieter? Einfach fragen.",
     "✅ Da wenn Deutschland überwältigend wird — 24/7, nie urteilend",
 ]
 
@@ -2762,9 +2760,9 @@ def handle_upgrade(message):
             "Oder Deutschland fühlt sich manchmal einfach zu viel an.\n\n"
             "*Premium Plus* ist dein Kumpel für genau diese Momente:\n\n"
             f"{plus_extra_values_str}\n\n"
-            "€25/Monat. Jederzeit kündbar."
+            "€30/Monat. Kündbar jederzeit."
         )
-        markup.add(InlineKeyboardButton("🎓 Premium holen", callback_data="pay_plus"))
+        markup.add(InlineKeyboardButton("👑 Auf Premium Plus upgraden", callback_data="pay_plus"))
         markup.add(InlineKeyboardButton("⭐ Mit Stars — 2000 Stars", callback_data="pay_stars_plus"))
 
     else:
@@ -2774,7 +2772,7 @@ def handle_upgrade(message):
             f"🎓 *Premium — €20/Monat*\n"
             f"Für alle die Deutsch wirklich lernen wollen.\n"
             f"{premium_values_str}\n\n"
-            f"🎓 *Premium — €25/Monat*\n"
+            f"👑 *Premium Plus — €30/Monat*\n"
             f"Nicht nur Deutsch lernen. In Deutschland ankommen.\n"
             f"{plus_extra_values_str}\n\n"
             "_Hast du einen Code? Tippe:_ /freecode DEINCODE"
@@ -2782,10 +2780,10 @@ def handle_upgrade(message):
         if plus_checkout_url:
             markup.add(InlineKeyboardButton("🎓 Premium — €20/Monat", url=plus_checkout_url))
         markup.add(InlineKeyboardButton("⭐ Premium mit Stars — 1500 Stars", callback_data="pay_stars"))
-        markup.add(InlineKeyboardButton("🎓 Premium — €25/Monat", callback_data="pay_plus"))
+        markup.add(InlineKeyboardButton("👑 Premium Plus — €30/Monat", callback_data="pay_plus"))
         markup.add(InlineKeyboardButton("⭐ Plus mit Stars — 2000 Stars", callback_data="pay_stars_plus"))
 
-    markup.add(translate_btn(chat_id))
+    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
     last_bot_text[chat_id] = text
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
@@ -2794,7 +2792,7 @@ def handle_upgrade(message):
 #  DAILY FREE TIER + TWO-TIER GATE SYSTEM
 #  Free: 3 Gespräche/Tag (Szenarien + Quatschen, gemeinsamer Pool)
 #  Premium (€20): Szenarien unlimitiert | Quatschen NICHT enthalten
-#  Premium (€25): Alles drin
+#  Premium Plus (€30): Alles unlimitiert inkl. Quatschen
 # ═══════════════════════════════════════════════════════════════════════════
 
 FREE_DAILY_LIMIT = 1
@@ -2867,18 +2865,18 @@ def send_daily_limit_paywall(chat_id: int):
         "Oder jetzt upgraden:\n\n"
         "🎓 *Premium — €20/Monat*\n"
         "Unbegrenzte Gespräche & Übungen — alles was du zum Lernen brauchst.\n\n"
-        "🎓 *Premium — €25/Monat*\n"
+        "👑 *Premium Plus — €30/Monat*\n"
         "Nicht nur Deutsch lernen. In Deutschland ankommen.\n"
         "Finanzamt-Briefe, Kündigungen, schwierige Gespräche — dein Kumpel ist da.\n\n"
         "_Hast du einen Code? /freecode DEINCODE_"
     )
     last_bot_text[chat_id] = text
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🎓 Premium — €25/Monat", callback_data="pay_plus"))
+    markup.add(InlineKeyboardButton("👑 Premium Plus — €30/Monat", callback_data="pay_plus"))
     markup.add(InlineKeyboardButton("🎓 Premium — €20/Monat", url=checkout_url))
     markup.add(InlineKeyboardButton("⭐ Stars zahlen", callback_data="pay_stars"))
     markup.add(InlineKeyboardButton("🎁 Freunde einladen → 3 Tage gratis", url=share_url))
-    markup.add(translate_btn(chat_id))
+    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
 def send_quatschen_upgrade_prompt(chat_id: int):
@@ -2892,13 +2890,13 @@ def send_quatschen_upgrade_prompt(chat_id: int):
         "Einen Brief vom Finanzamt bekommen? Musst du kündigen und weißt nicht wie?\n"
         "Schlechter Tag und Deutschland fühlt sich zu viel an?\n\n"
         "Genau dafür ist Quatschen da. Dein Kumpel — 24/7, nie urteilend.\n\n"
-        "*Premium — €25/Monat*"
+        "*Premium Plus — €30/Monat*"
     )
     last_bot_text[chat_id] = text
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🎓 Jetzt Premium holen", callback_data="pay_plus"))
+    markup.add(InlineKeyboardButton("👑 Jetzt auf Premium Plus upgraden", callback_data="pay_plus"))
     markup.add(InlineKeyboardButton("⭐ Stars — 2000 Stars", callback_data="pay_stars_plus"))
-    markup.add(translate_btn(chat_id))
+    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
 def get_remaining_convos_hint(chat_id: int) -> str:
@@ -3729,179 +3727,45 @@ def handle_onboarding(chat_id, text):
 
         lang = user_data[str(chat_id)].get("native_language", "English")
         name = user_data[str(chat_id)].get("name", "")
-        name_part = f", {name}" if name else ""
 
-        # Hardcoded native-quality pitches for top 8 languages
-        # Claude Haiku makes morphology errors in inflected languages (Russian etc.) — don't use it for these
-        PITCHES = {
-            "English": (
-                f"You know the feeling{name_part}? You\'ve been learning German — but the moment "
-                f"a German starts talking, your mind goes blank. 😅\n\n"
-                f"Now you\'ve got me — a real German friend, 24/7 in your pocket.\n"
-                f"No pressure, no judgment. We just talk.\n\n"
-                f"📅 In 4 weeks: the panic fades, simple replies start flowing naturally.\n"
-                f"📅 In 3 months: Ämter, colleagues, friends — you handle it all with ease.\n"
-                f"📅 In 1 year: Germans will ask where you learned to speak so well. 😄\n\n"
-                f"Pick a topic — let\'s go. 👇"
-            ),
-            "Русский": (
-                f"Знакомо{name_part}? Ты учишь немецкий — а как только немец заговорил, "
-                f"всё вылетело из головы. 😅\n\n"
-                f"Теперь у тебя есть я — настоящий немецкий друг, 24/7 в кармане.\n"
-                f"Без давления, без осуждения. Просто разговариваем.\n\n"
-                f"📅 Через 4 недели: паника проходит, простые фразы приходят сами.\n"
-                f"📅 Через 3 месяца: Amt, коллеги, друзья — ты справляешься со всем.\n"
-                f"📅 Через год: немцы сами спросят, где ты так хорошо выучил язык. 😄\n\n"
-                f"Выбери тему — начнём. 👇"
-            ),
-            "Українська": (
-                f"Знайоме{name_part}? Ти вчиш німецьку — а щойно хтось заговорив, "
-                f"усе вилетіло з голови. 😅\n\n"
-                f"Тепер у тебе є я — справжній німецький друг, 24/7 у кишені.\n"
-                f"Без тиску, без осуду. Просто розмовляємо.\n\n"
-                f"📅 Через 4 тижні: паніка зникає, прості фрази приходять самі.\n"
-                f"📅 Через 3 місяці: Amt, колеги, друзі — ти з усім справляєшся.\n"
-                f"📅 Через рік: німці самі питатимуть, де ти так добре вивчив мову. 😄\n\n"
-                f"Обери тему — починаємо. 👇"
-            ),
-            "Türkçe": (
-                f"Tanıdık geldi mi{name_part}? Almanca öğreniyorsun — ama biri konuşmaya "
-                f"başlayınca her şey uçup gidiyor. 😅\n\n"
-                f"Artık 24/7 cebinde gerçek bir Alman arkadaşın var.\n"
-                f"Baskı yok, yargılama yok. Sadece konuşuyoruz.\n\n"
-                f"📅 4 haftada: panik geçiyor, basit cümleler kendiliğinden geliyor.\n"
-                f"📅 3 ayda: Amt, iş arkadaşları, dostlar — hepsinin altından kalkıyorsun.\n"
-                f"📅 1 yılda: Almanlar sana nereden bu kadar iyi öğrendin diye soracak. 😄\n\n"
-                f"Bir konu seç — başlayalım. 👇"
-            ),
-            "Arabic": (
-                f"تعرف هذا الإحساس{name_part}؟ تتعلم الألمانية — لكن بمجرد أن يتكلم أحد، "
-                f"يختفي كل شيء من رأسك. 😅\n\n"
-                f"الآن معك أنا — صديق ألماني حقيقي، 24/7 في جيبك.\n"
-                f"بدون ضغط، بدون حكم. نتكلم فقط.\n\n"
-                f"📅 خلال 4 أسابيع: يختفي الذعر، تجيء الردود البسيطة بشكل طبيعي.\n"
-                f"📅 خلال 3 أشهر: الدوائر الحكومية، الزملاء، الأصدقاء — تتعامل مع الجميع.\n"
-                f"📅 خلال سنة: سيسألك الألمان أين تعلمت اللغة بهذا المستوى. 😄\n\n"
-                f"اختر موضوعاً — لنبدأ. 👇"
-            ),
-            "Español": (
-                f"¿Te suena familiar{name_part}? Estás aprendiendo alemán — pero en cuanto "
-                f"alguien habla, se te va todo. 😅\n\n"
-                f"Ahora tienes a tu lado a un amigo alemán de verdad, 24/7 en tu bolsillo.\n"
-                f"Sin presión, sin juicios. Solo hablamos.\n\n"
-                f"📅 En 4 semanas: el pánico desaparece, las frases simples salen solas.\n"
-                f"📅 En 3 meses: Amt, compañeros, amigos — te manejas con todo.\n"
-                f"📅 En 1 año: los alemanes te preguntarán dónde aprendiste tan bien. 😄\n\n"
-                f"Elige un tema — empecemos. 👇"
-            ),
-            "Français": (
-                f"Tu connais ce sentiment{name_part} ? Tu apprends l\'allemand — mais dès "
-                f"qu\'un Allemand parle, tout disparaît. 😅\n\n"
-                f"Maintenant tu as moi — un vrai ami allemand, 24/7 dans ta poche.\n"
-                f"Sans pression, sans jugement. On parle, c\'est tout.\n\n"
-                f"📅 En 4 semaines : la panique s\'en va, les réponses simples viennent naturellement.\n"
-                f"📅 En 3 mois : l\'Amt, les collègues, les amis — tu gères tout.\n"
-                f"📅 En 1 an : les Allemands te demanderont où tu as si bien appris. 😄\n\n"
-                f"Choisis un sujet — on commence. 👇"
-            ),
-            "Polski": (
-                f"Znasz to uczucie{name_part}? Uczysz się niemieckiego — ale jak tylko ktoś "
-                f"zaczyna mówić, wszystko ulatuje z głowy. 😅\n\n"
-                f"Teraz masz mnie — prawdziwego niemieckiego przyjaciela, 24/7 w kieszeni.\n"
-                f"Bez presji, bez oceniania. Po prostu rozmawiamy.\n\n"
-                f"📅 Za 4 tygodnie: panika mija, proste odpowiedzi przychodzą same.\n"
-                f"📅 Za 3 miesiące: Amt, współpracownicy, znajomi — dajesz radę ze wszystkim.\n"
-                f"📅 Za rok: Niemcy sami zapytają, gdzie tak dobrze nauczyłeś się języka. 😄\n\n"
-                f"Wybierz temat — zaczynamy. 👇"
-            ),
-        }
-
-        if lang in PITCHES:
-            pitch_msg = PITCHES[lang]
-        else:
-            # Claude fallback for other languages — stronger prompt to avoid morphology errors
-            try:
-                pitch_resp = claude.messages.create(
-                    model="claude-haiku-4-5-20251001",
-                    max_tokens=250,
-                    system=(
-                        "You are a native speaker of the requested language. "
-                        "Write ONLY the message text. No quotes, no preamble. "
-                        "Use only words and grammar that a native speaker would naturally use. "
-                        "If unsure about any word form, choose a simpler expression instead."
-                    ),
-                    messages=[{"role": "user", "content": (
-                        f"Write a short message in {lang} to {name or 'the user'} (informal). "
-                        f"Max 10 lines, 3 emojis max. Cover:\n"
-                        f"1. Pain: knows German but freezes when a German speaks\n"
-                        f"2. Solution: real German friend in pocket, 24/7, no pressure, no judgment\n"
-                        f"3. Timeline: 4 weeks (panic gone), 3 months (handles Amt/work/friends), 1 year (native-level)\n"
-                        f"4. Short action line to pick a topic\n\n"
-                        f"CRITICAL: Use only simple, correct {lang}. No unusual word forms. Keep it natural."
-                    )}]
-                )
-                pitch_msg = pitch_resp.content[0].text.strip()
-            except Exception:
-                pitch_msg = PITCHES["English"]  # safe English fallback
-
-        # Transition texts in native language — sets up the NPC intro
-        TRANSITIONS = {
-            "English":    "Stand by — I'm sending you a message right now. Just write back! 💬",
-            "Русский":    "Сейчас напишу тебе. Просто ответь мне! 💬",
-            "Українська": "Зараз напишу тобі. Просто відповідай! 💬",
-            "Türkçe":     "Sana hemen mesaj gönderiyorum. Sadece yanıtla! 💬",
-            "Arabic":     "سأرسل لك رسالة الآن. فقط ردّ عليّ! 💬",
-            "Español":    "Te mando un mensaje ahora mismo. ¡Solo responde! 💬",
-            "Français":   "Je t'envoie un message tout de suite. Réponds juste ! 💬",
-            "Polski":     "Zaraz piszę do Ciebie. Po prostu odpowiedz! 💬",
-        }
-        transition = TRANSITIONS.get(lang, "I'm sending you a message — just write back! 💬")
-
-        # Send pitch with translate button
-        pitch_markup = InlineKeyboardMarkup()
-        pitch_markup.add(translate_btn(chat_id))
-        last_bot_text[chat_id] = pitch_msg
-        bot.send_message(chat_id, pitch_msg, reply_markup=pitch_markup)
-
-        # NPC voice intro — always in German, sets the scene
-        npc_intro_text = (
-            "Hey! Ich bin dein Deutscher Kumpel. "
-            "Ich komme aus Berlin — geboren und aufgewachsen hier. "
-            "Wie heißt du denn? Und woher kommst du?"
-        )
-        time.sleep(1.5)
-        bot.send_chat_action(chat_id, "record_audio")
+        # Punchy pitch in native language — pain points + value promise
         try:
-            audio = text_to_speech_stream(npc_intro_text, chat_id)
-            markup_intro = InlineKeyboardMarkup()
-            markup_intro.add(translate_btn(chat_id))
-            last_bot_text[chat_id] = npc_intro_text
-            bot.send_voice(chat_id, audio, reply_markup=markup_intro)
-        except Exception as e:
-            log.warning(f"NPC intro voice failed for {chat_id}: {e}")
-            bot.send_message(chat_id, f"🎤 {npc_intro_text}")
+            pitch_resp = claude.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=220,
+                system="Write only the message text. No quotes, no preamble, no extra explanation.",
+                messages=[{"role": "user", "content": (
+                    f"Write a short, punchy message in {lang} to {name or 'the user'}. "
+                    f"Informal tone. Max 10 lines. Use 3-4 emojis max.\n\n"
+                    f"Structure it like this:\n"
+                    f"1. Address the fear/pain: many people already KNOW German but are too scared to speak it. "
+                    f"Or they freeze when a German speaks to them.\n"
+                    f"2. The solution: now they have a native German speaker as a personal friend in their pocket — "
+                    f"available 24/7, no judgment, always patient.\n"
+                    f"3. A concrete timeline — make it feel real and achievable:\n"
+                    f"   - In 4 weeks: they stop panicking in conversations, basic replies flow naturally\n"
+                    f"   - In 3 months: they handle everyday situations confidently — Ämter, colleagues, friends\n"
+                    f"   - In 1 year: almost native speaker level, Germans ask where they learned so well 😄\n"
+                    f"4. End with one punchy action line like 'Los geht's.' or 'Pick a topic.' — no fluff.\n\n"
+                    f"Do NOT say 'AI', 'bot', 'app', or 'chatbot'. "
+                    f"Write as if I am a real German friend texting them. "
+                    f"The timeline should feel exciting, not like a language course brochure."
+                )}]
+            )
+            pitch_msg = pitch_resp.content[0].text.strip()
+        except Exception:
+            pitch_msg = (
+                f"Kennst du das? Du lernst Deutsch, aber wenn ein Echter mit dir spricht — Blackout. 😅\n\n"
+                f"Ab jetzt hast du einen Muttersprachler als Kumpel in der Tasche. "
+                f"Immer da, kein Urteilen, kein Stress. Einfach reden.\n\n"
+                f"📅 In 4 Wochen: kein Panik mehr — einfache Antworten kommen von alleine.\n"
+                f"📅 In 3 Monaten: Ämter, Kollegen, Freunde — du meisterst den Alltag auf Deutsch.\n"
+                f"📅 In 1 Jahr: fast Muttersprachler. Deutsche fragen dich, wo du so gut gelernt hast. 😄\n\n"
+                f"Los geht's. 👇"
+            )
 
-        # Wait for user reply in handle_onboarding → step "intro_reply"
-        user_state[chat_id] = {"mode": "onboarding", "step": "intro_reply"}
-
-    elif step == "intro_reply":
-        # User replied to NPC intro — any response counts
-        name = user_data[str(chat_id)].get("name", "")
-        closing_text = (
-            f"Freut mich, dich kennenzulernen{', ' + name if name else ''}! "
-            f"Dann lass uns doch Deutsch SPRECHEN!"
-        )
         user_state[chat_id] = {"mode": "menu"}
-
-        bot.send_chat_action(chat_id, "record_audio")
-        try:
-            audio = text_to_speech_stream(closing_text, chat_id)
-            bot.send_voice(chat_id, audio)
-        except Exception as e:
-            log.warning(f"Onboarding closing voice failed for {chat_id}: {e}")
-            bot.send_message(chat_id, f"😄 {closing_text}")
-
-        time.sleep(0.8)
+        bot.send_message(chat_id, pitch_msg, reply_markup=ReplyKeyboardRemove())
         send_topic_buttons(chat_id)
 
 def send_voice_intro(chat_id):
@@ -3925,9 +3789,8 @@ def start_chat_callback(call):
     if chat_id in test_state:
         return
 
-    # ── PAYWALL CHECK ─────────────────────────────────────────────────────────
-    if not is_premium(chat_id):
-        send_paywall(chat_id)
+    # ── Gate check (handles both premium and free 1/day limit) ──────────────
+    if not gate_scenario(chat_id):
         return
 
     # ── Trial warning (1 day left) ────────────────────────────────────────────
@@ -3980,11 +3843,6 @@ def handle_topic_callback(call):
 
     bot.answer_callback_query(call.id)
 
-    # Paywall check
-    if not is_premium(chat_id):
-        send_paywall(chat_id)
-        return
-
     # Special mode: Quatschen — Premium Plus only
     if goal == "Quatschen":
         if not is_premium_plus(chat_id):
@@ -3993,12 +3851,12 @@ def handle_topic_callback(call):
                 "Kein Skript, kein Thema, kein Druck — einfach reden.\n"
                 "Finanzamt-Brief? Kündigung? Oder einfach schlechter Tag?\n"
                 "Dein Kumpel hört zu. 24/7, nie urteilend.\n\n"
-                "🎓 Premium — €25/Monat oder 2000 Stars."
+                "👑 Premium Plus — €30/Monat oder 2000 Stars."
             )
             last_bot_text[chat_id] = qtext
             markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("🎓 Premium holen", callback_data="pay_plus"))
-            markup.add(translate_btn(chat_id))
+            markup.add(InlineKeyboardButton("👑 Premium Plus holen", callback_data="pay_plus"))
+            markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
             bot.send_message(chat_id, qtext, reply_markup=markup)
             return
         user_data[str(chat_id)]["goal"] = goal
@@ -4029,6 +3887,9 @@ def start_scenario(chat_id, scenario):
     if not gate_scenario(chat_id):
         return
     increment_daily_convo(chat_id)
+    uid = str(chat_id)
+    user_data[uid]["conversations_started"] = user_data[uid].get("conversations_started", 0) + 1
+    save_users(user_data)
     name = user_data.get(str(chat_id), {}).get("name", "User")
 
     # 1. Set state FIRST so build_system_prompt and GPT get the right context
@@ -4116,7 +3977,8 @@ def start_scenario(chat_id, scenario):
     # 6. Send context text
     user = user_data.get(str(chat_id), {})
     lang = user.get("native_language")
-    bot.send_message(chat_id, f"🎭 {ctx}")
+    lang_hint = f"\n🌍 Tippe /übersetzen um meine letzte Nachricht auf {lang} zu übersetzen." if lang else ""
+    bot.send_message(chat_id, f"🎭 {ctx}{lang_hint}")
 
     # 7. Send voice nudge
     send_reply(chat_id, opening, voice=True)
@@ -4485,7 +4347,7 @@ def lesson_yes_callback(call):
     last_bot_text[chat_id] = lesson_text
 
     translate_markup = InlineKeyboardMarkup()
-    translate_markup.add(translate_btn(chat_id))
+    translate_markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
     bot.send_message(chat_id, lesson_text, reply_markup=translate_markup)
 
     # Mini dialog
@@ -4511,7 +4373,7 @@ def lesson_yes_callback(call):
 
     restart_markup = InlineKeyboardMarkup()
     restart_markup.add(InlineKeyboardButton("🔄 Test erneut starten", callback_data="start_test"))
-    restart_markup.add(translate_btn(chat_id))
+    restart_markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
     bot.send_message(chat_id, dialog_text, parse_mode="Markdown", reply_markup=restart_markup)
 
 
@@ -4711,100 +4573,72 @@ def feedback(message):
     bot.send_message(chat_id, result)
 
 # FORTSCHRITT COMMAND
-@bot.message_handler(commands=['level'])
-def level_cmd(message):
-    ensure_user(message.chat.id)
-    if _require_onboarding(message.chat.id): return
-    send_my_progress(message.chat.id)
-
 @bot.message_handler(commands=['progress'])
-def progress_cmd_redirect(message):
+def progress_cmd(message):
     ensure_user(message.chat.id)
     if _require_onboarding(message.chat.id): return
-    send_my_progress(message.chat.id)
+    send_progress(message.chat.id)
 
+@bot.message_handler(commands=['fortschritt'])
+def fortschritt(message):
+    chat_id = message.chat.id
+    ensure_user(chat_id)
+    user = user_data[str(chat_id)]
 
-def send_my_progress(chat_id: int):
-    """
-    Kombinierte Progress-Ansicht: Deutschniveau + XP + Streak + Achievements + Empfehlung.
-    Ersetzt die separaten /level, /progress, /achievements Commands.
-    """
-    uid   = str(chat_id)
-    user  = user_data.get(uid, {})
-    stats = user.get("user_stats", {})
-    name  = user.get("name", "")
+    level   = user.get("level", "A2")
+    streak  = user.get("scenario_streak", 0)
+    goal    = user.get("goal", "—")
+    name    = user.get("name", "User")
 
-    # ── Daten zusammentragen ────────────────────────────────────────────────
-    german_level = user.get("level", "A2")          # A1–C2 aus Onboarding/Adaptiv
-    xp           = stats.get("xp", 0)
-    bot_level    = stats.get("level", 1)
-    streak       = stats.get("streak", 0)
-    goal         = user.get("goal", "")
-    convos       = user.get("conversations_started", 0)
+    # Scenarios completed per goal
+    progress = user.get("user_progress", {})
+    total_done = sum(len(v) for v in progress.values())
+    goal_done  = len(progress.get(goal, []))
 
-    # ── XP-Balken innerhalb des Bot-Levels ──────────────────────────────────
-    xp_in_level  = xp % 50
-    filled       = xp_in_level // 5
-    xp_bar       = "🟦" * filled + "⬜" * (10 - filled)
-    xp_to_next   = 50 - xp_in_level
+    # Streak bar toward next level (out of 3)
+    filled  = min(streak, 3)
+    bar     = "🟩" * filled + "⬜" * (3 - filled)
 
-    # ── Streak-Balken ───────────────────────────────────────────────────────
-    streak_bar = ("🔥" * min(streak, 7)) if streak > 0 else "💤 Noch kein Streak"
+    # Level progression position
+    LEVELS  = ["A1", "A2", "B1", "B2", "C1"]
+    lv_pos  = LEVELS.index(level) + 1 if level in LEVELS else "?"
+    lv_bar  = "".join("🔵" if LEVELS[i] == level else ("✅" if i < LEVELS.index(level) else "⚪") for i in range(len(LEVELS)))
 
-    # ── Achievements ────────────────────────────────────────────────────────
-    earned = user.get("achievements", [])
-    ach_lines = []
-    for badge_id, key, threshold, emoji, title, desc in ACHIEVEMENT_DEFS:
-        if badge_id in earned:
-            ach_lines.append(f"{emoji} {title}")
-    ach_block = ("  " + "  ".join(ach_lines[:6])) if ach_lines else "  Noch keine — mach dein erstes Gespräch! 🎯"
-
-    # ── Empfehlung: Wochen bis nächstes Sprachniveau ────────────────────────
-    LEVEL_WEEKS = {
-        "A1": ("A2", 4),
-        "A2": ("B1", 8),
-        "B1": ("B2", 10),
-        "B2": ("C1", 14),
-        "C1": ("C2", 20),
-    }
-    next_info = LEVEL_WEEKS.get(german_level)
-
-    if next_info:
-        next_lvl, base_weeks = next_info
-        # Beschleunigung durch mehr tägliche Nutzung
-        # Basis: ~5 Gespräche/Woche → base_weeks
-        # +10 Min täglich = ca. 7 Gespräche/Woche → 30% schneller
-        fast_weeks = max(1, round(base_weeks * 0.70))
-        rec_block = (
-            f"⏱ *Dein Weg zu {next_lvl}:*\n"
-            f"  Bei aktuellem Tempo: ca. *{base_weeks} Wochen*\n"
-            f"  Mit 10 Min mehr täglich: ca. *{fast_weeks} Wochen* 🚀\n"
-            f"  → Einfach Quatschen — kein Lernplan, kein Druck."
+    # Weak points summary
+    wps = [wp for wp in user.get("weak_points", []) if isinstance(wp, dict)]
+    if wps:
+        wp_lines = "\n".join(
+            f"  • {wp.get('type','?')}  (Stärke: {wp.get('strength',0)})"
+            for wp in wps[-5:]
         )
     else:
-        rec_block = "🏆 Du bist auf dem höchsten Niveau — weiter so!"
+        wp_lines = "  Noch keine erfasst"
 
-    # ── Ziel-Info ───────────────────────────────────────────────────────────
-    goal_line = (f"🎯 *Dein Ziel:* {GOAL_TEXT.get(goal, goal)}\n" if goal else "")
+    # Session mode
+    s     = session_state.get(chat_id, {"struggle": 0, "success": 0})
+    mode  = get_dynamic_mode(s)
+    mode_emoji = {"easy": "🐢 Easy", "normal": "🚶 Normal", "hard": "🔥 Hard"}.get(mode, mode)
 
-    # ── Zusammensetzen ──────────────────────────────────────────────────────
     text = (
-        f"📊 *Mein Progress{', ' + name if name else ''}*\n"
-        f"──────────────────\n\n"
-        f"🇩🇪 *Deutschniveau:* {german_level}\n"
-        f"{goal_line}"
-        f"\n⭐ *XP:* {xp}  |  Level {bot_level}  |  +{xp_to_next} bis Level {bot_level + 1}\n"
-        f"{xp_bar}\n\n"
-        f"🔥 *Streak:* {streak} {'Tag' if streak == 1 else 'Tage'}  {streak_bar}\n\n"
-        f"🏅 *Achievements:*\n{ach_block}\n\n"
-        f"{rec_block}"
+        f"📊 *Dein Fortschritt, {name}*\n"
+        f"━━━━━━━━━━━━━━━━━\n\n"
+        f"🎯 *Niveau:* {level}\n"
+        f"{lv_bar}\n"
+        f"A1 → A2 → B1 → B2 → C1\n\n"
+        f"⚡ *Level-Up Streak:* {streak}/3\n"
+        f"{bar}\n\n"
+        f"🗂 *Aktuelles Ziel:* {goal}\n"
+        f"📁 Szenarien in diesem Ziel: {goal_done} erledigt\n"
+        f"📚 Insgesamt erledigt: {total_done}\n\n"
+        f"🧠 *Schwachpunkte:*\n{wp_lines}\n\n"
+        f"🎮 *Aktuelle Schwierigkeit:* {mode_emoji}"
     )
 
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🎯 Jetzt Gespräch starten", callback_data="start_chat"))
-    markup.add(translate_btn(chat_id))
-    last_bot_text[chat_id] = text
-    bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
+    bot.send_message(chat_id, text, parse_mode="Markdown")
+
+# ─────────────────────────────────────────────
+# MENU & FEATURE FUNCTIONS
+# ─────────────────────────────────────────────
 
 def show_menu(chat_id):
     user_state[chat_id] = user_state.get(chat_id, {})
@@ -5200,6 +5034,11 @@ def menu_cmd(message):
     if not is_premium(message.chat.id): send_paywall(message.chat.id); return
     show_menu(message.chat.id)
 
+@bot.message_handler(commands=['level'])
+def level_cmd(message):
+    ensure_user(message.chat.id)
+    show_level(message.chat.id)
+
 @bot.message_handler(commands=['errors'])
 def errors_cmd(message):
     ensure_user(message.chat.id)
@@ -5230,24 +5069,25 @@ def info_cmd(message):
         tier = "\n🔓 Kostenlos: 1 Gespräch/Tag + tägliche Gems."
 
     text = (
-        f"📖 *Instruktion{' — Hallo, ' + name + '!' if name else ''}*\n\n"
+        f"ℹ️ *Dein Deutscher Kumpel*{' — Hallo, ' + name + '!' if name else ''}\n\n"
         "🎯 /themen — Gesprächsthema wählen\n"
         "🎤 Sprich oder schreib auf Deutsch — Fehler werden erklärt & gespeichert\n"
         "💪 /practice — Übungen zu deinen Schwächen\n"
         "🃏 /flashcards — Vokabelkarten auf Quizlet\n"
-        "📊 /level — Mein Progress, XP & Empfehlungen\n"
-        "📋 /integration — Amtsbriefe, Verträge & Formulare verstehen\n"
+        "💎 /gem — Ausdruck des Tages\n"
+        "📊 /progress — dein Fortschritt\n"
+        "📋 /integration — Amtsbriefe, Verträge & Formulare auf Deutsch verstehen\n"
         "🔁 /restart — neues Gespräch starten\n\n"
         "💎 *Pläne:*\n"
         "🔓 Free: 1 Gespräch/Tag + tägliche Gems\n"
         "🎓 Premium (€20/Mo): unlimitierte Gespräche & Übungen\n"
-        "🎓 Premium (€25/Mo): alles drin — Gespräche, Quatschen, Alltag\n"
+        "👑 Premium Plus (€30/Mo): alles aus Premium + Alltag in Deutschland meistern\n"
         "→ /upgrade für Details & Preise\n"
         + tier +
         "\n\nFragen? /support"
     )
     markup = InlineKeyboardMarkup()
-    markup.add(translate_btn(chat_id))
+    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
     last_bot_text[chat_id] = text
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
@@ -5267,7 +5107,7 @@ def send_danke_menu(chat_id: int):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("☕ Einen Kaffee spendieren",  callback_data="danke:donate"))
     markup.add(InlineKeyboardButton("💬 Feedback hinterlassen",    callback_data="danke:feedback"))
-    markup.add(translate_btn(chat_id))
+    markup.add(InlineKeyboardButton("🌍 übersetzen",               callback_data="translate_last"))
     last_bot_text[chat_id] = text
     bot.send_message(chat_id, text, reply_markup=markup)
 
@@ -5468,8 +5308,8 @@ def handle_adminstats(message):
         return
 
     # ── Tier-Übersicht ──────────────────────────────────────────────────────
-    n_plus    = 0  # Removed tier
-    n_premium = sum(1 for u in users.values() if u.get("premium"))
+    n_plus    = sum(1 for u in users.values() if u.get("premium_plus"))
+    n_premium = sum(1 for u in users.values() if u.get("premium") and not u.get("premium_plus"))
     n_trial   = 0
     for u in users.values():
         if not u.get("premium") and u.get("trial_start") and u.get("trial_code_used"):
@@ -5484,22 +5324,7 @@ def handle_adminstats(message):
 
     # Stufe 2 — Onboarding komplett (Name + Sprache + Ziel gesetzt)
     f_onboarded = sum(1 for u in users.values()
-                      if u.get("name") and u.get("native_language"))
-
-    # ── Retrospektives Onboarding-Schritt-Tracking ────────────────────────────
-    # Inferiert aus vorhandenen user_data Feldern — funktioniert auch für alte User
-    ob_joined    = f_joined
-    ob_has_name  = sum(1 for u in users.values() if u.get("name"))
-    ob_has_lang  = sum(1 for u in users.values() if u.get("name") and u.get("native_language"))
-    ob_saw_topic = sum(1 for u in users.values()
-                       if u.get("conversations_started", 0) > 0 or u.get("paywall_hits", 0) > 0)
-    ob_talked    = sum(1 for u in users.values() if u.get("conversations_started", 0) > 0)
-
-    # Dropout zwischen Schritten
-    drop_step1 = ob_joined   - ob_has_name   # Nie auf "Wie heißt du?" geantwortet
-    drop_step2 = ob_has_name - ob_has_lang   # Name gegeben, Sprache nie
-    drop_step3 = ob_has_lang - ob_saw_topic  # Sprache gegeben, nie Topic geklickt
-    drop_step4 = ob_saw_topic - ob_talked    # Topic geklickt, aber Paywall/Abbruch
+                      if u.get("name") and u.get("native_language") and u.get("goal"))
 
     # Stufe 3 — Mindestens 1 Gespräch geführt
     f_talked = sum(1 for u in users.values() if u.get("conversations_started", 0) >= 1)
@@ -5585,13 +5410,6 @@ def handle_adminstats(message):
         "",
         "⚠️ *Größte Dropouts*",
         f"   Beim Onboarding:    -{drop_onboarding}",
-        "",
-        "📍 *Onboarding — Schritt für Schritt (retrospektiv)*",
-        f"   /start getippt:        {ob_joined}",
-        f"   ✅ Name gegeben:       {ob_has_name}  (Dropout: -{drop_step1})",
-        f"   ✅ Sprache/Herkunft:   {ob_has_lang}  (Dropout: -{drop_step2})",
-        f"   ✅ Topic geklickt:     {ob_saw_topic}  (Dropout: -{drop_step3})",
-        f"   ✅ Gespräch geführt:   {ob_talked}  (Dropout: -{drop_step4})",
         f"   Vor 1. Gespräch:    -{drop_first_conv}",
         f"   Nach 1. Gespräch:   -{drop_retention}  ← Einmal & weg",
         f"   An der Paywall:     -{drop_paywall}",
@@ -5706,28 +5524,6 @@ def handle_integration(message):
     ensure_user(chat_id)
     if _require_onboarding(chat_id): return
     _track_feature(chat_id, "integration")
-    if not is_premium_plus(chat_id):
-        uid  = str(chat_id)
-        name = user_data.get(uid, {}).get("name", "")
-        text = (
-            f"🏛️ *Leben in Deutschland — Premium Plus*{', ' + name if name else ''}\n\n"
-            "Dieser Bereich ist dein persönlicher Helfer für alles rund um Deutschland:\n\n"
-            "📄 Briefe & Dokumente erklären\n"
-            "✍️ Kündigung schreiben lassen\n"
-            "📋 Mietverträge & Verträge checken\n"
-            "🏠 Wohnungssuche meistern\n"
-            "💶 Steuern zurückbekommen\n"
-            "🗑️ Mülltrennung, Mietrecht & mehr\n\n"
-            "Alles auf Deutsch — mit mir als Kumpel der es erklärt.\n\n"
-            "→ *Premium — €25/Monat*"
-        )
-        last_bot_text[chat_id] = text
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🎓 Jetzt Premium", callback_data="pay_plus"))
-        markup.add(InlineKeyboardButton("⭐ Mit Stars — 2000 Stars", callback_data="pay_stars_plus"))
-        markup.add(translate_btn(chat_id))
-        bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
-        return
     _show_integration_menu(chat_id)
 
 
@@ -5744,35 +5540,30 @@ def _strip_md(text: str) -> str:
 def _show_integration_menu(chat_id):
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
-        InlineKeyboardButton("📄 Brief / Dokument erklären",     callback_data="intg:brief_erklaeren"),
-        InlineKeyboardButton("✍️ Kündigung schreiben lassen",    callback_data="intg:kuendigung"),
-        InlineKeyboardButton("📋 Vertrag checken",               callback_data="intg:vertragscheck"),
-        InlineKeyboardButton("💬 Schreib das für mich",          callback_data="intg:schreib"),
-        InlineKeyboardButton("🏠 Wohnungssuche in Deutschland",  callback_data="intg:wohnen"),
-        InlineKeyboardButton("🏘️ Was darf mein Vermieter?",     callback_data="intg:mieterrecht"),
-        InlineKeyboardButton("💶 Steuern & Finanzamt",           callback_data="intg:steuern"),
-        InlineKeyboardButton("🗑️ Mülltrennung",                 callback_data="intg:muell"),
-        InlineKeyboardButton("🎭 Termin vorbereiten",            callback_data="intg:termin"),
-        InlineKeyboardButton("🗺️ Beratungsstellen finden",       callback_data="intg:beratung"),
+        InlineKeyboardButton("📄 Brief / Dokument erklären",    callback_data="intg:brief_erklaeren"),
+        InlineKeyboardButton("✍️ Antwort auf einen Brief",      callback_data="intg:brief_antworten"),
+        InlineKeyboardButton("🎭 Termin vorbereiten",           callback_data="intg:termin"),
+        InlineKeyboardButton("🗺️ Beratungsstellen finden",      callback_data="intg:beratung"),
+        InlineKeyboardButton("💶 Steuern & Finanzamt",          callback_data="intg:steuern"),
+        InlineKeyboardButton("🇩🇪 Deutsche Kultur",             callback_data="intg:kultur"),
     )
     bot.send_message(chat_id,
-        "🏛️ *Leben in Deutschland*\n\nWomit kann ich dir helfen?",
-        parse_mode="Markdown", reply_markup=markup)
+        "🏛️ Leben in Deutschland\n\nWomit kann ich dir helfen?",
+        reply_markup=markup)
 
 
 def _show_steuern_menu(chat_id):
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
-        InlineKeyboardButton("💰 Steuern zurückbekommen",        callback_data="intg:steuerrueckgabe"),
-        InlineKeyboardButton("📄 Steuerbescheid erklären",       callback_data="intg:steuerbescheid"),
+        InlineKeyboardButton("📄 Steuerbescheid erklären",      callback_data="intg:steuerbescheid"),
         InlineKeyboardButton("📋 Was ist eine Steuererklärung?", callback_data="intg:steuererklaerung_info"),
-        InlineKeyboardButton("🗓️ Fristen & Termine",             callback_data="intg:steuerfristen"),
-        InlineKeyboardButton("🏢 Mein Finanzamt finden",         callback_data="intg:finanzamt"),
-        InlineKeyboardButton("◀️ Zurück",                        callback_data="intg:back"),
+        InlineKeyboardButton("🗓️ Fristen & Termine",            callback_data="intg:steuerfristen"),
+        InlineKeyboardButton("🏢 Mein Finanzamt finden",        callback_data="intg:finanzamt"),
+        InlineKeyboardButton("◀️ Zurück",                       callback_data="intg:back"),
     )
     bot.send_message(chat_id,
-        "💶 *Steuern & Finanzamt*\n\nWas brauchst du?",
-        parse_mode="Markdown", reply_markup=markup)
+        "💶 Steuern & Finanzamt\n\nWas brauchst du?",
+        reply_markup=markup)
 
 
 
@@ -5899,7 +5690,7 @@ def send_daily_gem(chat_id):
     last_bot_text[_cid] = msg
     user_state[_cid] = {"mode": user_state.get(_cid, {}).get("mode", "idle"), "gem_exercise": expression, "gem_text": expression}
     markup = InlineKeyboardMarkup()
-    markup.add(translate_btn(chat_id))
+    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
     bot.send_message(_cid, msg, parse_mode="Markdown", reply_markup=markup)
 
 
@@ -5947,9 +5738,25 @@ def handle_support(message):
 
 @bot.message_handler(commands=["achievements", "badges", "erfolge"])
 def handle_achievements(message):
-    ensure_user(message.chat.id)
-    if _require_onboarding(message.chat.id): return
-    send_my_progress(message.chat.id)
+    chat_id = message.chat.id
+    uid = str(chat_id)
+    if uid not in user_data:
+        bot.send_message(chat_id, "Starte zuerst mit /start.")
+        return
+    earned = user_data[uid].get("achievements", [])
+    if not earned:
+        bot.send_message(chat_id,
+            "Noch keine Achievements 😅\nMach dein erstes Gespräch und leg los! 🎯")
+        return
+
+    lines = ["🏅 *Deine Achievements:*\n"]
+    for badge_id, key, threshold, emoji, title, desc in ACHIEVEMENT_DEFS:
+        if badge_id in earned:
+            lines.append(f"{emoji} *{title}* — _{desc}_")
+
+    total = len(earned)
+    lines.append(f"\n_{total}/{len(ACHIEVEMENT_DEFS)} freigeschaltet_")
+    bot.send_message(chat_id, "\n".join(lines), parse_mode="Markdown")
 
 
 @bot.message_handler(commands=["levelup", "level_up", "nächstesniveau"])
@@ -5977,42 +5784,6 @@ def handle_translate(message):
     translation = get_translation(chat_id, last_npc)
     bot.send_message(chat_id, f"🌍 Übersetzung ({lang}):\n\n_{translation}_",
         parse_mode="Markdown", reply_markup=InlineKeyboardMarkup())
-
-
-def _felix_freetext_reply(chat_id: int, text: str):
-    """Felix antwortet menschlich auf alles — nie 'Ich hab dich nicht verstanden'."""
-    uid  = str(chat_id)
-    name = user_data.get(uid, {}).get("name", "")
-    lang = user_data.get(uid, {}).get("native_language", "English")
-    user_story = user_data.get(uid, {}).get("user_story", [])
-    story_note = "\n".join(f"- {f}" for f in user_story[-10:]) if user_story else ""
-
-    try:
-        resp = claude.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=120,
-            system=(
-                f"Du bist Felix — ein echter Berliner Freund, kein Bot. "
-                f"Der User heißt {name or 'du'}. "
-                f"{'Was du über ihn weißt: ' + story_note if story_note else ''}\n\n"
-                f"Der User hat dir gerade etwas geschrieben. Antworte kurz, direkt und menschlich. "
-                f"Niemals: 'Ich hab dich nicht verstanden' oder 'Bitte nutze die Buttons'. "
-                f"Wenn er frustriert oder genervt ist — sei empathisch, nicht stur. "
-                f"Wenn er etwas Zufälliges schreibt — reagiere wie ein Freund. "
-                f"1-2 Sätze. Auf Deutsch. Kein Roboter-Ton."
-            ),
-            messages=[{"role": "user", "content": text}]
-        )
-        reply = resp.content[0].text.strip()
-    except Exception:
-        reply = f"Hey{' ' + name if name else ''}! Was ist los? 😄"
-
-    # Send as voice + text
-    send_reply(chat_id, reply, voice=True)
-
-    # After natural reply, offer topics subtly
-    time.sleep(0.5)
-    send_topic_buttons(chat_id)
 
 
 @bot.message_handler(func=lambda message: True)
@@ -6072,8 +5843,7 @@ def handle(message):
         elif text == "7":
             restart_chat(chat_id)
         else:
-            # User typed freely instead of clicking — Felix responds naturally
-            _felix_freetext_reply(chat_id, text)
+            show_menu(chat_id)
         return
 
     if mode == "shadowing":
@@ -6227,94 +5997,6 @@ def handle(message):
         bot.send_message(chat_id, result, reply_markup=markup)
         return
 
-    if mode == "intg_kuendigung":
-        uid = str(chat_id)
-        native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
-        bot.send_chat_action(chat_id, "typing")
-        try:
-            resp = claude.messages.create(
-                model="claude-haiku-4-5-20251001", max_tokens=500,
-                system=(
-                    "Du bist ein Experte für deutsches Vertragsrecht. "
-                    "Schreibe eine formelle, rechtlich korrekte Kündigung auf Deutsch. "
-                    "KEIN Markdown, keine Sternchen. Formatiere als echten Brief."
-                ),
-                messages=[{"role": "user", "content": (
-                    f"Schreibe eine Kündigung für: {text}\n\n"
-                    f"Verwende [Name] und [Adresse] als Platzhalter. "
-                    f"Kündigung zum nächstmöglichen Termin, mit Bitte um Bestätigung. "
-                    f"Datum: heute. Formell und rechtssicher."
-                )}]
-            )
-            result = _strip_md(resp.content[0].text.strip())
-        except Exception as e:
-            result = f"⚠️ Fehler beim Generieren: {e}"
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("✍️ Nochmal / andere Kündigung", callback_data="intg:kuendigung"))
-        markup.add(InlineKeyboardButton("🏛️ Menü", callback_data="intg:back"))
-        user_state[chat_id]["mode"] = "idle"
-        bot.send_message(chat_id,
-            f"📋 Deine Kündigung:\n\n{result}\n\n"
-            f"👆 Kopiere den Text, füll [Name] und [Adresse] aus und schick ihn ab.\n"
-            f"_Empfehlung: per Einschreiben mit Rückschein senden._",
-            reply_markup=markup)
-        return
-
-    if mode == "intg_vertragscheck":
-        uid = str(chat_id)
-        native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
-        bot.send_chat_action(chat_id, "typing")
-        try:
-            resp = claude.messages.create(
-                model="claude-haiku-4-5-20251001", max_tokens=600,
-                system=(
-                    f"Du bist ein Vertragsexperte. Analysiere den deutschen Vertragstext. "
-                    f"Erkläre auf einfachem Deutsch + kurze Zusammenfassung auf {native_lang}. "
-                    f"Kein Markdown, keine Sternchen. Gliedere in: Was ist wichtig, Was ist ungewöhnlich, Worauf achten."
-                ),
-                messages=[{"role": "user", "content": f"Analysiere diesen Vertragstext:\n\n{text}"}]
-            )
-            result = _strip_md(resp.content[0].text.strip())
-        except Exception as e:
-            result = f"⚠️ Fehler: {e}"
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🏛️ Menü", callback_data="intg:back"))
-        user_state[chat_id]["mode"] = "idle"
-        bot.send_message(chat_id,
-            f"{result}\n\n⚠️ Für rechtliche Beratung: Mieterverein oder Anwalt.",
-            reply_markup=markup)
-        return
-
-    if mode == "intg_schreib":
-        uid = str(chat_id)
-        native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
-        bot.send_chat_action(chat_id, "typing")
-        try:
-            resp = claude.messages.create(
-                model="claude-haiku-4-5-20251001", max_tokens=400,
-                system=(
-                    "Du bist ein professioneller Schreibassistent für Deutsch als Fremdsprache. "
-                    "Schreibe einen formellen oder informellen deutschen Text basierend auf der Beschreibung. "
-                    "KEIN Markdown. Formatiere als echten Text/Brief/Nachricht."
-                ),
-                messages=[{"role": "user", "content": (
-                    f"Der User beschreibt auf {native_lang} was er auf Deutsch schreiben möchte:\n\n"
-                    f"{text}\n\n"
-                    f"Schreibe den fertigen deutschen Text. Wenn es ein formeller Brief ist, "
-                    f"benutze [Name] und [Adresse] als Platzhalter."
-                )}]
-            )
-            result = _strip_md(resp.content[0].text.strip())
-        except Exception as e:
-            result = f"⚠️ Fehler: {e}"
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("💬 Noch einen Text schreiben", callback_data="intg:schreib"))
-        markup.add(InlineKeyboardButton("🏛️ Menü", callback_data="intg:back"))
-        user_state[chat_id]["mode"] = "idle"
-        bot.send_message(chat_id, f"✍️ Hier ist dein Text auf Deutsch:\n\n{result}",
-            reply_markup=markup)
-        return
-
     if mode in ("intg_beratung", "intg_finanzamt"):
         uid         = str(chat_id)
         native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
@@ -6338,7 +6020,7 @@ def handle(message):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("🏛️ Menü", callback_data="intg:back"))
         user_state[chat_id]["mode"] = "idle"
-        bot.send_message(chat_id, _strip_md(result), reply_markup=markup)
+        bot.send_message(chat_id, result, reply_markup=markup)
         return
 
     # Voice selection
@@ -6638,15 +6320,15 @@ def handle_successful_payment(message):
     ensure_user(chat_id)
     from datetime import timedelta
     payload = message.successful_payment.invoice_payload
-    is_plus = payload.startswith("premium_")
+    is_plus = payload.startswith("premium_plus_")
 
     user_data[uid]["premium"]       = True
     user_data[uid]["premium_until"] = (datetime.now() + timedelta(days=30)).isoformat()
     user_data[uid]["stars_payment"] = True
 
     if is_plus:
-        user_data[uid]["premium"]            = True
-        user_data[uid]["premium_until"]      = (datetime.now() + timedelta(days=30)).isoformat()
+        user_data[uid]["premium_plus"]       = True
+        user_data[uid]["premium_plus_until"] = (datetime.now() + timedelta(days=30)).isoformat()
         log.info(f"✅ Stars Premium PLUS activated: {chat_id}")
         bot.send_message(chat_id,
             "⭐ Danke für deine Stars!\n\n"
@@ -6663,7 +6345,7 @@ def handle_successful_payment(message):
             "Das bedeutet wirklich viel und hilft, den Bot am Laufen zu halten. "
             "Du bist ein Schatz. 🙏💙")
     else:
-        user_data[uid]["premium"]      = False
+        user_data[uid]["premium_plus"] = False
         log.info(f"✅ Stars Premium activated: {chat_id}")
         bot.send_message(chat_id,
             "⭐ Danke für deine Stars!\n\n"
@@ -6684,11 +6366,11 @@ def handle_file_message(message):
     uid  = str(chat_id)
     native_lang = user_data.get(uid, {}).get("native_language") or "Englisch"
 
-    # Only process in integration brief/document modes
-    if mode not in ("intg_brief_erklaeren", "intg_brief_antworten", "intg_steuerbescheid", "intg_vertragscheck"):
+    # Only process in integration brief mode
+    if mode not in ("intg_brief_erklaeren", "intg_brief_antworten", "intg_steuerbescheid"):
         bot.send_message(chat_id,
             "📎 Dateien und Fotos nehme ich gerne für Briefe und Dokumente entgegen!\n"
-            "Nutze /integration → Brief erklären oder Vertrag checken. 📄")
+            "Nutze /integration → Brief erklären um einen Brief zu analysieren. 📄")
         return
 
     # ── PHOTO: send to Claude Vision ──────────────────────────────────────
@@ -6726,13 +6408,6 @@ def handle_file_message(message):
                 "intg_brief_antworten": (
                     f"Lies den Brief im Bild und schreibe eine formelle deutsche Antwort darauf.\n"
                     f"Danach kurze Erklärung auf {native_lang}."
-                ),
-                "intg_vertragscheck": (
-                    f"Analysiere den Vertragstext im Bild:\n"
-                    f"1. Was ist wichtig? Welche Klauseln sind entscheidend?\n"
-                    f"2. Was ist ungewöhnlich oder könnte nachteilig sein?\n"
-                    f"3. Kurze Zusammenfassung auf {native_lang}\n"
-                    f"Kein Markdown, Plaintext. Am Ende: Hinweis auf Mieterverein/Anwalt."
                 ),
             }
             system_p = action_prompts.get(mode, action_prompts["intg_brief_erklaeren"])
@@ -6835,15 +6510,13 @@ def handle_voice(message):
     if mode == "onboarding":
         if state.get("step") == "name":
             user_text = _transcribe_voice(message)
+            # Use the full transcript as the name (trim excess punctuation/length)
             name = user_text.strip().strip(".,!?-–")[:40] if user_text else ""
             if name:
                 handle_onboarding(chat_id, name)
             else:
-                bot.send_message(chat_id, "Wie heißt du? 😊")
-        elif state.get("step") == "intro_reply":
-            # Any voice reply counts — trigger the closing
-            handle_onboarding(chat_id, "_voice_reply_")
-        # All other onboarding steps: voice not applicable, ignore silently
+                bot.send_message(chat_id, "Ich hab dich nicht verstanden 😅 Wie heißt du?")
+        # Goal step and all others: voice not applicable, ignore silently
         return
 
     # ── TEST MODE — extract a/b/c from spoken answer ─────────────────────────
@@ -6858,7 +6531,7 @@ def handle_voice(message):
             )
             handle_answer(chat_id, answer)
         else:
-            bot.send_message(chat_id, "Tipp einfach A, B oder C 🙂")
+            bot.send_message(chat_id, "Ich hab dich nicht verstanden 😅 Sag bitte A, B oder C.")
         return
 
     # ── GEM EXERCISE CHECK ───────────────────────────────────────────────────
@@ -6869,7 +6542,7 @@ def handle_voice(message):
             bot.send_message(chat_id, f"_📝 Du hast gesagt: {user_text}_", parse_mode="Markdown")
             check_gem_exercise(chat_id, user_text, state["gem_text"])
         else:
-            bot.send_message(chat_id, "Versuch's nochmal — A, B oder C 🙂")
+            bot.send_message(chat_id, "Ich hab dich nicht verstanden 😅 Versuch's nochmal!")
         return
 
     # ── QUATSCHEN MODE ────────────────────────────────────────────────────────
@@ -6879,7 +6552,8 @@ def handle_voice(message):
             handle_quatschen_message(chat_id, user_text)
         else:
             bot.send_message(chat_id,
-                "Nichts gehört 😅 Versuch es nochmal — etwas lauter oder näher ans Mikro!")
+                "Ich hab dich leider nicht verstanden 😅\n"
+                "Versuch es nochmal — sprich etwas lauter oder näher ans Mikro!")
         return
 
     # ── CHAT MODE ─────────────────────────────────────────────────────────────
@@ -7174,159 +6848,6 @@ def master_callback_router(call):
         if action == "kultur":
             _show_kultur_menu(chat_id); return
 
-        # ── NEUE PREMIUM PLUS FEATURES ────────────────────────────────────
-
-        if action == "kuendigung":
-            user_state[chat_id] = {"mode": "intg_kuendigung"}
-            bot.send_message(chat_id,
-                "✍️ *Kündigung schreiben lassen*\n\n"
-                "Was möchtest du kündigen?\n\n"
-                "Schreib einfach z.B.:\n"
-                "• _Fitnessstudio McFit_\n"
-                "• _Handyvertrag Telekom_\n"
-                "• _Wohnung fristgerecht_\n"
-                "• _Strom-Vertrag Vattenfall_\n\n"
-                "Ich schreibe dir die fertige Kündigung — kopieren und abschicken. 📋",
-                parse_mode="Markdown")
-            return
-
-        if action == "vertragscheck":
-            user_state[chat_id] = {"mode": "intg_vertragscheck"}
-            bot.send_message(chat_id,
-                "📋 *Vertrag checken*\n\n"
-                "Schick mir den Vertragstext (kopieren & einfügen) oder ein Foto.\n\n"
-                "Ich erkläre dir die wichtigsten Klauseln in Klartext — "
-                "was du beachten musst, was ungewöhnlich ist, worauf du aufpassen solltest. 🔍\n\n"
-                "_⚠️ Für rechtliche Beratung wende dich an einen Anwalt oder die Mieterberatung._",
-                parse_mode="Markdown")
-            return
-
-        if action == "schreib":
-            user_state[chat_id] = {"mode": "intg_schreib"}
-            bot.send_message(chat_id,
-                "💬 *Schreib das für mich — auf Deutsch*\n\n"
-                f"Beschreib mir in {native_lang} (oder auf Deutsch) was du schreiben willst.\n\n"
-                "Zum Beispiel:\n"
-                "• _Ich will meinem Vermieter schreiben dass der Wasserhahn kaputt ist_\n"
-                "• _Ich will meinem Chef erklären dass ich morgen krank bin_\n"
-                "• _Ich will meinem Nachbarn sagen dass er zu laut ist_\n\n"
-                "Ich formuliere es auf professionellem Deutsch für dich. ✍️",
-                parse_mode="Markdown")
-            return
-
-        if action == "wohnen":
-            lang = user_data.get(str(chat_id), {}).get("native_language", "Englisch")
-            wohnen_text = (
-                "🏠 *Wohnungssuche in Deutschland*\n\n"
-                "Die härtesten Märkte: Berlin, München, Hamburg. Hier was du wissen musst:\n\n"
-                "📋 *Was du brauchst:*\n"
-                "• SCHUFA-Auskunft (kostenlos 1x/Jahr auf schufa.de)\n"
-                "• Gehaltsnachweis (3 Monate, ca. 3× die Kaltmiete netto)\n"
-                "• Mietschuldenfreiheitsbescheinigung (vom letzten Vermieter)\n"
-                "• Personalausweis / Reisepass\n\n"
-                "📞 *Beim Anruf für eine Besichtigung sag:*\n"
-                "_\"Guten Tag, ich rufe wegen der Wohnung in der [Straße] an. "
-                "Ist die noch verfügbar? Ich bin berufstätig und suche ab [Datum]. "
-                "Kann ich einen Besichtigungstermin bekommen?\"_\n\n"
-                "📧 *E-Mail-Vorlage:*\n"
-                "_Sehr geehrte Damen und Herren,\n"
-                "ich interessiere mich für Ihre Wohnung in der [Straße].\n"
-                "Ich bin [Beruf], arbeite seit [X Jahren] bei [Firma] und suche ab [Datum] "
-                "eine neue Wohnung. Gerne sende ich Ihnen auf Wunsch alle Unterlagen zu.\n"
-                "Mit freundlichen Grüßen, [Ihr Name]_\n\n"
-                "🔍 *Beste Portale:* ImmobilienScout24, Immowelt, WG-Gesucht (WGs), eBay Kleinanzeigen"
-            )
-            markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("◀️ Zurück", callback_data="intg:back"))
-            last_bot_text[chat_id] = wohnen_text
-            bot.send_message(chat_id, wohnen_text, parse_mode="Markdown", reply_markup=markup)
-            return
-
-        if action == "mieterrecht":
-            mieter_text = (
-                "🏘️ *Was darf mein Vermieter — und was nicht?*\n\n"
-                "💶 *Kaution:*\n"
-                "Max. 3 Nettokaltmieten. Rückgabe innerhalb von 3-6 Monaten nach Auszug.\n\n"
-                "🔧 *Schönheitsreparaturen:*\n"
-                "Nur wenn ausdrücklich im Vertrag und rechtlich korrekt formuliert. "
-                "Viele Klauseln sind ungültig — prüfen lassen!\n\n"
-                "📈 *Mieterhöhung:*\n"
-                "Max. 20% in 3 Jahren (in vielen Städten 15%). Muss schriftlich kommen.\n"
-                "Du hast 2 Monate Zeit zum Widerspruch.\n\n"
-                "🏠 *Eigenbedarf:*\n"
-                "Vermieter darf kündigen wenn Familienmitglied einzieht. "
-                "Muss beweisbar sein. Mindestens 3 Monate Kündigungsfrist.\n\n"
-                "🔑 *Besichtigungen:*\n"
-                "Vermieter darf NICHT einfach rein. Muss 24h vorher ankündigen.\n\n"
-                "🌡️ *Heizung:*\n"
-                "Muss von Oktober bis April mindestens 20°C garantieren.\n\n"
-                "📞 *Hilfe holen:*\n"
-                "Mieterverein → ~60€/Jahr, unbegrenzte Beratung, lohnt sich fast immer.\n"
-                "mieterverein.de"
-            )
-            markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("◀️ Zurück", callback_data="intg:back"))
-            last_bot_text[chat_id] = mieter_text
-            bot.send_message(chat_id, mieter_text, parse_mode="Markdown", reply_markup=markup)
-            return
-
-        if action == "muell":
-            muell_text = (
-                "🗑️ *Mülltrennung in Deutschland*\n\n"
-                "🟡 *Gelbe Tonne / Gelber Sack*\n"
-                "Verpackungen: Plastik, Dosen, Tetra Pak, Alufolie\n\n"
-                "🔵 *Blaue Tonne (Papiertonne)*\n"
-                "Papier, Zeitungen, Kartons, Briefumschläge\n\n"
-                "🟤 *Braune Tonne (Biotonne)*\n"
-                "Lebensmittelreste, Kaffeesatz, Eierschalen, Gartenabfälle\n\n"
-                "⚫ *Restmülltonne (Grau/Schwarz)*\n"
-                "Alles was nicht sortierbar ist: Windeln, Staubsaugerbeutel, Zigarettenstummel\n\n"
-                "🟢 *Grüner Punkt / Glascontainer*\n"
-                "Glas nach Farbe: Weiß, Braun, Grün\n\n"
-                "⚡ *Elektroschrott*\n"
-                "Zum Wertstoffhof oder Rückgabe im Elektromarkt\n\n"
-                "📦 *Sperrmüll*\n"
-                "Möbel, große Gegenstände → Termin bei der Stadt anmelden\n\n"
-                "_💡 Tipp: App \"AbfallApp\" oder die städtische Website zeigt dir den Abholkalender._"
-            )
-            markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("◀️ Zurück", callback_data="intg:back"))
-            last_bot_text[chat_id] = muell_text
-            bot.send_message(chat_id, muell_text, parse_mode="Markdown", reply_markup=markup)
-            return
-
-        if action == "steuerrueckgabe":
-            steuer_text = (
-                "💰 *Steuern zurückbekommen — so geht's*\n\n"
-                "Durchschnittliche Rückerstattung in Deutschland: *ca. 1.000€*\n\n"
-                "🛠️ *Was du absetzen kannst:*\n"
-                "• Fahrtkosten zur Arbeit (0,30€/km, Hin- UND Rückweg)\n"
-                "• Homeoffice-Pauschale (6€/Tag, max. 1.260€/Jahr)\n"
-                "• Arbeitsmittel (Laptop, Schreibtisch, Headset...)\n"
-                "• Fortbildungen & Fachbücher\n"
-                "• Gewerkschaftsbeiträge\n"
-                "• Spenden\n"
-                "• Kinderbetreuungskosten\n"
-                "• Doppelte Haushaltsführung (zweite Wohnung wegen Job)\n\n"
-                "📱 *Welches Tool für dich?*\n\n"
-                "Für *Angestellte*:\n"
-                "→ *Taxfix* (taxfix.de) — einfach, app-basiert, ~35€\n"
-                "→ *WISO Steuer* (wiso-steuer.de) — auch für Komplizierteres, ~30€\n\n"
-                "Für *Freelancer / Selbstständige*:\n"
-                "→ *WISO Steuer* — deckt alle Einkunftsarten ab\n"
-                "→ *Steuerberater* — bei komplexen Fällen\n\n"
-                "🗓️ *Deadline:*\n"
-                "31. Juli des Folgejahres (z.B. für 2024 → 31. Juli 2025)\n"
-                "Mit Steuerberater bis 28. Februar des übernächsten Jahres\n\n"
-                "_💡 Keine Pflicht zur Abgabe als Arbeitnehmer — aber fast immer lohnt es sich!_"
-            )
-            markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("🗓️ Fristen & Termine", callback_data="intg:steuerfristen"))
-            markup.add(InlineKeyboardButton("◀️ Zurück", callback_data="intg:steuern"))
-            last_bot_text[chat_id] = steuer_text
-            bot.send_message(chat_id, steuer_text, parse_mode="Markdown", reply_markup=markup)
-            return
-
         return
 
     if data.startswith("kultur:"):
@@ -7391,7 +6912,7 @@ Nur diese Zeilen, nichts sonst.""",
             has_quiz = False
 
         markup = InlineKeyboardMarkup(row_width=2)
-        markup.add(translate_btn(chat_id))
+        markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
         if has_quiz:
             markup.add(InlineKeyboardButton("✅ Quiz starten", callback_data="kultur_quiz_start"))
         markup.add(InlineKeyboardButton("📚 Andere Themen", callback_data="intg:kultur"))
@@ -7441,7 +6962,7 @@ Nur diese Zeilen, nichts sonst.""",
 
     if data == "pay_plus":
         bot.answer_callback_query(call.id)
-        price_id = os.getenv("STRIPE_PRICE_ID", "")
+        price_id = os.getenv("STRIPE_PRICE_ID_PLUS", "")
         if not price_id:
             bot.send_message(chat_id, "⚠️ Premium Plus ist gerade noch nicht verfügbar.")
             return
@@ -7455,10 +6976,10 @@ Nur diese Zeilen, nichts sonst.""",
                 metadata={"telegram_id": str(chat_id), "plan": "plus"},
             )
             markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("🎓 Jetzt Premium — €25/Monat", url=session.url))
+            markup.add(InlineKeyboardButton("👑 Jetzt Premium Plus — €30/Monat", url=session.url))
             markup.add(InlineKeyboardButton("⭐ Mit Stars — 2000 Stars", callback_data="pay_stars_plus"))
             ptext = (
-                "🎓 *Premium — €25/Monat*\n\n"
+                "👑 *Premium Plus — €30/Monat*\n\n"
                 "Nicht nur Deutsch lernen. In Deutschland ankommen.\n\n"
                 "Finanzamt-Brief auf dem Tisch? Musst du kündigen, dich beschweren, "
                 "erklären — aber weißt nicht wie?\n"
@@ -7466,7 +6987,7 @@ Nur diese Zeilen, nichts sonst.""",
                 "Dein Kumpel ist da. Immer. Kein Urteilen, kein Stress."
             )
             last_bot_text[chat_id] = ptext
-            markup.add(translate_btn(chat_id))
+            markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data="translate_last"))
             bot.send_message(chat_id, ptext, reply_markup=markup)
         except stripe.error.InvalidRequestError as e:
             # Häufigste Ursache: Price ID ist einmalig, nicht recurring.
@@ -8120,7 +7641,7 @@ def stripe_webhook():
                 "Tippe /themen für Übungen — oder schreib ihm einfach drauflos. 🗣️"
             )
         else:
-            user_data[uid]["premium"]      = False
+            user_data[uid]["premium_plus"] = False
             log.info(f"✅ Premium activated via Stripe: {telegram_id}")
             welcome_msg = (
                 "🎉 *Willkommen im Premium-Club!*\n\n"
