@@ -19,6 +19,7 @@ import threading
 from flask import Flask, request, jsonify
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
+from calendar import monthrange
 from urllib.parse import quote
 from openai import OpenAI
 from telebot.types import (InlineKeyboardMarkup, InlineKeyboardButton,
@@ -2509,16 +2510,23 @@ TRIAL_CODES = {
 # Stripe
 STRIPE_SECRET_KEY          = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET      = os.getenv("STRIPE_WEBHOOK_SECRET", "")
-STRIPE_PRICE_ID            = os.getenv("STRIPE_PRICE_ID", "")
-STRIPE_PRICE_ID_DISCOUNTED = os.getenv("STRIPE_PRICE_ID_DISCOUNTED", "")
-STRIPE_PAYMENT_LINK        = os.getenv("STRIPE_PAYMENT_LINK", "https://buy.stripe.com/6oUbJ20822qNdTU1bU9fW00")
+STRIPE_PRICE_ID            = os.getenv("STRIPE_PRICE_ID",            "price_1U0kGTJ6DBeqSSUP7T9G7Xyx")
+STRIPE_PRICE_ID_DISCOUNTED = os.getenv("STRIPE_PRICE_ID_DISCOUNTED", "price_1U0kH1J6DBeqSSUPfowR6auY")
+STRIPE_PAYMENT_LINK        = os.getenv("STRIPE_PAYMENT_LINK", "")  # Fallback; Checkout Sessions bevorzugt
 RAILWAY_DOMAIN             = os.getenv("RAILWAY_PUBLIC_DOMAIN", "germandudebottg-production.up.railway.app")
 if STRIPE_SECRET_KEY:
     stripe.api_key = STRIPE_SECRET_KEY
 
 DISCOUNT_CODES = {
-    "RABATT50": {"percent": 50, "price_eur": 12.50, "label": "€12.50/Monat (50% Rabatt)", "used_by": None},
+    "RABATT50": {"percent": 50, "price_eur": 12.50, "label": "€12.50/Monat (50% Rabatt)", "price_id": "price_1U0kH1J6DBeqSSUPfowR6auY", "used_by": None},
 }
+
+def end_of_current_month() -> str:
+    """ISO-String für den letzten Moment des laufenden Kalendermonats (23:59:59)."""
+    now = datetime.now()
+    last_day = monthrange(now.year, now.month)[1]
+    return now.replace(day=last_day, hour=23, minute=59, second=59, microsecond=0).isoformat()
+
 
 def is_premium(chat_id):
     """True if user has active paid premium OR valid trial. Always syncs from disk."""
@@ -2599,9 +2607,35 @@ def send_stars_invoice(chat_id):
         bot.send_message(chat_id, "⚠️ Stars-Zahlung konnte nicht gestartet werden. Versuch es später nochmal.")
 
 
-def create_stripe_checkout(chat_id):
-    """Return personalised Stripe Payment Link with chat_id as client_reference_id."""
-    return f"{STRIPE_PAYMENT_LINK}?client_reference_id={chat_id}"
+def create_stripe_checkout(chat_id, price_id: str = None):
+    """Erstellt eine Stripe Checkout Session (einmalige Zahlung, kein Abo).
+    Gibt die Session-URL zurück oder None bei Fehler.
+    Wenn kein price_id übergeben wird, prüft die Funktion ob der User
+    einen aktiven Rabattcode mit eigener price_id hat."""
+    # Auto-detect discounted price for users with an active discount code
+    if not price_id:
+        uid  = str(chat_id)
+        code = user_data.get(uid, {}).get("discount_code")
+        if code and code in DISCOUNT_CODES:
+            price_id = DISCOUNT_CODES[code].get("price_id") or None
+    pid = price_id or STRIPE_PRICE_ID
+    if not STRIPE_SECRET_KEY or not pid:
+        # Fallback auf alten Payment Link falls vorhanden
+        return f"{STRIPE_PAYMENT_LINK}?client_reference_id={chat_id}" if STRIPE_PAYMENT_LINK else None
+    try:
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            mode="payment",
+            line_items=[{"price": pid, "quantity": 1}],
+            success_url="https://t.me/germandude_bot?start=premium_success",
+            cancel_url="https://t.me/germandude_bot",
+            client_reference_id=str(chat_id),
+            metadata={"telegram_id": str(chat_id)},
+        )
+        return session.url
+    except Exception as e:
+        log.warning(f"Stripe Checkout Session creation failed for {chat_id}: {e}")
+        return f"{STRIPE_PAYMENT_LINK}?client_reference_id={chat_id}" if STRIPE_PAYMENT_LINK else None
 
 def send_paywall(chat_id):
     uid = str(chat_id)
@@ -6262,13 +6296,20 @@ def handle_successful_payment(message):
             "Du bist ein Schatz. 🙏💙")
         return
 
+    until_str  = end_of_current_month()
+    until_dt   = datetime.fromisoformat(until_str)
+    until_fmt  = until_dt.strftime("%-d. %B").replace(
+        until_dt.strftime("%B"),
+        ["Januar","Februar","März","April","Mai","Juni",
+         "Juli","August","September","Oktober","November","Dezember"][until_dt.month - 1]
+    )
     user_data[uid]["premium"]       = True
-    user_data[uid]["premium_until"] = (datetime.now() + timedelta(days=30)).isoformat()
+    user_data[uid]["premium_until"] = until_str
     user_data[uid]["stars_payment"] = True
-    log.info(f"✅ Stars Premium activated: {chat_id}")
+    log.info(f"✅ Stars Premium activated until {until_str}: {chat_id}")
     bot.send_message(chat_id,
         "⭐ Danke für deine Stars!\n\n"
-        "🎉 Du hast jetzt 30 Tage *Premium* — alle Szenarien & Übungen unlimitiert. 💪\n"
+        f"🎉 Du hast jetzt *Premium — bis {until_fmt}*. Alle Szenarien & Übungen unlimitiert. 💪\n"
         "Dein Streak und deine XP sind natürlich noch da.\n\n"
         "Tippe /themen um weiterzumachen!",
         parse_mode="Markdown")
@@ -7519,6 +7560,95 @@ def send_voice_pushes_endpoint():
         log.error(f"Voice push broadcast error: {e}")
         return jsonify({"error": str(e)}), 500
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  SUBSCRIPTION LIFECYCLE — Monatsende-Reminder + Ablauf (canon: kein Abo)
+#  /check_subscriptions → täglich via Railway Cron (z.B. 23:00 letzter Tag + 00:05 am 1.)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def broadcast_subscription_reminders() -> dict:
+    """
+    Letzter Tag des Monats → Renewal-Reminder an alle aktiven Premium-User.
+    1. des Monats         → Abgelaufene Premium-Accounts deaktivieren.
+    """
+    users   = load_users()
+    now     = datetime.now()
+    today   = now.date()
+    last_day_of_month = monthrange(today.year, today.month)[1]
+    is_last_day       = today.day == last_day_of_month
+    is_first          = today.day == 1
+
+    reminders_sent = 0
+    expired        = 0
+
+    if is_last_day:
+        for uid, user in users.items():
+            if not user.get("premium"):
+                continue
+            premium_until = user.get("premium_until")
+            if not premium_until:
+                continue
+            try:
+                until_dt = datetime.fromisoformat(premium_until)
+            except Exception:
+                continue
+            # Nur User die diesen Monat ablaufen
+            if until_dt.year != today.year or until_dt.month != today.month:
+                continue
+
+            name         = user.get("name", "")
+            checkout_url = create_stripe_checkout(int(uid))
+            markup       = InlineKeyboardMarkup()
+            if checkout_url:
+                markup.add(InlineKeyboardButton("🎓 Jetzt verlängern — €25", url=checkout_url))
+            markup.add(InlineKeyboardButton("⭐ Mit Stars verlängern — 1500 Stars", callback_data="pay_stars"))
+
+            try:
+                bot.send_message(int(uid),
+                    f"📅 Hey{', ' + name if name else ''}!\n\n"
+                    f"Dein *Premium-Zugang läuft heute um Mitternacht ab*.\n\n"
+                    f"Verlängere jetzt für einen weiteren Monat — Streak und XP bleiben. 💪",
+                    parse_mode="Markdown", reply_markup=markup)
+                reminders_sent += 1
+                log.info(f"Renewal reminder sent to {uid}")
+            except Exception as e:
+                log.warning(f"Renewal reminder failed for {uid}: {e}")
+
+    if is_first:
+        for uid, user in users.items():
+            if not user.get("premium"):
+                continue
+            premium_until = user.get("premium_until")
+            if not premium_until:
+                continue
+            try:
+                until_dt = datetime.fromisoformat(premium_until)
+                if until_dt < now:
+                    user_data[uid]["premium"] = False
+                    expired += 1
+                    log.info(f"Premium expired (1. des Monats) for {uid}")
+            except Exception:
+                continue
+        if expired:
+            save_users(user_data)
+
+    return {"reminders_sent": reminders_sent, "expired": expired,
+            "is_last_day": is_last_day, "is_first": is_first}
+
+
+@flask_app.route("/check_subscriptions", methods=["POST"])
+def check_subscriptions_endpoint():
+    """Täglich via Railway Cron: Renewal-Reminder am Monatsende + Expiry am 1."""
+    auth = request.headers.get("X-Cron-Secret", "")
+    if auth != CRON_SECRET:
+        return jsonify({"error": "unauthorized"}), 401
+    try:
+        result = broadcast_subscription_reminders()
+        return jsonify({"ok": True, **result}), 200
+    except Exception as e:
+        log.error(f"Subscription check error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @flask_app.route("/stripe_webhook", methods=["POST"])
 def stripe_webhook():
     payload    = request.get_data()
@@ -7555,15 +7685,26 @@ def stripe_webhook():
                 log.warning(f"Could not send donation thanks to {telegram_id}: {e}")
             return jsonify({"ok": True}), 200
 
-        # ── Premium aktivieren ─────────────────────────────────────────────
+        # ── Premium aktivieren (einmalig, bis Monatsende) ──────────────────
+        until_str = end_of_current_month()
         user_data[uid]["premium"]                = True
+        user_data[uid]["premium_until"]          = until_str
         user_data[uid]["stripe_customer_id"]     = customer_id
-        user_data[uid]["stripe_subscription_id"] = sub_id
-        log.info(f"✅ Premium activated via Stripe: {telegram_id}")
+        user_data[uid]["stripe_subscription_id"] = sub_id  # None bei one-time, kein Problem
+        log.info(f"✅ Premium activated via Stripe until {until_str}: {telegram_id}")
+
+        # Datum für die Welcome-Msg formatieren (z.B. "31. Oktober")
+        until_dt   = datetime.fromisoformat(until_str)
+        until_fmt  = until_dt.strftime("%-d. %B").replace(
+            until_dt.strftime("%B"),
+            ["Januar","Februar","März","April","Mai","Juni",
+             "Juli","August","September","Oktober","November","Dezember"][until_dt.month - 1]
+        )
         welcome_msg = (
             "🎉 *Willkommen im Premium-Club!*\n\n"
-            "Du hast jetzt vollen Zugriff auf alle Szenarien & Übungen. 💪\n"
+            f"Du hast vollen Zugriff auf alle Szenarien & Übungen — *bis {until_fmt}*. 💪\n"
             "Dein Streak und deine XP sind natürlich noch da.\n\n"
+            "Am letzten Tag des Monats bekommst du eine Erinnerung zum Verlängern.\n\n"
             "Tippe /themen um weiterzumachen!"
         )
         save_users(user_data)
@@ -7573,20 +7714,15 @@ def stripe_webhook():
             log.warning(f"Could not notify {telegram_id}: {e}")
 
     elif event["type"] == "customer.subscription.deleted":
+        # Kein Abo-Modell mehr — dieser Event wird nicht mehr gefeuert.
+        # Bleibt als Fallback falls alte Subscriptions noch auslaufen.
         customer_id = event["data"]["object"].get("customer")
         for uid, user in user_data.items():
             if user.get("stripe_customer_id") == customer_id:
                 user_data[uid]["premium"]                = False
                 user_data[uid]["stripe_subscription_id"] = None
                 save_users(user_data)
-                try:
-                    bot.send_message(int(uid),
-                        "😢 Dein Abo wurde gekündigt.\n"
-                        "XP und Streak bleiben erhalten.\n"
-                        "Tippe /premium um wieder zu starten.",
-                        parse_mode="Markdown")
-                except Exception as e:
-                    log.warning(f"Could not notify cancelled user: {e}")
+                log.info(f"Legacy subscription.deleted handled for {uid}")
                 break
 
     return jsonify({"ok": True}), 200
