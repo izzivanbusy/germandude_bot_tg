@@ -2225,6 +2225,23 @@ def start_quatschen(chat_id):
             f"Frag nach wie es mit bestimmten Dingen weiterging."
         )
 
+    # Spaced Repetition — fällige Fehler ins Sysprompt injizieren
+    due_errors = get_due_spaced_errors(uid)
+    if due_errors:
+        err_lines = "\n".join(
+            f"- Fehler: '{e['original']}' → Richtig: '{e['corrected']}'"
+            for e in due_errors
+        )
+        sys_prompt += (
+            f"\n\nFEHLER-WIEDERHOLUNG (Spaced Repetition):\n"
+            f"Folgende Fehler hat {name or 'der User'} kürzlich beim Schreiben gemacht "
+            f"und braucht Wiederholung. Bring sie NATÜRLICH ein — nicht als Lektion, "
+            f"sondern indem du die korrekte Struktur selbst verwendest oder einmal kurz "
+            f"sanft fragst wie man das sagt. Maximal 1-2 davon im Gespräch, nicht alle:\n"
+            f"{err_lines}"
+        )
+        mark_errors_reviewed(uid, [e["original"] for e in due_errors])
+
     # Load history first, then build sys_prompt with memory context
     history = user_data.get(uid, {}).get("quatschen_history", [])
     if history and not friend_mem:
@@ -5402,9 +5419,19 @@ def handle_adminstats(message):
         for feat, cnt in top_features:
             lines.append(f"   /{feat}: {cnt}×")
 
+    # Text-Message Stats
+    total_text_msgs    = sum(u.get("text_messages_total", 0) for u in users.values())
+    users_who_texted   = sum(1 for u in users.values() if u.get("text_messages_total", 0) > 0)
+    total_errors_saved = sum(len(u.get("text_errors", [])) for u in users.values())
+
     lines += [
         "",
         f"💬 Feedback-Einträge gesamt: {n_feedback}",
+        "",
+        "⌨️ *Text-Nachrichten*",
+        f"   Text-Msgs gesamt:   {total_text_msgs}",
+        f"   User die tippen:    {users_who_texted}",
+        f"   Fehler gespeichert: {total_errors_saved} (Spaced Rep.)",
     ]
 
     bot.send_message(message.chat.id, "\n".join(lines), parse_mode="Markdown")
@@ -5753,6 +5780,139 @@ def handle_translate(message):
         parse_mode="Markdown", reply_markup=InlineKeyboardMarkup())
 
 
+# ─── TEXT CORRECTION + SPACED REPETITION ────────────────────────────────────
+
+FELIX_VOICE_NUDGES = [
+    "Moment — ich tippe eigentlich nicht so gern 😄 Schick mir mal eine Sprachnachricht!",
+    "Hey, ich hab gerade alle Hände voll zu tun. Sprich einfach mit mir! 🎙️",
+    "Alter, ich bin eigentlich mehr der Zuhörer-Typ 😄 Deine Stimme mag ich lieber als Text. Los!",
+    "Haha, du schreibst aber fix 😄 Ich wette dein Deutsch klingt noch besser — Sprachnachricht?",
+    "Psst: Ich freu mich mehr über deine Stimme als über Text 🎤 Versuch's!",
+    "Ich lese alles — aber ehrlich: deine Stimme ist cooler. 🎤 Los!",
+    "Moment mal... tipp ich gerade zurück? Das ist nicht mein Stil 😄 Liieber Sprachnachricht!",
+    "Deine Finger werden schon müde sein — Stimme ist viel einfacher 😄🎤",
+]
+
+SPACED_REPETITION_INTERVALS = [1, 3, 7, 14, 30]  # Tage nach jedem Review
+
+
+def _next_review_date(review_count: int) -> str:
+    """Gibt ISO-Datum für den nächsten Spaced-Repetition-Review zurück."""
+    days = SPACED_REPETITION_INTERVALS[min(review_count, len(SPACED_REPETITION_INTERVALS) - 1)]
+    return (datetime.now() + timedelta(days=days)).date().isoformat()
+
+
+def save_text_error(uid: str, original: str, corrected: str, context: str = ""):
+    """Speichert einen korrigierten Fehler für Spaced Repetition."""
+    user_data.setdefault(uid, {})
+    errors = user_data[uid].setdefault("text_errors", [])
+    # Duplikat-Check: gleicher Original-Text in den letzten 5 Einträgen
+    for e in errors[-5:]:
+        if e.get("original", "").lower().strip() == original.lower().strip():
+            return
+    errors.append({
+        "original":     original,
+        "corrected":    corrected,
+        "context":      context,
+        "created_at":   datetime.now().isoformat(),
+        "next_review":  _next_review_date(0),
+        "review_count": 0,
+        "last_reviewed": None,
+    })
+    user_data[uid]["text_errors"] = errors[-50:]  # max 50 Fehler
+    save_users(user_data)
+
+
+def get_due_spaced_errors(uid: str) -> list:
+    """Gibt bis zu 3 Fehler zurück, die heute zur Wiederholung fällig sind."""
+    today  = datetime.now().date().isoformat()
+    errors = user_data.get(uid, {}).get("text_errors", [])
+    due = [
+        e for e in errors
+        if e.get("next_review", "9999") <= today
+        and e.get("review_count", 0) < len(SPACED_REPETITION_INTERVALS)
+    ]
+    return due[:3]
+
+
+def mark_errors_reviewed(uid: str, originals: list):
+    """Schiebt den nächsten Review-Termin für eine Liste von Fehlern vor."""
+    errors = user_data.get(uid, {}).get("text_errors", [])
+    changed = False
+    for e in errors:
+        if e.get("original") in originals:
+            e["review_count"]   = e.get("review_count", 0) + 1
+            e["last_reviewed"]  = datetime.now().isoformat()
+            e["next_review"]    = _next_review_date(e["review_count"])
+            changed = True
+    if changed:
+        save_users(user_data)
+
+
+def correct_german_text(text: str) -> dict:
+    """Lässt Haiku deutschen Text auf Grammatik/Rechtschreibung prüfen.
+    Rückgabe: {has_errors: bool, corrected: str, note: str}"""
+    import json as _json
+    try:
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            system=(
+                "You are a German grammar and spelling corrector. "
+                "If the input is NOT in German, return: "
+                "{\"has_errors\": false, \"corrected\": \"\", \"note\": \"\"}. "
+                "If the German text has grammar, spelling, or word-order errors, return: "
+                "{\"has_errors\": true, \"corrected\": \"<full corrected sentence>\", "
+                "\"note\": \"<one short German explanation of the main error, max 10 words>\"}. "
+                "If the text is already correct German, return: "
+                "{\"has_errors\": false, \"corrected\": \"\", \"note\": \"\"}. "
+                "Return ONLY valid JSON, nothing else."
+            ),
+            messages=[{"role": "user", "content": f"Check this: {text}"}]
+        )
+        raw = resp.content[0].text.strip()
+        return _json.loads(raw)
+    except Exception as e:
+        log.warning(f"correct_german_text failed: {e}")
+        return {"has_errors": False, "corrected": "", "note": ""}
+
+
+def handle_text_in_conversation(chat_id, text: str):
+    """Wird aufgerufen wenn der User während eines Sprachgesprächs tippt.
+    1. Visuelle Korrektur (Durchgestrichen + Fett)
+    2. Fehler in Spaced Repetition speichern
+    3. Felix-Humor-Nudge Richtung Sprache
+    4. Text-Stats tracken
+    """
+    uid = str(chat_id)
+    user_data.setdefault(uid, {})
+
+    # Stats tracken
+    user_data[uid]["text_msg_count"]      = user_data[uid].get("text_msg_count", 0) + 1
+    user_data[uid]["text_messages_total"] = user_data[uid].get("text_messages_total", 0) + 1
+    txt_count = user_data[uid]["text_msg_count"]
+
+    # Deutschen Text auf Fehler prüfen
+    correction = correct_german_text(text)
+    if correction.get("has_errors") and correction.get("corrected"):
+        corrected = correction["corrected"]
+        note      = correction.get("note", "")
+        # Visual: Durchgestrichen original + Pfeil + Fett korrigiert (HTML)
+        msg = f"<s>{text}</s>  →  <b>{corrected}</b>"
+        if note:
+            msg += f"\n<i>💡 {note}</i>"
+        bot.send_message(chat_id, msg, parse_mode="HTML")
+        # Für Spaced Repetition speichern
+        context = current_scenario.get(chat_id, {}).get("topic", "Gespräch")
+        save_text_error(uid, text, corrected, context)
+
+    # Felix-Nudge (erste Nachricht und danach alle 4)
+    if txt_count == 1 or txt_count % 4 == 0:
+        bot.send_message(chat_id, random.choice(FELIX_VOICE_NUDGES))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
 @bot.message_handler(func=lambda message: True)
 def handle(message):
     # Skip non-text messages — they have dedicated handlers
@@ -6037,23 +6197,10 @@ def handle(message):
         bot.send_message(chat_id, "🎙️ Schick eine Sprachnachricht, um weiterzumachen.")
         return
 
-    # ── VOICE NUDGE: user sends text instead of voice in active scenario ──────
-    import random as _r
-    _nudges = [
-        "Hey, ich würd gerne deine Stimme hören! 🎤",
-        "Du weißt doch — ich bin ein Sprachnachrichten-Typ 😄🎤",
-        "Psst... ich höre dich lieber als ich dich lese! 🎤",
-        "Komm, schick mir eine Sprachnachricht — das macht viel mehr Spaß! 🎙️",
-        "Ich lese zwar alles — aber deine Stimme mag ich lieber 🎤",
-        "Hey, Stimme bitte! Das ist dein Deutschkurs, nicht dein Tagebuch 😄🎤",
-    ]
+    # ── TEXT IN ACTIVE SCENARIO: korrigieren + Error speichern + Nudge ─────────
     if current_scenario.get(chat_id) and message.text and mode in ("chat", "quatschen", None):
-        # Nudge first text message, then every 4th
-        _txt_count = user_data.get(str(chat_id), {}).get("text_msg_count", 0)
-        user_data[str(chat_id)]["text_msg_count"] = _txt_count + 1
-        if _txt_count == 0 or _txt_count % 4 == 0:
-            bot.send_message(chat_id, _r.choice(_nudges))
-        # Still process the text — answer with voice as always
+        handle_text_in_conversation(chat_id, text)
+        # Text weiter als NPC-Input verarbeiten (läuft unten weiter)
 
     # ── GEM EXERCISE CHECK ───────────────────────────────────────────────────
     state = user_state.get(chat_id, {})
