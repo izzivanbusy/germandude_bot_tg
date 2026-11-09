@@ -1853,6 +1853,11 @@ GERMAN_GEMS = [
     "Worauf willst du hinaus? (auf etwas hinauswollen)",
 ]
 
+# Korrektur-Hinweise für mehrdeutige Gems — damit Haiku die richtige Bedeutung erklärt
+GERMAN_GEM_HINTS = {
+    "wollen wir uns anstellen?": "Bedeutung: in der Schlange stehen / anstehen — z.B. vor einer Kasse, einem Club oder Amt. Nicht 'dumm stellen', sondern wörtlich queuing/lining up.",
+}
+
 # Utility functions for German Gems
 def get_todays_gem(user_id: str) -> str:
     """Return today's gem expression (rotates daily, unique per user)."""
@@ -2185,8 +2190,9 @@ def send_crisis_response(chat_id):
         parse_mode="Markdown"
     )
 
-def start_quatschen(chat_id):
-    """Start free conversation mode with German Dude."""
+def start_quatschen(chat_id, from_push: bool = False):
+    """Start free conversation mode with German Dude.
+    from_push=True: User kam über den Voice-Push-Button — Felix knüpft daran an."""
     if not gate_quatschen(chat_id):
         return
     if not is_premium(chat_id):
@@ -2258,7 +2264,20 @@ def start_quatschen(chat_id):
             user_memory[chat_id].append({"role": "assistant", "content": exchange["bot"]})
 
     # Opening prompt
-    if history:
+    if from_push:
+        # User hat auf den Voice-Push-Button gedrückt — Felix freut sich und knüpft an
+        if history:
+            opening_prompt = (
+                f"Du hast {name} gerade eine persönliche Sprachnachricht geschickt um sie/ihn einzuladen. "
+                f"Sie/Er hat geantwortet und ist jetzt da! Begrüße herzlich und knüpf daran an — "
+                f"'Hey, ich wusste du kommst!' oder ähnlich. Maximal 2 Sätze, kein 'Willkommen zurück'."
+            )
+        else:
+            opening_prompt = (
+                f"Du hast {name or 'den User'} gerade eine persönliche Einladung zum Quatschen geschickt. "
+                f"Er/Sie ist jetzt da! Begrüße herzlich und freu dich. Maximal 2 Sätze."
+            )
+    elif history:
         opening_prompt = (
             f"Du kennst {name} schon. Begrüße ihn/sie kurz und herzlich wie einen alten Freund. "
             f"Maximal 2 Sätze. Kein 'Willkommen zurück'."
@@ -5655,7 +5674,11 @@ def send_daily_gem(chat_id):
                 "BEISPIEL3: <alltagsnaher Satz, du- oder ich-Form>\n"
                 "Kein er/sie in Beispielen. Kein Schulbuch-Deutsch. Nur die Zeilen."
             ),
-            messages=[{"role": "user", "content": f"Ausdruck: {expression}"}]
+            messages=[{"role": "user", "content":
+                f"Ausdruck: {expression}"
+                + (f"\nHinweis zur korrekten Bedeutung: {GERMAN_GEM_HINTS[expression]}"
+                   if expression in GERMAN_GEM_HINTS else "")
+            }]
         )
         raw  = resp.content[0].text.strip()
         data = {}
@@ -7232,7 +7255,7 @@ Nur diese Zeilen, nichts sonst.""",
             bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
         except Exception:
             pass
-        start_quatschen(chat_id)
+        start_quatschen(chat_id, from_push=True)
         return
 
     else:
