@@ -1970,7 +1970,6 @@ def send_reply(chat_id, text, voice=True):
     pending_texts[text_key] = text
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("📄 Text anzeigen", callback_data=f"show_text:{text_key}"))
-    markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data=f"translate:{text_key}"))
 
     try:
         audio = text_to_speech_stream(text, chat_id)
@@ -2432,7 +2431,7 @@ def handle_quatschen_message(chat_id, user_text):
 
         response = claude.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=200,
+            max_tokens=400,
             system=sys_msg,
             messages=conv_msgs
         )
@@ -3876,12 +3875,18 @@ def show_text_callback(call):
         return
     bot.answer_callback_query(call.id)
     if text:
-        bot.send_message(call.message.chat.id, f"💬 {text}")
+        translate_markup = InlineKeyboardMarkup()
+        translate_markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data=f"translate:{key}"))
+        bot.send_message(call.message.chat.id, f"💬 {text}", reply_markup=translate_markup)
     else:
         # Fallback: use last_bot_text
         text = last_bot_text.get(call.message.chat.id, "")
         if text:
-            bot.send_message(call.message.chat.id, f"💬 {text}")
+            fallback_key = hashlib.md5(text.encode()).hexdigest()[:8]
+            pending_texts[fallback_key] = text
+            translate_markup = InlineKeyboardMarkup()
+            translate_markup.add(InlineKeyboardButton("🌍 übersetzen", callback_data=f"translate:{fallback_key}"))
+            bot.send_message(call.message.chat.id, f"💬 {text}", reply_markup=translate_markup)
         else:
             bot.answer_callback_query(call.id, "Text nicht mehr verfügbar.")
 
